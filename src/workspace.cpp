@@ -1,4 +1,5 @@
 #include "workspace.h"
+#include "geometry.h"
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSvgRenderer>
@@ -21,6 +22,8 @@ void Workspace::setDocument(Document *d) {
     update();
 }
 void Workspace::setSimulator(Simulator *s) {
+    if (m_simulator)
+        disconnect(m_simulator, nullptr, this, nullptr);
     m_simulator = s;
     if (s)
         connect(s, &Simulator::changed, this, [this] { update(); });
@@ -32,7 +35,12 @@ double Workspace::scale() const {
 QPointF Workspace::origin() const {
     return QPointF((width() - 200 * scale()) / 2, (height() - 150 * scale()) / 2) + m_pan;
 }
+QPointF Workspace::toWorld(QPointF p) const {
+    return Geometry::worldToCanvas((p - origin()) / scale());
+}
 void Workspace::zoomBy(double factor) {
+    if (!std::isfinite(factor) || factor <= 0)
+        return;
     m_zoom = std::clamp(m_zoom * factor, .45, 5.);
     update();
     emit zoomChanged();
@@ -74,6 +82,11 @@ void Workspace::mouseMoveEvent(QMouseEvent *e) {
         m_document->moveSelection(pos);
     }
 }
+void Workspace::mouseUngrabEvent() {
+    if (m_drag && m_document)
+        m_document->finishMove();
+    m_drag = m_panning = false;
+}
 void Workspace::mouseReleaseEvent(QMouseEvent *) {
     if (m_drag && m_document)
         m_document->finishMove();
@@ -107,7 +120,9 @@ void Workspace::paint(QPainter *p) {
         p->scale(s, s);
         int idx = 0;
         QPointF previous(0, 150);
-        for (const auto &a : m_document->items()) {
+        for (const auto &world : m_document->items()) {
+            Artwork a = world;
+            a.bounds = Geometry::worldToCanvas(world.bounds);
             const bool enabled = m_document->layers()[a.layer].toMap()["enabled"].toBool();
             if (!a.visible || (!enabled && m_preview)) {
                 ++idx;
@@ -127,14 +142,19 @@ void Workspace::paint(QPainter *p) {
             else if (a.kind == "ellipse")
                 p->drawEllipse(a.bounds);
             else if (a.kind == "svg") {
-                QSvgRenderer renderer(a.svg);
-                renderer.render(p, a.bounds);
+                if (a.asset)
+                    a.asset->renderer->render(p, a.bounds);
             } else if (a.kind == "text") {
                 QFont font("DejaVu Sans");
                 font.setWeight(a.text == "MOIN" ? QFont::Black : QFont::DemiBold);
                 font.setPixelSize(100);
-                QPainterPath path;
-                path.addText(0, 100, font, a.text);
+                auto *cached = m_textPaths.object(a.text);
+                if (!cached) {
+                    cached = new QPainterPath;
+                    cached->addText(0, 100, font, a.text);
+                    m_textPaths.insert(a.text, cached);
+                }
+                const auto &path = *cached;
                 auto b = path.boundingRect();
                 if (!b.isEmpty()) {
                     QTransform t;

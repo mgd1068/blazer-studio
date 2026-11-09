@@ -1,4 +1,5 @@
 #include "document.h"
+#include "materiallibrary.h"
 #include "simulator.h"
 #include "workspace.h"
 #include <QFile>
@@ -7,6 +8,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QTemporaryDir>
 #include <QtTest>
 #include <functional>
 
@@ -17,9 +19,12 @@ class UiTest : public QObject {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         Document project;
+        QTemporaryDir storage;
+        MaterialLibrary library(storage.filePath("materials.json"));
         Simulator machine;
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("project", &project);
+        engine.rootContext()->setContextProperty("materialLibrary", &library);
         engine.rootContext()->setContextProperty("machine", &machine);
         QFile f(QStringLiteral(BLAZER_SOURCE_DIR "/profiles/blaze-x-m3.json"));
         QVERIFY(f.open(QIODevice::ReadOnly));
@@ -61,6 +66,53 @@ class UiTest : public QObject {
         QCOMPARE(catalogRows->property("count").toInt(), 15);
         QTest::keyClick(w, Qt::Key_Escape);
         QTest::qWait(200);
+        auto *choice = item("materialChoice");
+        QVERIFY(choice);
+        click(choice);
+        QTest::keyClick(w, Qt::Key_Down);
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.layers()[1].toMap()["speed"].toDouble(), 250.);
+        QCOMPARE(project.material()["id"].toString(), "vendor-copy-pro5w-plywood-3");
+        auto *edit = item("editMaterialButton");
+        QVERIFY(edit);
+        click(edit);
+        auto *editor = w->findChild<QObject *>("materialEditor");
+        QVERIFY(editor);
+        QTRY_VERIFY(editor->property("visible").toBool());
+        if (qEnvironmentVariableIsSet("BLAZER_EDITOR_SCREENSHOT")) {
+            QTest::qWait(150);
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_EDITOR_SCREENSHOT")));
+        }
+        auto *name = item("materialNameInput");
+        QVERIFY(name);
+        click(name);
+        QTest::keyClick(w, Qt::Key_A, Qt::ControlModifier);
+        for (char c : QByteArray("Eigenes Testmaterial"))
+            QTest::keyClick(w, c);
+        auto *power = item("materialCutPower");
+        QVERIFY(power);
+        power->setProperty("inputText", "42,5");
+        auto *save = item("saveMaterialButton");
+        QVERIFY(save);
+        click(save);
+        QTRY_VERIFY(!editor->property("visible").toBool());
+        QCOMPARE(project.material()["name"].toString(), "Eigenes Testmaterial");
+        QCOMPARE(project.layers()[1].toMap()["power"].toDouble(), 42.5);
+        MaterialLibrary reopened(storage.filePath("materials.json"));
+        QCOMPARE(reopened.profileAt(1)["name"].toString(), "Eigenes Testmaterial");
+        click(edit);
+        power = item("materialCutPower");
+        power->setProperty("inputText", "ungültig");
+        click(save);
+        QVERIFY(editor->property("visible").toBool());
+        QVERIFY(!item("materialEditorError")->property("text").toString().isEmpty());
+        power->setProperty("inputText", "37.5");
+        QTest::keyClick(w, Qt::Key_Escape);
+        QCOMPARE(project.layers()[1].toMap()["power"].toDouble(), 42.5);
+        click(edit);
+        QCOMPARE(item("materialCutPower")->property("inputText").toString(), "42.5");
+        QTest::keyClick(w, Qt::Key_Escape);
+        project.demo();
         auto *add = item("addRectangle");
         QVERIFY(add);
         click(add);

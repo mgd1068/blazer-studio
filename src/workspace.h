@@ -1,6 +1,8 @@
 #pragma once
 #include "document.h"
 #include "simulator.h"
+#include <QCache>
+#include <QPointer>
 #include <QQuickPaintedItem>
 class Workspace : public QQuickPaintedItem {
     Q_OBJECT
@@ -48,14 +50,16 @@ class Workspace : public QQuickPaintedItem {
     void mouseMoveEvent(QMouseEvent *) override;
     void mouseReleaseEvent(QMouseEvent *) override;
     void wheelEvent(QWheelEvent *) override;
+    void mouseUngrabEvent() override;
 
   private:
     double scale() const;
     QPointF origin() const;
-    QPointF toWorld(QPointF p) const { return (p - origin()) / scale(); }
-    Document *m_document = nullptr;
-    Simulator *m_simulator = nullptr;
+    QPointF toWorld(QPointF p) const;
+    QPointer<Document> m_document;
+    QPointer<Simulator> m_simulator;
     bool m_preview = false, m_dark = false, m_drag = false, m_panning = false;
     double m_zoom = 1;
     QPointF m_pan, m_last, m_offset;
+    QCache<QString, QPainterPath> m_textPaths{128};
 };

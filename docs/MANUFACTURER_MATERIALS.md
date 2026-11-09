@@ -31,7 +31,7 @@ Ein auffälliger Quellwert bleibt ausdrücklich unverändert: 5-W-Schnitt von Sp
 
 Links unter Material öffnet **Herstellerwerte ansehen** die Referenztabellen. Die Modul-/Bearbeitungsauswahl wechselt die Tabelle; es gibt bewusst keine automatische Übernahme in die beiden vorhandenen Bearbeitungen. Quelle und offene Modellzuordnung werden angezeigt. Aktive Projektwerte und die ursprüngliche LightBurn-Konfiguration bleiben unverändert.
 
-Die Daten sind als Grundlage für eine spätere auswählbare Materialbibliothek vorbereitet. Vor Übernahme gehört eine bestätigte Modell-/Modulzuordnung dazu. Eigene Materialtests werden als eigene Datensätze gespeichert und überschreiben die Herstellerquelle nicht.
+Zusätzlich existiert jetzt eine [eigene bearbeitbare Materialbibliothek](MATERIAL_LIBRARY.md). Zwei ausdrücklich als M3 Pro bezeichnete Kopien der 5-W-Schnittwerte für 3/5-mm-Sperrholz sind dort auswählbar; ihre Gravur ist deaktiviert. Die Modellzuordnung bleibt offen. Eigene Profile überschreiben die Herstellerquelle nicht.
 
 ## Erneut extrahieren
 

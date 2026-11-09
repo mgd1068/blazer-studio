@@ -1,40 +1,31 @@
 #include "document.h"
+#include "geometry.h"
+#include "materiallibrary.h"
 #include <QFile>
-#include <QFont>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QRegularExpression>
 #include <QSaveFile>
-#include <QSvgRenderer>
+#include <QSet>
 #include <QUuid>
-#include <QXmlStreamReader>
-#include <algorithm>
-#include <cmath>
 
 namespace {
+constexpr qint64 maxProjectBytes = 16 * 1024 * 1024;
+constexpr qint64 maxEmbeddedBytes = 8 * 1024 * 1024;
 QString id() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
-bool isFiniteNumber(double n) {
-    return std::isfinite(n);
+bool number(const QJsonObject &o, const QString &key, double minimum, double maximum) {
+    const auto v = o[key];
+    return v.isDouble() && std::isfinite(v.toDouble()) && v.toDouble() >= minimum &&
+           v.toDouble() <= maximum;
 }
-double physicalLength(const QString &s, double fallback) {
-    static const QRegularExpression rx(R"(^\s*([\d.]+)\s*(mm|cm|in|px|pt)?\s*$)");
-    const auto m = rx.match(s);
-    if (!m.hasMatch())
-        return fallback;
-    double n = m.captured(1).toDouble();
-    auto u = m.captured(2);
-    if (u == "cm")
-        n *= 10;
-    else if (u == "in")
-        n *= 25.4;
-    else if (u == "pt")
-        n *= 25.4 / 72;
-    else if (u == "px" || u.isEmpty())
-        n *= 25.4 / 96;
-    return n > 0 && isFiniteNumber(n) ? n : fallback;
+bool text(const QJsonObject &o, const QString &key, int max = 1000) {
+    return o[key].isString() && o[key].toString().size() <= max;
+}
+QVariantMap layer(QString name, QString mode, double speed, double power) {
+    return {{"name", name}, {"mode", mode},    {"speed", speed}, {"power", power},
+            {"passes", 1},  {"enabled", true}, {"interval", .1}};
 }
 } // namespace
 Document::Document(QObject *p) : QAbstractListModel(p) {
@@ -44,7 +35,8 @@ int Document::rowCount(const QModelIndex &p) const {
     return p.isValid() ? 0 : m_items.size();
 }
 QVariant Document::data(const QModelIndex &i, int role) const {
-    if (!i.isValid() || i.row() < 0 || i.row() >= m_items.size())
+    if (!i.isValid() || i.model() != this || i.column() != 0 || i.row() < 0 ||
+        i.row() >= m_items.size())
         return {};
     const auto &a = m_items[i.row()];
     switch (role) {
@@ -70,7 +62,7 @@ QColor Document::layerColor(int n) const {
     return n == 0 ? QColor("#cb713c") : QColor("#4c7bd9");
 }
 QVariantMap Document::selection() const {
-    if (m_selected < 0 || m_selected >= m_items.size())
+    if (m_selected < 0)
         return {};
     const auto &a = m_items[m_selected];
     return {{"name", a.name},
@@ -83,14 +75,12 @@ QVariantMap Document::selection() const {
             {"layer", a.layer},
             {"visible", a.visible}};
 }
-QVariantList Document::layers() const {
-    return m_layers;
-}
 void Document::select(int row) {
     if (row < -1 || row >= m_items.size())
         row = -1;
     if (row == m_selected)
         return;
+    finishMove();
     m_selected = row;
     emit selectionChanged();
 }
@@ -98,41 +88,54 @@ void Document::notify(const QString &s) {
     m_message = s;
     emit messageChanged();
 }
-void Document::refresh() {
-    beginResetModel();
-    endResetModel();
-    m_dirty = true;
+Document::Snapshot Document::snapshot() const {
+    return {m_items, m_layers, m_title, m_selected, m_material};
+}
+bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
+    return a.items == b.items && a.layers == b.layers && a.title == b.title &&
+           a.material == b.material;
+}
+void Document::refresh(int row) {
+    m_dirty = !sameContent(snapshot(), m_saved);
+    if (row >= 0 && row < m_items.size())
+        emit dataChanged(index(row), index(row));
     emit changed();
     emit selectionChanged();
+}
+void Document::markClean() {
+    m_saved = snapshot();
+    m_dirty = false;
+}
+void Document::applySnapshot(const Snapshot &s) {
+    beginResetModel();
+    m_items = s.items;
+    m_layers = s.layers;
+    m_title = s.title;
+    m_selected = s.selected;
+    m_material = s.material;
+    m_beforeMove.reset();
+    endResetModel();
+    refresh();
 }
 void Document::demo() {
     beginResetModel();
     m_title = "Werkstattschild";
-    m_layers = {QVariantMap{{"name", "01 · Gravieren"},
-                            {"mode", "Gravur"},
-                            {"speed", 3000.},
-                            {"power", 20.},
-                            {"passes", 1},
-                            {"enabled", true}},
-                QVariantMap{{"name", "02 · Schneiden"},
-                            {"mode", "Schnitt"},
-                            {"speed", 600.},
-                            {"power", 80.},
-                            {"passes", 1},
-                            {"enabled", true}}};
+    m_layers = {layer("01 · Gravieren", "Gravur", 3000, 20),
+                layer("02 · Schneiden", "Schnitt", 600, 80)};
+    m_material = MaterialLibrary::example();
     m_items = {
         {id(), "Schildkontur", "rect", "", QRectF(30, 35, 140, 80), 1, true, {}},
-        {id(), "Bohrung links", "ellipse", "", QRectF(37, 42, 4, 4), 1, true, {}},
-        {id(), "Bohrung rechts", "ellipse", "", QRectF(159, 42, 4, 4), 1, true, {}},
-        {id(), "MOIN", "text", "MOIN", QRectF(51, 58, 98, 32), 0, true, {}},
-        {id(), "Unterzeile", "text", "ZEIT FÜR GUTE IDEEN", QRectF(55, 95, 90, 7), 0, true, {}}};
+        {id(), "Bohrung links", "ellipse", "", QRectF(37, 104, 4, 4), 1, true, {}},
+        {id(), "Bohrung rechts", "ellipse", "", QRectF(159, 104, 4, 4), 1, true, {}},
+        {id(), "MOIN", "text", "MOIN", QRectF(51, 60, 98, 32), 0, true, {}},
+        {id(), "Unterzeile", "text", "ZEIT FÜR GUTE IDEEN", QRectF(55, 48, 90, 7), 0, true, {}}};
     m_selected = 0;
-    m_dirty = false;
     m_undo.clear();
     m_redo.clear();
+    m_beforeMove.reset();
+    markClean();
     endResetModel();
-    emit changed();
-    emit selectionChanged();
+    refresh();
     notify("Beispielprojekt · Parameter sind Entwurfswerte, keine Materialempfehlung.");
 }
 void Document::newProject() {
@@ -141,56 +144,348 @@ void Document::newProject() {
     m_items.clear();
     m_title = "Unbenannt";
     m_selected = -1;
+    markClean();
     endResetModel();
-    emit changed();
-    emit selectionChanged();
+    refresh();
     notify("Neues Projekt · SVG importieren oder Formen hinzufügen.");
 }
-
-QByteArray Document::state() const {
-    QJsonArray arr;
+void Document::checkpoint() {
+    finishMove();
+    m_undo.append(snapshot());
+    while (m_undo.size() > 50)
+        m_undo.removeFirst();
+    m_redo.clear();
+}
+void Document::undo() {
+    finishMove();
+    if (m_undo.isEmpty())
+        return;
+    m_redo.append(snapshot());
+    applySnapshot(m_undo.takeLast());
+}
+void Document::redo() {
+    finishMove();
+    if (m_redo.isEmpty())
+        return;
+    m_undo.append(snapshot());
+    applySnapshot(m_redo.takeLast());
+}
+bool Document::canAppend(const Artwork &a) {
+    if (m_items.size() >= Geometry::objectLimit) {
+        notify("Maximal 2000 Objekte pro Projekt.");
+        return false;
+    }
+    qint64 size = a.asset ? a.asset->bytes.size() : 0;
+    for (const auto &i : m_items)
+        if (i.asset)
+            size += i.asset->bytes.size();
+    if (size > maxEmbeddedBytes) {
+        notify("Eingebettete SVGs dürfen zusammen maximal 8 MB groß sein.");
+        return false;
+    }
+    return true;
+}
+void Document::appendArtwork(const Artwork &a) {
+    if (!canAppend(a))
+        return;
+    checkpoint();
+    const int row = m_items.size();
+    beginInsertRows({}, row, row);
+    m_items.append(a);
+    m_selected = row;
+    endInsertRows();
+    refresh();
+}
+void Document::addShape(const QString &kind) {
+    if (!QStringList{"rect", "ellipse", "text"}.contains(kind))
+        return;
+    appendArtwork({id(),
+                   kind == "text"   ? "Neuer Text"
+                   : kind == "rect" ? "Rechteck"
+                                    : "Ellipse",
+                   kind,
+                   kind == "text" ? "TEXT" : "",
+                   QRectF(65, 55, 50, 30),
+                   kind == "text" ? 0 : 1,
+                   true,
+                   {}});
+}
+void Document::removeSelected() {
+    if (m_selected < 0)
+        return;
+    checkpoint();
+    int row = m_selected;
+    beginRemoveRows({}, row, row);
+    m_items.removeAt(row);
+    m_selected = m_items.isEmpty() ? -1 : std::min(row, int(m_items.size() - 1));
+    endRemoveRows();
+    refresh();
+}
+void Document::duplicateSelected() {
+    if (m_selected < 0)
+        return;
+    auto a = m_items[m_selected];
+    a.id = id();
+    a.name = (a.name + " · Kopie").left(1000);
+    a.bounds.translate(5, 5);
+    if (!Geometry::validBounds(a.bounds)) {
+        notify("Kopie liegt außerhalb des unterstützten Koordinatenbereichs.");
+        return;
+    }
+    appendArtwork(a);
+}
+void Document::toggleVisible(int row) {
+    if (row < 0 || row >= m_items.size())
+        return;
+    checkpoint();
+    m_items[row].visible = !m_items[row].visible;
+    refresh(row);
+}
+void Document::setProperty(const QString &key, const QVariant &value) {
+    if (m_selected < 0)
+        return;
+    if (key == "name" || key == "text") {
+        if (value.metaType().id() != QMetaType::QString || value.toString().size() > 1000)
+            return;
+        const auto &a = m_items[m_selected];
+        if ((key == "name" ? a.name : a.text) == value.toString())
+            return;
+        checkpoint();
+        if (key == "name")
+            m_items[m_selected].name = value.toString();
+        else
+            m_items[m_selected].text = value.toString();
+        refresh(m_selected);
+        return;
+    }
+    bool ok;
+    double n = value.toDouble(&ok);
+    if (!ok || !std::isfinite(n) || value.metaType().id() == QMetaType::Bool)
+        return;
+    auto bounds = m_items[m_selected].bounds;
+    if (key == "x")
+        bounds.moveLeft(n);
+    else if (key == "y")
+        bounds.moveTop(n);
+    else if (key == "width")
+        bounds.setWidth(n);
+    else if (key == "height")
+        bounds.setHeight(n);
+    else
+        return;
+    if (!Geometry::validBounds(bounds) || bounds == m_items[m_selected].bounds)
+        return;
+    checkpoint();
+    m_items[m_selected].bounds = bounds;
+    refresh(m_selected);
+}
+void Document::setLayer(int layerIndex) {
+    if (m_selected < 0 || layerIndex < 0 || layerIndex > 1 ||
+        m_items[m_selected].layer == layerIndex)
+        return;
+    checkpoint();
+    m_items[m_selected].layer = layerIndex;
+    refresh(m_selected);
+}
+void Document::setLayerSetting(int layerIndex, const QString &key, const QVariant &value) {
+    if (layerIndex < 0 || layerIndex > 1)
+        return;
+    auto map = m_layers[layerIndex].toMap();
+    QVariant canonical;
+    if (key == "enabled") {
+        if (value.metaType().id() != QMetaType::Bool)
+            return;
+        canonical = value.toBool();
+    } else {
+        bool ok;
+        double n = value.toDouble(&ok);
+        if (!ok || !std::isfinite(n) || value.metaType().id() == QMetaType::Bool)
+            return;
+        if (key == "speed" && n >= 1 && n <= 100000)
+            canonical = n;
+        else if (key == "power" && n >= 0 && n <= 100)
+            canonical = n;
+        else if (key == "passes" && n >= 1 && n <= 100 && std::floor(n) == n)
+            canonical = int(n);
+        else if (key == "interval" && n >= .001 && n <= 10)
+            canonical = n;
+        else
+            return;
+    }
+    if (map[key] == canonical)
+        return;
+    checkpoint();
+    map[key] = canonical;
+    m_layers[layerIndex] = map;
+    refresh();
+}
+bool Document::applyMaterial(const QVariantMap &profile) {
+    QString error;
+    if (!MaterialLibrary::validate(profile, error)) {
+        notify(error);
+        return false;
+    }
+    auto updated = m_layers;
+    for (int i = 0; i < 2; ++i) {
+        auto values = profile[i == 0 ? "engrave" : "cut"].toMap();
+        auto map = updated[i].toMap();
+        for (const QString key : {"speed", "power", "passes", "enabled", "interval"})
+            if (values.contains(key))
+                map[key] = values[key];
+        updated[i] = map;
+    }
+    if (m_material == profile && m_layers == updated)
+        return true;
+    checkpoint();
+    m_layers = updated;
+    m_material = profile;
+    refresh();
+    notify("Material übernommen: " + profile["name"].toString() +
+           " · eigene Prüfung erforderlich.");
+    return true;
+}
+bool Document::materialModified() const {
+    if (m_material.isEmpty())
+        return false;
+    for (int i = 0; i < 2; ++i) {
+        auto expected = m_material[i == 0 ? "engrave" : "cut"].toMap();
+        auto actual = m_layers[i].toMap();
+        for (const QString key : {"speed", "power", "passes", "enabled", "interval"})
+            if (expected.contains(key) && expected[key] != actual[key])
+                return true;
+    }
+    return false;
+}
+void Document::beginMove() {
+    if (m_selected >= 0 && !m_beforeMove)
+        m_beforeMove = snapshot();
+}
+void Document::moveSelection(QPointF pos) {
+    if (m_selected < 0 || !m_beforeMove)
+        return;
+    auto bounds = m_items[m_selected].bounds;
+    bounds.moveTopLeft(pos);
+    if (!Geometry::validBounds(bounds) || bounds == m_items[m_selected].bounds)
+        return;
+    m_items[m_selected].bounds = bounds;
+    refresh(m_selected);
+}
+void Document::finishMove() {
+    if (!m_beforeMove)
+        return;
+    if (!sameContent(*m_beforeMove, snapshot())) {
+        m_undo.append(*m_beforeMove);
+        while (m_undo.size() > 50)
+            m_undo.removeFirst();
+        m_redo.clear();
+    }
+    m_beforeMove.reset();
+    emit changed();
+}
+bool Document::importSvg(const QUrl &url) {
+    QFile file(url.toLocalFile());
+    if (!url.isLocalFile() || !file.open(QIODevice::ReadOnly) || file.size() > maxEmbeddedBytes) {
+        notify("SVG konnte nicht gelesen werden (max. 8 MB).");
+        return false;
+    }
+    QString error;
+    auto asset = SvgAsset::parse(file.read(maxEmbeddedBytes + 1), error);
+    if (!asset) {
+        notify(error);
+        return false;
+    }
+    Artwork artwork{id(),
+                    file.fileName().section('/', -1),
+                    "svg",
+                    "",
+                    QRectF((Geometry::bedWidth - asset->sizeMm.width()) / 2,
+                           (Geometry::bedHeight - asset->sizeMm.height()) / 2,
+                           asset->sizeMm.width(), asset->sizeMm.height()),
+                    0,
+                    true,
+                    asset};
+    if (!canAppend(artwork))
+        return false;
+    appendArtwork(artwork);
+    notify("SVG als Grafik importiert · noch keine Zerlegung in Laserpfade.");
+    return true;
+}
+QByteArray Document::serialize() const {
+    QJsonArray objects;
     for (const auto &a : m_items)
-        arr.append(QJsonObject{{"id", a.id},
-                               {"name", a.name},
-                               {"kind", a.kind},
-                               {"text", a.text},
-                               {"x", a.bounds.x()},
-                               {"y", a.bounds.y()},
-                               {"width", a.bounds.width()},
-                               {"height", a.bounds.height()},
-                               {"layer", a.layer},
-                               {"visible", a.visible},
-                               {"svg", QString::fromLatin1(a.svg.toBase64())}});
+        objects.append(QJsonObject{
+            {"id", a.id},
+            {"name", a.name},
+            {"kind", a.kind},
+            {"text", a.text},
+            {"x", a.bounds.x()},
+            {"y", a.bounds.y()},
+            {"width", a.bounds.width()},
+            {"height", a.bounds.height()},
+            {"layer", a.layer},
+            {"visible", a.visible},
+            {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
     return QJsonDocument(QJsonObject{{"format", "blazer-studio"},
-                                     {"version", 1},
-                                     {"selected", m_selected},
+                                     {"version", 2},
+                                     {"units", "mm"},
+                                     {"origin", "bottom-left"},
                                      {"title", m_title},
-                                     {"objects", arr},
-                                     {"layers", QJsonArray::fromVariantList(m_layers)}})
+                                     {"selected", m_selected},
+                                     {"objects", objects},
+                                     {"layers", QJsonArray::fromVariantList(m_layers)},
+                                     {"material", QJsonObject::fromVariantMap(m_material)}})
         .toJson();
 }
-bool Document::restore(const QByteArray &bytes) {
+std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const {
+    if (bytes.size() > maxProjectBytes)
+        return {};
     QJsonParseError error;
-    auto doc = QJsonDocument::fromJson(bytes, &error);
-    auto root = doc.object();
+    auto json = QJsonDocument::fromJson(bytes, &error);
+    auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        root["version"].toInt() != 1 || !root["objects"].isArray() ||
-        root["objects"].toArray().size() > 2000)
-        return false;
-    auto layers = root["layers"].toArray().toVariantList();
-    if (layers.size() != 2)
-        return false;
-    for (const auto &v : layers) {
-        auto l = v.toMap();
-        auto speed = l["speed"].toDouble(), power = l["power"].toDouble();
-        int passes = l["passes"].toInt();
-        if (!isFiniteNumber(speed) || speed <= 0 || speed > 100000 || !isFiniteNumber(power) ||
-            power < 0 || power > 100 || passes < 1 || passes > 100)
-            return false;
+        !number(root, "version", 1, 2) ||
+        std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
+        !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
+        return {};
+    const int version = root["version"].toInt();
+    if (version == 2 && (root["units"] != "mm" || root["origin"] != "bottom-left"))
+        return {};
+    auto objects = root["objects"].toArray();
+    auto layers = root["layers"].toArray();
+    if (objects.size() > Geometry::objectLimit || layers.size() != 2)
+        return {};
+    Snapshot state;
+    state.title = root["title"].toString();
+    for (int i = 0; i < layers.size(); ++i) {
+        auto l = layers[i].toObject();
+        if (!text(l, "name") || !text(l, "mode") ||
+            l["mode"].toString() != (i == 0 ? "Gravur" : "Schnitt") || !l["enabled"].isBool() ||
+            !number(l, "speed", 1, 100000) || !number(l, "power", 0, 100) ||
+            !number(l, "passes", 1, 100) ||
+            std::floor(l["passes"].toDouble()) != l["passes"].toDouble())
+            return {};
+        if (!l.contains("interval"))
+            l["interval"] = .1;
+        else if (!number(l, "interval", .001, 10))
+            return {};
+        auto map = l.toVariantMap();
+        map["passes"] = l["passes"].toInt();
+        state.layers.append(map);
     }
-    QList<Artwork> items;
-    for (auto v : root["objects"].toArray()) {
-        auto o = v.toObject();
+    QSet<QString> ids;
+    qint64 embedded = 0;
+    for (const auto &value : objects) {
+        if (!value.isObject())
+            return {};
+        auto o = value.toObject();
+        if (!text(o, "id", 50) || QUuid(o["id"].toString()).isNull() ||
+            ids.contains(o["id"].toString()) || !text(o, "name") || !text(o, "text") ||
+            !text(o, "kind", 20) || !o["visible"].isBool() || !o["svg"].isString() ||
+            !number(o, "x", -2000, 2000) || !number(o, "y", -2000, 2000) ||
+            !number(o, "width", .1, 2000) || !number(o, "height", .1, 2000) ||
+            !number(o, "layer", 0, 1) || std::floor(o["layer"].toDouble()) != o["layer"].toDouble())
+            return {};
+        ids.insert(o["id"].toString());
         Artwork a{o["id"].toString(),
                   o["name"].toString(),
                   o["kind"].toString(),
@@ -199,277 +494,83 @@ bool Document::restore(const QByteArray &bytes) {
                          o["height"].toDouble()),
                   o["layer"].toInt(),
                   o["visible"].toBool(),
-                  QByteArray::fromBase64(o["svg"].toString().toLatin1())};
-        if (!QStringList{"rect", "ellipse", "text", "svg"}.contains(a.kind) || a.layer < 0 ||
-            a.layer > 1 || !isFiniteNumber(a.bounds.x()) || !isFiniteNumber(a.bounds.y()) ||
-            !isFiniteNumber(a.bounds.width()) || !isFiniteNumber(a.bounds.height()) ||
-            a.bounds.width() <= 0 || a.bounds.height() <= 0 || a.bounds.width() > 2000 ||
-            a.bounds.height() > 2000 || std::abs(a.bounds.x()) > 2000 ||
-            std::abs(a.bounds.y()) > 2000)
-            return false;
+                  {}};
+        if (!QStringList{"rect", "ellipse", "text", "svg"}.contains(a.kind))
+            return {};
+        if (version == 1)
+            a.bounds.moveTop(Geometry::bedHeight - a.bounds.y() - a.bounds.height());
+        if (!Geometry::validBounds(a.bounds))
+            return {};
+        const auto encoded = o["svg"].toString().toLatin1();
         if (a.kind == "svg") {
-            if (a.svg.contains("<!ENTITY") || a.svg.contains("<!DOCTYPE"))
-                return false;
-            QXmlStreamReader xml(a.svg);
-            while (!xml.atEnd()) {
-                xml.readNext();
-                if (xml.isStartElement())
-                    for (const auto &at : xml.attributes())
-                        if (at.name() == "href" && !at.value().startsWith(u'#'))
-                            return false;
-            }
-            if (xml.hasError())
-                return false;
-            QSvgRenderer svg(a.svg);
-            if (!svg.isValid())
-                return false;
-        }
-        items.append(a);
+            auto decoded =
+                QByteArray::fromBase64Encoding(encoded, QByteArray::AbortOnBase64DecodingErrors);
+            if (!decoded)
+                return {};
+            embedded += decoded.decoded.size();
+            if (embedded > maxEmbeddedBytes)
+                return {};
+            QString svgError;
+            a.asset = SvgAsset::parse(decoded.decoded, svgError);
+            if (!a.asset)
+                return {};
+        } else if (!encoded.isEmpty())
+            return {};
+        state.items.append(a);
     }
-    beginResetModel();
-    m_items = items;
-    m_layers = layers;
-    m_title = root["title"].toString("Unbenannt");
-    int selected = root["selected"].toInt(items.isEmpty() ? -1 : 0);
-    m_selected = selected >= -1 && selected < items.size() ? selected : -1;
-    endResetModel();
-    emit changed();
-    emit selectionChanged();
-    return true;
-}
-void Document::checkpoint() {
-    m_undo.append(state());
-    if (m_undo.size() > 50)
-        m_undo.removeFirst();
-    m_redo.clear();
-}
-void Document::undo() {
-    if (m_undo.isEmpty())
-        return;
-    m_redo.append(state());
-    restore(m_undo.takeLast());
-    m_dirty = true;
-    emit changed();
-}
-void Document::redo() {
-    if (m_redo.isEmpty())
-        return;
-    m_undo.append(state());
-    restore(m_redo.takeLast());
-    m_dirty = true;
-    emit changed();
-}
-void Document::addShape(const QString &kind) {
-    if (!QStringList{"rect", "ellipse", "text"}.contains(kind))
-        return;
-    checkpoint();
-    m_items.append({id(),
-                    kind == "text"   ? "Neuer Text"
-                    : kind == "rect" ? "Rechteck"
-                                     : "Ellipse",
-                    kind,
-                    kind == "text" ? "TEXT" : "",
-                    QRectF(65, 55, 50, 30),
-                    kind == "text" ? 0 : 1,
-                    true,
-                    {}});
-    m_selected = m_items.size() - 1;
-    refresh();
-}
-void Document::removeSelected() {
-    if (m_selected < 0)
-        return;
-    checkpoint();
-    m_items.removeAt(m_selected);
-    m_selected = m_items.isEmpty() ? -1 : std::min(m_selected, int(m_items.size() - 1));
-    refresh();
-}
-void Document::duplicateSelected() {
-    if (m_selected < 0)
-        return;
-    checkpoint();
-    auto a = m_items[m_selected];
-    a.id = id();
-    a.name += " · Kopie";
-    a.bounds.translate(5, 5);
-    m_items.append(a);
-    m_selected = m_items.size() - 1;
-    refresh();
-}
-void Document::toggleVisible(int row) {
-    if (row < 0 || row >= m_items.size())
-        return;
-    checkpoint();
-    m_items[row].visible = !m_items[row].visible;
-    refresh();
-}
-void Document::setProperty(const QString &key, const QVariant &v) {
-    if (m_selected < 0)
-        return;
-    auto &a = m_items[m_selected];
-    auto b = a.bounds;
-    if (key == "name" || key == "text") {
-        if (v.toString().size() > 1000)
-            return;
-        checkpoint();
-        if (key == "name")
-            a.name = v.toString();
-        else
-            a.text = v.toString();
-        refresh();
-        return;
+    if (root.contains("material")) {
+        if (!root["material"].isObject())
+            return {};
+        state.material = root["material"].toObject().toVariantMap();
+        QString error;
+        if (!state.material.isEmpty() && !MaterialLibrary::validate(state.material, error))
+            return {};
     }
-    bool ok = false;
-    double n = v.toDouble(&ok);
-    if (!ok || !isFiniteNumber(n))
-        return;
-    if (key == "x" || key == "y") {
-        if (std::abs(n) > 2000)
-            return;
-    } else if (key == "width" || key == "height") {
-        if (n < .1 || n > 2000)
-            return;
-    } else
-        return;
-    checkpoint();
-    if (key == "x")
-        b.moveLeft(n);
-    else if (key == "y")
-        b.moveTop(n);
-    else if (key == "width")
-        b.setWidth(n);
-    else
-        b.setHeight(n);
-    a.bounds = b;
-    refresh();
-}
-void Document::setLayer(int layer) {
-    if (m_selected < 0 || layer < 0 || layer > 1 || m_items[m_selected].layer == layer)
-        return;
-    checkpoint();
-    m_items[m_selected].layer = layer;
-    refresh();
-}
-void Document::setLayerSetting(int layer, const QString &key, const QVariant &v) {
-    if (layer < 0 || layer > 1)
-        return;
-    auto map = m_layers[layer].toMap();
-    if (!map.contains(key) || key == "name" || key == "mode")
-        return;
-    if (key != "enabled") {
-        bool ok;
-        double n = v.toDouble(&ok);
-        if (!ok || !isFiniteNumber(n))
-            return;
-        if (key == "speed" && (n < 1 || n > 100000))
-            return;
-        if (key == "power" && (n < 0 || n > 100))
-            return;
-        if (key == "passes" && (n < 1 || n > 100 || std::floor(n) != n))
-            return;
-    }
-    checkpoint();
-    map[key] = v;
-    m_layers[layer] = map;
-    refresh();
-}
-void Document::beginMove() {
-    m_beforeMove = state();
-}
-void Document::moveSelection(QPointF pos) {
-    if (m_selected < 0)
-        return;
-    m_items[m_selected].bounds.moveTopLeft(pos);
-    m_dirty = true;
-    emit changed();
-    emit selectionChanged();
-}
-void Document::finishMove() {
-    if (!m_beforeMove.isEmpty() && m_beforeMove != state()) {
-        m_undo.append(m_beforeMove);
-        if (m_undo.size() > 50)
-            m_undo.removeFirst();
-        m_redo.clear();
-        emit changed();
-    }
-    m_beforeMove.clear();
-}
-bool Document::importSvg(const QUrl &url) {
-    QFile f(url.toLocalFile());
-    if (!f.open(QIODevice::ReadOnly) || f.size() > 8 * 1024 * 1024) {
-        notify("SVG konnte nicht gelesen werden (max. 8 MB).");
-        return false;
-    }
-    auto bytes = f.readAll();
-    if (bytes.contains("<!DOCTYPE") || bytes.contains("<!ENTITY")) {
-        notify("SVG mit DTD/Entities wird im Entwurf nicht unterstützt.");
-        return false;
-    }
-    QXmlStreamReader xml(bytes);
-    QString w, h;
-    while (!xml.atEnd()) {
-        xml.readNext();
-        if (xml.isStartElement()) {
-            if (xml.name() == "svg" && w.isEmpty()) {
-                w = xml.attributes().value("width").toString();
-                h = xml.attributes().value("height").toString();
-            }
-            for (const auto &a : xml.attributes())
-                if (a.name() == "href" && !a.value().startsWith(u'#')) {
-                    notify("SVG mit externen oder eingebetteten Verweisen wird nicht unterstützt.");
-                    return false;
-                }
-        }
-    }
-    if (xml.hasError()) {
-        notify("Ungültiges SVG.");
-        return false;
-    }
-    QSvgRenderer svg(bytes);
-    if (!svg.isValid()) {
-        notify("SVG konnte nicht dargestellt werden.");
-        return false;
-    }
-    double width = physicalLength(w, svg.viewBoxF().width() * 25.4 / 96),
-           height = physicalLength(h, svg.viewBoxF().height() * 25.4 / 96);
-    if (!isFiniteNumber(width) || !isFiniteNumber(height) || width <= 0 || height <= 0 ||
-        width > 2000 || height > 2000) {
-        notify("Ungültige SVG-Abmessungen.");
-        return false;
-    }
-    checkpoint();
-    m_items.append({id(), f.fileName().section('/', -1), "svg", "",
-                    QRectF((200 - width) / 2, (150 - height) / 2, width, height), 0, true, bytes});
-    m_selected = m_items.size() - 1;
-    refresh();
-    notify("SVG als Grafik importiert · noch keine Zerlegung in Laserpfade.");
-    return true;
+    if (root.contains("selected") &&
+        (!number(root, "selected", -1, Geometry::objectLimit) ||
+         std::floor(root["selected"].toDouble()) != root["selected"].toDouble()))
+        return {};
+    state.selected = root["selected"].toInt(state.items.isEmpty() ? -1 : 0);
+    if (state.selected >= state.items.size())
+        return {};
+    return state;
 }
 bool Document::save(const QUrl &url) {
-    QSaveFile f(url.toLocalFile());
-    if (!f.open(QIODevice::WriteOnly)) {
-        notify("Speichern fehlgeschlagen.");
+    finishMove();
+    if (!url.isLocalFile()) {
+        notify("Bitte einen lokalen Dateipfad wählen.");
         return false;
     }
-    auto bytes = state();
-    if (f.write(bytes) != bytes.size() || !f.commit()) {
-        notify("Speichern fehlgeschlagen.");
+    auto bytes = serialize();
+    if (bytes.size() > maxProjectBytes) {
+        notify("Projekt ist größer als 16 MB; Speichern abgebrochen.");
         return false;
     }
-    m_dirty = false;
+    QSaveFile file(url.toLocalFile());
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+        notify("Speichern fehlgeschlagen; vorhandene Datei bleibt erhalten.");
+        return false;
+    }
+    markClean();
     emit changed();
     notify("Projekt gespeichert.");
     return true;
 }
 bool Document::open(const QUrl &url) {
-    QFile f(url.toLocalFile());
-    if (!f.open(QIODevice::ReadOnly) || f.size() > 16 * 1024 * 1024 || !restore(f.readAll())) {
-        notify("Keine gültige Blazer-Studio-Projektdatei.");
+    QFile file(url.toLocalFile());
+    if (!url.isLocalFile() || !file.open(QIODevice::ReadOnly) || file.size() > maxProjectBytes) {
+        notify("Projekt konnte nicht gelesen werden.");
         return false;
     }
+    auto state = parse(file.read(maxProjectBytes + 1));
+    if (!state) {
+        notify("Keine gültige Blazer-Studio-Projektdatei; aktuelles Projekt bleibt erhalten.");
+        return false;
+    }
+    applySnapshot(*state);
     m_undo.clear();
     m_redo.clear();
-    m_dirty = false;
+    markClean();
     emit changed();
     notify("Projekt geöffnet.");
     return true;
@@ -489,4 +590,31 @@ double Document::pathLength() const {
             m_layers[a.layer].toMap()["enabled"].toBool())
             n += outline(a).length();
     return n;
+}
+QVariantMap Document::activeBounds() const {
+    QRectF bounds;
+    int count = 0;
+    for (const auto &a : m_items)
+        if (a.visible && m_layers[a.layer].toMap()["enabled"].toBool()) {
+            bounds = count ? bounds.united(a.bounds) : a.bounds;
+            ++count;
+        }
+    return {{"valid", count > 0},
+            {"x", bounds.x()},
+            {"y", bounds.y()},
+            {"width", bounds.width()},
+            {"height", bounds.height()}};
+}
+QStringList Document::issues() const {
+    QStringList result;
+    int count = 0;
+    for (const auto &a : m_items)
+        if (a.visible && m_layers[a.layer].toMap()["enabled"].toBool()) {
+            ++count;
+            if (!Geometry::insideBed(a.bounds))
+                result << a.name + ": außerhalb des Arbeitsraums";
+        }
+    if (!count)
+        result << "Keine sichtbaren Objekte mit aktivierter Bearbeitung.";
+    return result;
 }

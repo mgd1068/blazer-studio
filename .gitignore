@@ -2,3 +2,6 @@
 /.qt/
 /.cache/
 *.user
+
+__pycache__/
+*.pyc

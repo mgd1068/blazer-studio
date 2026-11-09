@@ -41,11 +41,40 @@ ApplicationWindow {
         else if (action === "open") openDialog.open()
         else if (action === "close") { machine.stop(); Qt.quit() }
     }
+    readonly property int libraryIndex: {
+        let names = materialLibrary.names
+        return materialLibrary.indexOf(project.material.id || "")
+    }
+    function applyLibraryProfile(index) {
+        let profile = materialLibrary.profileAt(index)
+        if (profile.id) project.applyMaterial(profile)
+    }
+    function editMaterial(asNew) {
+        let profile = libraryIndex >= 0 ? materialLibrary.profileAt(libraryIndex) : project.material
+        if (!profile.id) profile = materialLibrary.newProfile()
+        materialEditor.edit(profile, asNew)
+    }
+    MaterialEditor {
+        id: materialEditor
+        library: materialLibrary; dark: win.night
+        onAboutToShow: machine.focus(false)
+        onSaved: profileId => win.applyLibraryProfile(materialLibrary.indexOf(profileId))
+    }
+    Dialog {
+        id: deleteMaterialDialog
+        title: "Materialprofil löschen?"
+        width: 430; anchors.centerIn: parent; modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        contentItem: Text { text: "Das Profil wird aus der eigenen Bibliothek entfernt.\nGeöffnete Projekte behalten ihre übernommenen Werte."; color: win.ink; wrapMode: Text.WordWrap; padding: 18 }
+        onAccepted: materialLibrary.removeProfile(project.material.id)
+        onAboutToShow: machine.focus(false)
+    }
     function showManufacturerReference() { manufacturerDialog.open() }
     ManufacturerDialog {
         id: manufacturerDialog
         catalog: typeof manufacturerReference === "undefined" ? ({tables: []}) : manufacturerReference
         dark: win.night
+        onAboutToShow: machine.focus(false)
     }
     onClosing: function(close) {
         machine.focus(false)
@@ -64,9 +93,9 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Redo]; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; onActivated: importDialog.open() }
     Shortcut { sequence: "Escape"; onActivated: { machine.stop(); project.select(-1) } }
-    FileDialog { id: importDialog; title: "SVG importieren"; nameFilters: ["SVG-Grafiken (*.svg)"]; onAccepted: project.importSvg(selectedFile) }
-    FileDialog { id: saveDialog; title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.save(selectedFile) }
-    FileDialog { id: openDialog; title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
+    FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "SVG importieren"; nameFilters: ["SVG-Grafiken (*.svg)"]; onAccepted: project.importSvg(selectedFile) }
+    FileDialog { id: saveDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.save(selectedFile) }
+    FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     Dialog {
         id: discardDialog
         width: 400
@@ -175,11 +204,28 @@ ApplicationWindow {
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true
                         Text { text: "Material"; color: win.muted; font.pixelSize: 11 }
-                        Rectangle {
-                            Layout.fillWidth: true; height: 37; color: win.bg; radius: 5; border.color: win.line
-                            Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "Sperrholz · 3 mm"; color: win.ink; font.pixelSize: 12 }
+                        ComboBox {
+                            id: materialChoice
+                            objectName: "materialChoice"
+                            Layout.fillWidth: true
+                            model: materialLibrary.names
+                            currentIndex: win.libraryIndex
+                            displayText: currentIndex >= 0 ? currentText : (project.material.name || "Material wählen")
+                            onActivated: index => win.applyLibraryProfile(index)
                         }
-                        Text { text: "Beispiel · keine geprüften Schnittwerte"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 4
+                            ActionButton { objectName: "editMaterialButton"; text: "Bearbeiten"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: win.libraryIndex >= 0; onClicked: win.editMaterial(false) }
+                            ActionButton { objectName: "newMaterialButton"; text: "+"; hint: "Eigenes Profil als Kopie anlegen"; dark: win.night; compact: true; onClicked: win.editMaterial(true) }
+                            ActionButton { text: "⋯"; dark: win.night; compact: true; onClicked: materialMenu.popup() }
+                            Menu {
+                                id: materialMenu
+                                MenuItem { text: "Profil duplizieren"; enabled: win.libraryIndex >= 0; onTriggered: { let id = materialLibrary.duplicateProfile(win.libraryIndex); if (id) win.applyLibraryProfile(materialLibrary.indexOf(id)) } }
+                                MenuItem { text: "Profil aus Bibliothek löschen"; enabled: win.libraryIndex >= 0; onTriggered: deleteMaterialDialog.open() }
+                            }
+                        }
+                        Text { text: project.materialModified ? "Projektwerte weichen vom Profil ab" : (project.material.model !== "M3" ? "M3 Pro · Zuordnung zum M3 offen" : "Eigene Werte · noch nicht am Material geprüft"); color: project.materialModified ? "#bd8b40" : win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { visible: materialLibrary.message.length > 0; text: materialLibrary.message; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                     ActionButton {
                         objectName: "manufacturerButton"
@@ -353,8 +399,8 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 8
-                                    ActionButton { text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.frame() }
-                                    ActionButton { text: machine.state === "Pausiert" ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.state === "Läuft" || machine.state === "Pausiert"; onClicked: machine.pause() }
+                                    ActionButton { text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.frame(project.activeBounds) }
+                                    ActionButton { text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
                                     ActionButton { text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }
                                 ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
@@ -404,7 +450,8 @@ ApplicationWindow {
                             NumberField { label: "v"; value: win.currentLayer.speed; unit: "mm/min"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"speed",n) }
                             NumberField { label: "P"; value: win.currentLayer.power; unit: "%"; decimals: 1; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"power",n) }
                             NumberField { label: "×"; value: win.currentLayer.passes; unit: "Mal"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"passes",n) }
-                            Text { text: "Entwurfswerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            NumberField { visible: win.operation === 0; label: "↕"; value: win.currentLayer.interval; unit: "mm"; decimals: 3; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"interval",n) }
+                            Text { text: "Profilwerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                             SectionLabel { text: "AUSGEWÄHLTES OBJEKT"; dark: win.night }
                             TextField {
@@ -422,7 +469,8 @@ ApplicationWindow {
                                 NumberField { label: "B"; value: project.selection.width || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("width",n) }
                                 NumberField { label: "H"; value: project.selection.height || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("height",n) }
                             }
-                            Text { text: "Objektkoordinaten: ab linker oberer Ecke"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { visible: project.issues.length > 0; text: project.issues.join("\n"); color: "#cf645b"; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { text: "Koordinaten: links unten · Y nach oben"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             TextField {
                                 visible: project.selection.kind === "text"; Layout.fillWidth: true
                                 text: project.selection.text || ""; color: win.ink; font.pixelSize: 12; selectByMouse: true

@@ -1,4 +1,5 @@
 #include "document.h"
+#include "materiallibrary.h"
 #include "simulator.h"
 #include "workspace.h"
 #include <QFile>
@@ -16,6 +17,7 @@ int main(int argc, char **argv) {
     QQuickStyle::setStyle("Basic");
     qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
     Document document;
+    MaterialLibrary materialLibrary;
     Simulator simulator;
     QFile f(":/profiles/blaze-x-m3.json");
     if (!f.open(QIODevice::ReadOnly))
@@ -27,6 +29,7 @@ int main(int argc, char **argv) {
     auto reference = QJsonDocument::fromJson(materials.readAll()).toVariant();
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("project", &document);
+    engine.rootContext()->setContextProperty("materialLibrary", &materialLibrary);
     engine.rootContext()->setContextProperty("machine", &simulator);
     engine.rootContext()->setContextProperty("deviceProfile", profile);
     QObject::connect(

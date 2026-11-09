@@ -1,4 +1,4 @@
-# Entwurf 0.1 ausprobieren
+# Entwurf 0.2 ausprobieren
 
 ## Start
 
@@ -15,6 +15,8 @@ Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** 
 - Rechtecke, Ellipsen und Text anlegen; auswählen, ziehen, kopieren, ausblenden und löschen.
 - Position/Größe numerisch ändern, Textinhalt bearbeiten, Gravur/Schnitt zuweisen.
 - Zwei Bearbeitungen mit Geschwindigkeit, Sollleistung, Durchgängen und Ausgabeschalter.
+- Persistente Materialbibliothek: auswählen, bearbeiten, kopieren, anlegen und löschen; Gravurintervall, Modell, Modul, Stärke und Notizen. Profilstand bleibt im Projekt erhalten.
+- Einheitliche Millimeterkoordinaten mit Ursprung unten links; Rahmenfahrt um aktive Objektgrenzen.
 - Herstellerreferenz mit 64 Materialeinträgen für M3 Pro (5/10/1 W), getrennt von den aktiven Projektwerten; Quelle und offene Modellzuordnung sichtbar.
 - SVG maßstäblich als zusammenhängende Grafik importieren. Physische mm-/cm-/inch-Einheiten werden berücksichtigt; Angaben ohne Einheit gelten als CSS-Pixel bei 96 dpi.
 - Eigene `.blazer`-Projektdateien mit eingebettetem SVG und Parametern speichern/öffnen; Undo/Redo.
@@ -27,9 +29,9 @@ Strg+S: Speichern, Strg+O: Öffnen, Strg+I: SVG importieren, Strg+Z: Undo, Strg+
 
 Die Vorschau ist eine **Layoutvorschau**: Reihenfolge der Objektliste, Begrenzungen und Verbindungswege. Für importierte SVGs gibt es noch keine Elementzerlegung, für Text und Füllgravur noch keine Laserpfadberechnung. Der Demoablauf ist eine unabhängige Animation und führt das Projekt nicht als Maschinenjob aus. Rahmenfahrt und Positionsanzeigen sind simuliert, keine Live-Telemetrie.
 
-Noch nicht vorhanden sind echte Gerätekommunikation, GCode-Ausgabe, vollständige SVG-Kompatibilität, andere Importformate, persistente Materialbibliothek, mehrere Arbeitsblätter, Autosave oder Wiederherstellung nach einem Absturz. Der vorhandene Undo-Verlauf ist auf 50 Schritte begrenzt und wird nicht mitgespeichert. Die vollständige Roadmap bleibt unverändert das Entwicklungsziel.
+Noch nicht vorhanden sind echte Gerätekommunikation, GCode-Ausgabe, vollständige SVG-Kompatibilität, andere Importformate, mehrere Arbeitsblätter, Autosave oder Wiederherstellung nach einem Absturz. Der vorhandene Undo-Verlauf ist auf 50 Schritte begrenzt und wird nicht mitgespeichert. Die vollständige Roadmap bleibt unverändert das Entwicklungsziel.
 
-SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version abgelehnt. Die zwei Bearbeitungen und die Beispielmaterialanzeige sind vorerst fest vorgegeben; nur ihre numerischen Parameter und die Ausgabe lassen sich ändern.
+SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version abgelehnt. Die zwei Bearbeitungen Gravur und Schnitt sind vorerst fest vorgegeben; ihre Parameter und Ausgabe lassen sich über Profile oder einzeln ändern. Details: [Materialbibliothek](MATERIAL_LIBRARY.md).
 
 ## Bauen und prüfen
 
@@ -54,4 +56,4 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
   ./build/blazer-studio --screenshot /tmp/blazer.png
 ```
 
-Keine echte Laseremission ist Bestandteil dieser Prüfungen.
+Der aktuelle Prüfumfang steht im [Prüfbericht](QA_REPORT.md). Keine echte Laseremission ist Bestandteil dieser Prüfungen.

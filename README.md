@@ -2,7 +2,7 @@
 
 Geplante Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Status:** Bedienbarer Entwurf 0.1 in C++20 / Qt Quick. Editor, SVG-Layoutimport, Projektdateien und Gerätesimulator sind ausführbar. Echte Geräteanbindung und Laserpfadberechnung folgen.
+**Status:** Bedienbarer Entwurf 0.2 in C++20 / Qt Quick. Editor, SVG-Layoutimport, Projektdateien und Gerätesimulator sind ausführbar. Echte Geräteanbindung und Laserpfadberechnung folgen.
 
 ## Entwurf starten
 
@@ -10,7 +10,7 @@ Geplante Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias�
 ./run.sh
 ```
 
-[Bedienung, Build und Grenzen des Prototyps](docs/PROTOTYPE.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md) · [Materialreferenz des Herstellers](docs/MANUFACTURER_MATERIALS.md)
+[Bedienung, Build und Grenzen des Prototyps](docs/PROTOTYPE.md) · [Materialbibliothek](docs/MATERIAL_LIBRARY.md) · [Prüfbericht](docs/QA_REPORT.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md) · [Materialreferenz des Herstellers](docs/MANUFACTURER_MATERIALS.md)
 
 ![Blazer Studio – erster Entwurf](assets/prototype.png)
 
