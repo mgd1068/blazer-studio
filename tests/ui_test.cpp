@@ -144,6 +144,28 @@ class UiTest : public QObject {
         w->setProperty("night", true);
         QTest::qWait(40);
         QVERIFY(!w->grabWindow().isNull());
+        project.addShape("rect");
+        QVERIFY(project.dirty());
+        machine.focus(true);
+        QVERIFY(!w->close());
+        QVERIFY(!machine.firing());
+        auto *discard = w->findChild<QObject *>("discardDialog");
+        QVERIFY(discard);
+        QTRY_VERIFY(discard->property("visible").toBool());
+        auto *cancelClose = item("cancelCloseButton");
+        QVERIFY(cancelClose);
+        click(cancelClose);
+        QTRY_VERIFY(!discard->property("visible").toBool());
+        QVERIFY(w->isVisible());
+        QVERIFY(project.dirty());
+        QVERIFY(!w->close());
+        QTRY_VERIFY(discard->property("visible").toBool());
+        auto *discardChanges = item("discardChangesButton");
+        QVERIFY(discardChanges);
+        click(discardChanges);
+        QTRY_VERIFY_WITH_TIMEOUT(!w->isVisible(), 1500);
+        QVERIFY(!discard->property("visible").toBool());
+        QVERIFY(!machine.busy());
     }
 };
 QTEST_MAIN(UiTest)

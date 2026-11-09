@@ -16,6 +16,7 @@ ApplicationWindow {
     property int operation: 1
     property real step: 10
     property string pendingAction: ""
+    property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
     readonly property color panel: night ? "#202e39" : "#ffffff"
     readonly property color line: night ? "#34434f" : "#e3e9ee"
@@ -39,7 +40,11 @@ ApplicationWindow {
         if (action === "demo") project.demo()
         else if (action === "new") project.newProject()
         else if (action === "open") openDialog.open()
-        else if (action === "close") { machine.stop(); Qt.quit() }
+        else if (action === "close") {
+            discardCloseApproved = true
+            win.close()
+            discardCloseApproved = false
+        }
     }
     readonly property int libraryIndex: {
         let names = materialLibrary.names
@@ -78,7 +83,7 @@ ApplicationWindow {
     }
     onClosing: function(close) {
         machine.focus(false)
-        if (project.dirty) { close.accepted = false; pendingAction = "close"; discardDialog.open() }
+        if (project.dirty && !discardCloseApproved) { close.accepted = false; pendingAction = "close"; discardDialog.open() }
         else machine.stop()
     }
     onActiveChanged: if (!active) machine.focus(false)
@@ -98,13 +103,24 @@ ApplicationWindow {
     FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     Dialog {
         id: discardDialog
+        objectName: "discardDialog"
+        Component.onCompleted: {
+            standardButton(Dialog.Discard).objectName = "discardChangesButton"
+            standardButton(Dialog.Cancel).objectName = "cancelCloseButton"
+        }
         width: 400
         anchors.centerIn: parent
         title: "Ungespeicherte Änderungen"
         modal: true
         standardButtons: Dialog.Discard | Dialog.Cancel
         contentItem: Text { text: "Änderungen verwerfen und fortfahren?"; color: win.ink; padding: 20 }
-        onDiscarded: win.performAction(win.pendingAction)
+        onDiscarded: {
+            let action = win.pendingAction
+            win.pendingAction = ""
+            close()
+            win.performAction(action)
+        }
+        onRejected: win.pendingAction = ""
     }
 
     // Application header and workflow tabs.

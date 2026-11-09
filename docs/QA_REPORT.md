@@ -39,3 +39,9 @@ cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DBLAZER_SANITIZERS=ON
 cmake --build build-sanitize --parallel 4
 ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build-sanitize --output-on-failure
 ```
+
+## Korrektur: Schließen nach Verwerfen
+
+Der ergänzte Bedienungstest reproduzierte zunächst den Fehler: Nach „Verwerfen“ blieb das Fenster offen. `Qt.quit()` führte erneut durch den Schließen-Handler, der wegen des weiterhin geänderten Projekts wieder nachfragte. Die bestätigte Aktion schließt jetzt das Fenster mit einer nur während dieses Schließvorgangs gültigen Freigabe. Der Dialog wird vorher geschlossen; Abbrechen entfernt die vorgemerkte Aktion. Projektänderungen werden dabei nicht fälschlich als gespeichert markiert.
+
+Regressionstest: geändertes Projekt schließen, Fokusfreigabe aufgehoben, Abbrechen erhält Fenster und Änderungen, erneutes Schließen und Verwerfen beendet das Fenster ohne erneute Abfrage. Alle drei CTest-Programme bestehen nach der Korrektur.
