@@ -18,9 +18,11 @@ Ein angenehmer, moderner Arbeitsablauf für Gravieren und Schneiden: Werkstücke
 - Vorschau mit Bearbeitungsreihenfolge, Fahrbewegungen und später geschätzter Laufzeit.
 - Helles und dunkles Design, skalierbare Darstellung und Tastenkürzel.
 
-## Technischer Vorschlag
+## Technische Entscheidung
 
-C++ mit Qt 6 / Qt Quick (QML), CMake als Buildsystem. Dieser Stack ist ein Vorschlag aus der Projektbesprechung; die konkrete Versionierung und Architektur werden bei Implementierungsbeginn geprüft. Rust bleibt eine mögliche Alternative.
+Festgelegt am 09.11.2026: **C++20** für den Anwendungskern, **Qt 6 / Qt Quick (QML)** für die Oberfläche und **CMake** als Buildsystem. Die konkrete Qt-Version wird bei Implementierungsbeginn geprüft.
+
+Architekturempfehlung zur Abstimmung: objektorientierte Komponenten für Projektverwaltung, UI-Anbindung und Gerätekommunikation; wertbasierte Datenstrukturen und möglichst reine Funktionen für Geometrie und Werkzeugwegberechnung. Komposition bevorzugen, Vererbung gezielt für austauschbare Schnittstellen wie echten und simulierten Geräteadapter einsetzen.
 
 Editor, Jobmodell, Werkzeugwegerzeugung und Geräteadapter sollen getrennt sein. Ein simulierter Geräteadapter ermöglicht die Entwicklung der Oberfläche vor der Hardwareanbindung.
 
