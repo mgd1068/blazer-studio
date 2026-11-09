@@ -25,6 +25,10 @@ class UiTest : public QObject {
         QVERIFY(f.open(QIODevice::ReadOnly));
         engine.rootContext()->setContextProperty("deviceProfile",
                                                  QJsonDocument::fromJson(f.readAll()).toVariant());
+        QFile reference(QStringLiteral(BLAZER_SOURCE_DIR "/profiles/manufacturer-materials.json"));
+        QVERIFY(reference.open(QIODevice::ReadOnly));
+        engine.rootContext()->setContextProperty(
+            "manufacturerReference", QJsonDocument::fromJson(reference.readAll()).toVariant());
         engine.load(QUrl::fromLocalFile(QStringLiteral(BLAZER_SOURCE_DIR "/qml/Main.qml")));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -46,6 +50,17 @@ class UiTest : public QObject {
             QTest::mouseClick(w, Qt::LeftButton, {},
                               i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint());
         };
+        auto *manufacturer = item("manufacturerButton");
+        QVERIFY(manufacturer);
+        click(manufacturer);
+        auto *dialog = w->findChild<QObject *>("manufacturerDialog");
+        QVERIFY(dialog);
+        QVERIFY(dialog->property("visible").toBool());
+        auto *catalogRows = item("manufacturerRows");
+        QVERIFY(catalogRows);
+        QCOMPARE(catalogRows->property("count").toInt(), 15);
+        QTest::keyClick(w, Qt::Key_Escape);
+        QTest::qWait(200);
         auto *add = item("addRectangle");
         QVERIFY(add);
         click(add);

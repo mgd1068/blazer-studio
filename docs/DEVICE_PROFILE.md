@@ -22,3 +22,7 @@ Das bereinigte Profil liegt in `profiles/blaze-x-m3.json` und wird in die Anwend
 Im Prototyp erfolgt jede Geräteaktion über `Simulator`. Es gibt weder eine serielle Implementierung noch eine GCode-Ausgabe. Die voreingestellten Schnitt-/Gravurwerte des Beispiels sind Layout-Demowerte und keine geprüften Materialrezepte.
 
 Objektkoordinaten werden in diesem Entwurf ab der linken oberen Ecke gespeichert; der Maschinenmarker benutzt die linke untere Ecke. Die Bedienoberfläche kennzeichnet diesen Unterschied. Vor echter Geräteanbindung muss eine einheitlich geprüfte Koordinatentransformation eingeführt werden.
+
+## Ergänzte Herstellerquelle
+
+Die vom Nutzer genannte [Maschineneinstellungsseite](https://de.blazexlaser.com/pages/maschineneinstellung) ist als separate [Materialreferenz](MANUFACTURER_MATERIALS.md) erfasst. Sie nennt M3 Pro; eine Gleichsetzung mit dem eingerichteten M3 ist nicht bestätigt.

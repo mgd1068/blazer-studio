@@ -1,0 +1,923 @@
+{
+  "schemaVersion": 1,
+  "sourceUrl": "https://de.blazexlaser.com/pages/maschineneinstellung",
+  "retrievedOn": "2026-11-09",
+  "sourceSha256": "c1a9a9123c26265aaff0a7ee934ccb4d9553fd611f0d598496c76672731b7db3",
+  "manufacturerModel": "M3 Pro",
+  "installedProfileModel": "M3",
+  "applicability": "unverified-model-mismatch",
+  "hardwareTested": false,
+  "note": "Herstellerreferenz für M3 Pro. Zuordnung zum vorhandenen M3 nicht bestätigt. Fehlende Gravur-Durchgänge sind null, nicht als 1 ergänzt.",
+  "sourceAnomalies": [
+    "5-W-Schnitt: Sperrholz 10 mm mit 1 Durchgang, 8 mm mit 6 Durchgängen. Originalwerte unverändert; nicht am Gerät geprüft."
+  ],
+  "tables": [
+    {
+      "sourceTitle": "M3 Pro - 5W Gravur-Materialparameter",
+      "model": "M3 Pro",
+      "modulePowerW": 5,
+      "operation": "engrave",
+      "cuttingRecommended": null,
+      "sourceColumns": [
+        "Material",
+        "Leistung",
+        "Geschwindigkeit",
+        "Abstand(mm)"
+      ],
+      "entries": [
+        {
+          "material": "Kraftpapier",
+          "powerPercent": 100.0,
+          "speedMmMin": 5000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Kraftpapier",
+            "100%",
+            "5000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Sperrholz",
+          "powerPercent": 100.0,
+          "speedMmMin": 5000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Sperrholz",
+            "100%",
+            "5000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Massivholz",
+          "powerPercent": 100.0,
+          "speedMmMin": 5000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Massivholz",
+            "100%",
+            "5000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Bambus",
+          "powerPercent": 100.0,
+          "speedMmMin": 5000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Bambus",
+            "100%",
+            "5000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Kork",
+          "powerPercent": 90.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Kork",
+            "90%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Acryl (geschwärzt)",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Acryl (geschwärzt)",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Glas (geschwärzt)",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Glas (geschwärzt)",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Leder (geschwärztweiß)",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Leder (geschwärztweiß)",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Silikon",
+          "powerPercent": 100.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Silikon",
+            "100%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Kieselstein",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Kieselstein",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Keramik (geschwärzt)",
+          "powerPercent": 100.0,
+          "speedMmMin": 1500.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Keramik (geschwärzt)",
+            "100%",
+            "1500mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Aluminium(geschwärzt)",
+          "powerPercent": 80.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Aluminium(geschwärzt)",
+            "80%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Edelstahl",
+          "powerPercent": 100.0,
+          "speedMmMin": 500.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Edelstahl",
+            "100%",
+            "500mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Weißer Filz (geschwärzt)",
+          "powerPercent": 100.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Weißer Filz (geschwärzt)",
+            "100%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Blatt",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Blatt",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceTitle": "M3 Pro - 5W Schnitt-Materialparameter",
+      "model": "M3 Pro",
+      "modulePowerW": 5,
+      "operation": "cut",
+      "cuttingRecommended": null,
+      "sourceColumns": [
+        "Material",
+        "Leistung",
+        "Geschwindigkeit",
+        "Schnittdurchgänge"
+      ],
+      "entries": [
+        {
+          "material": "Sperrholz 3mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 250.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Sperrholz 3mm",
+            "100%",
+            "250mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Sperrholz 5mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 120.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Sperrholz 5mm",
+            "100%",
+            "120mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Sperrholz 8mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 200.0,
+          "intervalMm": null,
+          "passes": 6,
+          "sourceCells": [
+            "Sperrholz 8mm",
+            "100%",
+            "200mm/min",
+            "6 Durchgang"
+          ]
+        },
+        {
+          "material": "Sperrholz 10mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Sperrholz 10mm",
+            "100%",
+            "100mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Massivholz 5mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 3,
+          "sourceCells": [
+            "Massivholz 5mm",
+            "100%",
+            "100mm/min",
+            "3 Durchgang"
+          ]
+        },
+        {
+          "material": "Massivholz 12mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 4,
+          "sourceCells": [
+            "Massivholz 12mm",
+            "100%",
+            "100mm/min",
+            "4 Durchgang"
+          ]
+        },
+        {
+          "material": "Schwarzes Acryl 10mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 12,
+          "sourceCells": [
+            "Schwarzes Acryl 10mm",
+            "100%",
+            "100mm/min",
+            "12 Durchgang"
+          ]
+        },
+        {
+          "material": "Schwarzes Acryl 15mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 15,
+          "sourceCells": [
+            "Schwarzes Acryl 15mm",
+            "100%",
+            "100mm/min",
+            "15 Durchgang"
+          ]
+        },
+        {
+          "material": "Filz (geschwärzt) 3.5mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 20,
+          "sourceCells": [
+            "Filz (geschwärzt) 3.5mm",
+            "100%",
+            "100mm/min",
+            "20 Durchgang"
+          ]
+        },
+        {
+          "material": "Leder 1mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 1000.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Leder 1mm",
+            "100%",
+            "1000mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "MDF Mittel 4.3mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 200.0,
+          "intervalMm": null,
+          "passes": 6,
+          "sourceCells": [
+            "MDF Mittel 4.3mm",
+            "100%",
+            "200mm/min",
+            "6 Durchgang"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceTitle": "M3 Pro - 10W Gravur-Materialparameter",
+      "model": "M3 Pro",
+      "modulePowerW": 10,
+      "operation": "engrave",
+      "cuttingRecommended": null,
+      "sourceColumns": [
+        "Material",
+        "Leistung",
+        "Geschwindigkeit",
+        "Abstand(mm)"
+      ],
+      "entries": [
+        {
+          "material": "Kraftpapier",
+          "powerPercent": 80.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Kraftpapier",
+            "80%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Sperrholz",
+          "powerPercent": 100.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Sperrholz",
+            "100%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Massivholz",
+          "powerPercent": 100.0,
+          "speedMmMin": 6000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Massivholz",
+            "100%",
+            "6000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Bambus",
+          "powerPercent": 100.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Bambus",
+            "100%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Kork",
+          "powerPercent": 60.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Kork",
+            "60%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Acryl (geschwärzt)",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Acryl (geschwärzt)",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Glas (geschwärzt)",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Glas (geschwärzt)",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Leder (geschwärztweiß)",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Leder (geschwärztweiß)",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Silikon",
+          "powerPercent": 90.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Silikon",
+            "90%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Kieselstein",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Kieselstein",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Keramik (geschwärzt",
+          "powerPercent": 100.0,
+          "speedMmMin": 4000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Keramik (geschwärzt",
+            "100%",
+            "4000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Aluminium(geschwärzt)",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Aluminium(geschwärzt)",
+            "70%",
+            "7000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Edelstahl",
+          "powerPercent": 100.0,
+          "speedMmMin": 1000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Edelstahl",
+            "100%",
+            "1000mm/min",
+            "0.10"
+          ]
+        },
+        {
+          "material": "Weißer Filz (geschwärzt)",
+          "powerPercent": 60.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.1,
+          "passes": null,
+          "sourceCells": [
+            "Weißer Filz (geschwärzt)",
+            "60%",
+            "7000mm/min",
+            "0.10"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceTitle": "M3 Pro -10W Schnitt-Materialparameter",
+      "model": "M3 Pro",
+      "modulePowerW": 10,
+      "operation": "cut",
+      "cuttingRecommended": null,
+      "sourceColumns": [
+        "Material",
+        "Leistung",
+        "Geschwindigkeit",
+        "Schnittdurchgänge"
+      ],
+      "entries": [
+        {
+          "material": "Sperrholz 3mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 500.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Sperrholz 3mm",
+            "100%",
+            "500mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Sperrholz 5mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 250.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Sperrholz 5mm",
+            "100%",
+            "250mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Sperrholz 8mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 120.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Sperrholz 8mm",
+            "100%",
+            "120mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Sperrholz 10mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 200.0,
+          "intervalMm": null,
+          "passes": 5,
+          "sourceCells": [
+            "Sperrholz 10mm",
+            "100%",
+            "200mm/min",
+            "5 Durchgang"
+          ]
+        },
+        {
+          "material": "Massivholz 5mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 200.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Massivholz 5mm",
+            "100%",
+            "200mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Massivholz 12mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 70.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Massivholz 12mm",
+            "100%",
+            "70mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "Schwarzes Acryl 10mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 5,
+          "sourceCells": [
+            "Schwarzes Acryl 10mm",
+            "100%",
+            "100mm/min",
+            "5 Durchgang"
+          ]
+        },
+        {
+          "material": "Schwarzes Acryl 15mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 9,
+          "sourceCells": [
+            "Schwarzes Acryl 15mm",
+            "100%",
+            "100mm/min",
+            "9 Durchgang"
+          ]
+        },
+        {
+          "material": "Filz (geschwärzt) 3.5mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 100.0,
+          "intervalMm": null,
+          "passes": 9,
+          "sourceCells": [
+            "Filz (geschwärzt) 3.5mm",
+            "100%",
+            "100mm/min",
+            "9 Durchgang"
+          ]
+        },
+        {
+          "material": "Leder 1mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 2000.0,
+          "intervalMm": null,
+          "passes": 1,
+          "sourceCells": [
+            "Leder 1mm",
+            "100%",
+            "2000mm/min",
+            "1 Durchgang"
+          ]
+        },
+        {
+          "material": "MDF Mittel 4.3mm",
+          "powerPercent": 100.0,
+          "speedMmMin": 200.0,
+          "intervalMm": null,
+          "passes": 3,
+          "sourceCells": [
+            "MDF Mittel 4.3mm",
+            "100%",
+            "200mm/min",
+            "3 Durchgang"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceTitle": "M3 Pro - 1W Gravur-Materialparameter",
+      "model": "M3 Pro",
+      "modulePowerW": 1,
+      "operation": "engrave",
+      "cuttingRecommended": false,
+      "sourceColumns": [
+        "Material",
+        "Leistung",
+        "Geschwindigkeit",
+        "Abstand(mm)"
+      ],
+      "entries": [
+        {
+          "material": "Kraftpapier",
+          "powerPercent": 100.0,
+          "speedMmMin": 300.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Kraftpapier",
+            "100%",
+            "300mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Acryl (geschwärzt)",
+          "powerPercent": 40.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Acryl (geschwärzt)",
+            "40%",
+            "7000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Glas (geschwärzt)",
+          "powerPercent": 30.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Glas (geschwärzt)",
+            "30%",
+            "7000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Leder (geschwärzt)",
+          "powerPercent": 100.0,
+          "speedMmMin": 5000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Leder (geschwärzt)",
+            "100%",
+            "5000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Silikon",
+          "powerPercent": 100.0,
+          "speedMmMin": 2000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Silikon",
+            "100%",
+            "2000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Kieselstein",
+          "powerPercent": 100.0,
+          "speedMmMin": 3000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Kieselstein",
+            "100%",
+            "3000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Keramik",
+          "powerPercent": 100.0,
+          "speedMmMin": 3000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Keramik",
+            "100%",
+            "3000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Aluminiumplatte",
+          "powerPercent": 50.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Aluminiumplatte",
+            "50%",
+            "7000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Edelstahl",
+          "powerPercent": 70.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Edelstahl",
+            "70%",
+            "7000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Weißer Filz (geschwärzt)",
+          "powerPercent": 100.0,
+          "speedMmMin": 1000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Weißer Filz (geschwärzt)",
+            "100%",
+            "1000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Schwarzes Acryl",
+          "powerPercent": 100.0,
+          "speedMmMin": 6000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Schwarzes Acryl",
+            "100%",
+            "6000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Kupferplatte",
+          "powerPercent": 80.0,
+          "speedMmMin": 7000.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Kupferplatte",
+            "80%",
+            "7000mm/min",
+            "0.05"
+          ]
+        },
+        {
+          "material": "Kork",
+          "powerPercent": 100.0,
+          "speedMmMin": 300.0,
+          "intervalMm": 0.05,
+          "passes": null,
+          "sourceCells": [
+            "Kork",
+            "100%",
+            "300mm/min",
+            "0.05"
+          ]
+        }
+      ]
+    }
+  ]
+}

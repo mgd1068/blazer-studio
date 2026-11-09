@@ -10,7 +10,7 @@ Geplante Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias�
 ./run.sh
 ```
 
-[Bedienung, Build und Grenzen des Prototyps](docs/PROTOTYPE.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md)
+[Bedienung, Build und Grenzen des Prototyps](docs/PROTOTYPE.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md) · [Materialreferenz des Herstellers](docs/MANUFACTURER_MATERIALS.md)
 
 ![Blazer Studio – erster Entwurf](assets/prototype.png)
 

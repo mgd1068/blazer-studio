@@ -41,6 +41,12 @@ ApplicationWindow {
         else if (action === "open") openDialog.open()
         else if (action === "close") { machine.stop(); Qt.quit() }
     }
+    function showManufacturerReference() { manufacturerDialog.open() }
+    ManufacturerDialog {
+        id: manufacturerDialog
+        catalog: typeof manufacturerReference === "undefined" ? ({tables: []}) : manufacturerReference
+        dark: win.night
+    }
     onClosing: function(close) {
         machine.focus(false)
         if (project.dirty) { close.accepted = false; pendingAction = "close"; discardDialog.open() }
@@ -174,6 +180,12 @@ ApplicationWindow {
                             Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "Sperrholz · 3 mm"; color: win.ink; font.pixelSize: 12 }
                         }
                         Text { text: "Beispiel · keine geprüften Schnittwerte"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    }
+                    ActionButton {
+                        objectName: "manufacturerButton"
+                        text: "Herstellerwerte ansehen"
+                        dark: win.night; compact: true; Layout.fillWidth: true
+                        onClicked: win.showManufacturerReference()
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     RowLayout {

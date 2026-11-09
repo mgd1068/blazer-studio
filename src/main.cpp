@@ -21,6 +21,10 @@ int main(int argc, char **argv) {
     if (!f.open(QIODevice::ReadOnly))
         return 1;
     auto profile = QJsonDocument::fromJson(f.readAll()).toVariant();
+    QFile materials(":/profiles/manufacturer-materials.json");
+    if (!materials.open(QIODevice::ReadOnly))
+        return 1;
+    auto reference = QJsonDocument::fromJson(materials.readAll()).toVariant();
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("project", &document);
     engine.rootContext()->setContextProperty("machine", &simulator);
@@ -28,6 +32,7 @@ int main(int argc, char **argv) {
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
+    engine.rootContext()->setContextProperty("manufacturerReference", reference);
     engine.loadFromModule("BlazerStudio", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;
@@ -46,6 +51,8 @@ int main(int argc, char **argv) {
     int imported = args.indexOf("--import");
     if (imported >= 0 && imported + 1 < args.size())
         document.importSvg(QUrl::fromLocalFile(args[imported + 1]));
+    if (args.contains("--materials"))
+        QMetaObject::invokeMethod(root, "showManufacturerReference");
     int shot = args.indexOf("--screenshot");
     if (shot >= 0 && shot + 1 < args.size()) {
         const QString path = args[shot + 1];
