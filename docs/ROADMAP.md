@@ -12,6 +12,7 @@
 - Qt/QML-Projekt mit den Bereichen Vorbereiten, Vorschau und Gerät.
 - Arbeitsfläche, Objektliste, Einstellungsbereiche und Profile.
 - Simulierter Geräteadapter mit Status und Jobfortschritt.
+- Direkte Bedienung einschließlich 2-%-Positionier-/Fokuspunkt mit Halten/Loslassen, Zeitlimit und sichtbarem Emissionsstatus im Simulator.
 - Bediengefühl gemeinsam am OrcaSlicer-Vorbild prüfen.
 
 ## 3. Vorbereitung und Vorschau
@@ -27,6 +28,9 @@
 - Verbindung, Status, Verbindungsabbruch und kontrolliertes Wiederverbinden.
 - Positionierung und Rahmenfahrt zunächst ohne Laseremission.
 - Grenzen und Leistungsskalierung validieren, anschließend beaufsichtigte Materialtests.
+- Manuellen 2-%-Positionier-/Fokuspunkt nach Prüfung der Leistungsskalierung, Verriegelungen und geräteseitigen Abschaltmöglichkeiten integrieren.
+- Zustandswechsel, Loslassen, Zeitlimit, Jobkonflikte und Verbindungsfehler gezielt prüfen; nach Wiederverbindung keine erneute Emission.
+- Schrittbewegungen, Arbeitsnullpunkt und Rahmenfahrt; weitere Funktionen nur nach ermittelten Gerätefähigkeiten.
 - Jobübertragung, Pause/Fortsetzen soweit vom Gerät unterstützt und Abbruch.
 
 ## 5. Alltagstauglichkeit

@@ -30,6 +30,20 @@ Editor, Jobmodell, Werkzeugwegerzeugung und Geräteadapter sollen getrennt sein.
 
 Hersteller, genaue Modellvariante, Controller, Firmware, Transport und Befehlsprotokoll sind noch zu ermitteln. Insbesondere ist **GRBL-Unterstützung nicht bestätigt**. Keine Kompatibilitätszusage vor der Bestandsaufnahme und den Gerätetests.
 
+## Direkte Gerätefunktionen
+
+Anforderung von Mathias (09.11.2026): Ein **Laserpunkt mit 2 % Sollleistung** zum Einstellen der Position und des Fokus gehört in den Gerätebereich.
+
+- Gut erreichbare Funktion „Positionieren / Fokus – 2 %“ mit sichtbarer Leistungsangabe und Emissionsstatus.
+- Standardbedienung als Gedrückthalten, ergänzt durch eine kurze maximale Einschaltdauer. Loslassen oder Ablauf fordert unmittelbar Laser-Aus an.
+- Laserpunkt nur im verbundenen, betriebsbereiten Leerlauf freigeben; keine gleichzeitige Jobausführung. Vor Jobstart muss der manuelle Modus beendet und Laser-Aus bestätigt sein, soweit das Protokoll dies ermöglicht.
+- Abbruch, Verlassen des manuellen Modus und Verbindungsfehler beenden die Freigabe. Nach Wiederverbindung keine automatische Reaktivierung. Bei Verbindungsverlust kann die Anwendung Laser-Aus nicht garantieren; geräteseitigen Watchdog beziehungsweise zeitbegrenzten Puls vor Umsetzung prüfen.
+- 2 % beziehen sich auf den Sollwert des Controllers, nicht auf eine gemessene optische Leistung. Skalierung, Minimalleistung und mögliche Firmware-Untergrenzen am tatsächlichen BlazerX prüfen. Keinen ungeprüften Ersatz durch höhere Leistung vornehmen.
+- Vorhandene Verriegelungen und Schutzfunktionen gelten auch im manuellen Modus. Niedrige Sollleistung ist keine Zusage für Augensicherheit.
+- Ergänzende direkte Bedienung: X/Y-Schrittbewegungen mit wählbarer Schrittweite und Geschwindigkeit, Arbeitsnullpunkt setzen/anfahren und Rahmenfahrt. Referenzfahrt, Z-/Fokusverstellung, Air Assist oder Absaugung nur anbieten, wenn die Gerätefähigkeiten dafür nachgewiesen sind. Ein Fokuspunkt allein bedeutet keine motorisierte Fokusverstellung.
+
+Der Simulator bildet Halten/Loslassen, Zeitlimit, Zustandswechsel, Jobkonflikte und Verbindungsfehler ab. Echte Emission wird erst nach Prüfung des Geräteprotokolls und der Abschaltmöglichkeiten implementiert und beaufsichtigt getestet.
+
 ## Erste Ausbaustufe
 
 SVG-Import, Objekttransformationen, Ebenenparameter, Werkzeugwegvorschau und simulierter Jobablauf. Danach schrittweise echte Verbindung, Status, Positionierung, Rahmenfahrt, Jobübertragung und Abbruch.
