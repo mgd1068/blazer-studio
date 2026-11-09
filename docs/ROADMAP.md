@@ -1,42 +1,55 @@
 # Entwicklungsplan
 
-## 1. Gerät und vorhandene Umgebung erfassen
+Stand: 09.11.2026. Zielumfang: **LightBurn 2.2.01 einschließlich Pro-Funktionen** als funktionale Referenz, native Linux-Oberfläche nach OrcaSlicer und BlazerX als erste Geräteintegration. Siehe [Zielmatrix F01–F53](LIGHTBURN_SCOPE.md) und [recherchierte Zusatzvorschläge Z01–Z13](USER_WISHES.md).
 
-- Exakte BlazerX-Identität, Arbeitsraum, Controller und Firmware dokumentieren.
-- Vorhandene LightBurn-Gerätekonfiguration und Anschlussart untersuchen.
-- Dokumentation und Kommunikationsprotokoll prüfen; keine ungeprüften Steuerbefehle senden.
-- Einheiten, Koordinaten, Referenzfahrt, Leistungsskalierung und Schutzfunktionen erfassen.
+Die nachstehenden Etappen bestimmen die Reihenfolge. Der erste Prototyp ist keine Begrenzung des Gesamtziels. Noch keine Funktion implementiert; keine Termine zugesagt. Zusätzliche Z-Funktionen bleiben Vorschläge bis zu ihrer Übernahme.
 
-## 2. Bedienbarer Prototyp
+## P0 – Gerätebestand und Architektur
 
-- Qt/QML-Projekt mit den Bereichen Vorbereiten, Vorschau und Gerät.
-- Arbeitsfläche, Objektliste, Einstellungsbereiche und Profile.
-- Simulierter Geräteadapter mit Status und Jobfortschritt.
-- Direkte Bedienung einschließlich 2-%-Positionier-/Fokuspunkt mit Halten/Loslassen, Zeitlimit und sichtbarem Emissionsstatus im Simulator.
-- Bediengefühl gemeinsam am OrcaSlicer-Vorbild prüfen.
+- Exakte BlazerX-Variante, Arbeitsraum, Controller, Firmware, Zubehör und Anschluss erfassen; bestehende LightBurn-Konfiguration lesen.
+- Protokoll, Koordinaten, Einheiten, Referenzfahrt, Leistungsskalierung und Abschaltung prüfen.
+- Fähigkeitenmatrix erstellen: unterstützt / nicht vorhanden / ungeklärt, jeweils mit Beleg.
+- C++20, Qt 6/QML und CMake aufsetzen. Objekt-/Projektmodell, Berechnungen und Geräteadapter trennen.
+- Früh berücksichtigen: Seiten, stabile Objekt-IDs, Gruppenhierarchie, versionierte Materialprofile und unveränderliche Jobstände. Parametrik als Erweiterung entwerfen.
 
-## 3. Vorbereitung und Vorschau
+## P1 – Bedienbarer Kern und direkte Steuerung
 
-- Klar definierten SVG-Teilumfang importieren; nicht unterstützte Elemente sichtbar melden.
-- Verschieben, Skalieren, Drehen, Undo/Redo und Projektdatei.
-- Schnitt-/Gravurebenen und Materialprofile.
-- Werkzeugwege, Fahrbewegungen und Reihenfolge visualisieren.
+- Vorbereiten · Vorschau · Gerät; helle/dunkle Oberfläche, Arbeitsfläche, Auswahl, Transformationen und Objektbaum.
+- Projektdatei, mehrere Arbeitsblätter, Undo/Redo, Autosave/Wiederherstellung.
+- SVG-Kernimport, Grundformen, Ebenenparameter und erste Vektorwerkzeugwege mit Vorschau.
+- Simulator für Verbindung, Positionierung, Status, Übertragung, Jobablauf und Fehlerfälle.
+- Nach Protokollprüfung echte Verbindung und Bewegungen zunächst ohne Emission.
+- Direkter 2-%-Positionier-/Fokuspunkt: Haltebedienung, Zeitlimit, Emissionsanzeige, Jobkonflikte und Wiederverbindungsfälle prüfen. Leistungsskalierung und geräteseitige Abschaltung müssen vor echten Tests geklärt sein.
 
-## 4. Geräteintegration
+## P2 – Vollständiger alltäglicher Laserworkflow
 
-- Adapter für das tatsächlich ermittelte BlazerX-Protokoll.
-- Verbindung, Status, Verbindungsabbruch und kontrolliertes Wiederverbinden.
-- Positionierung und Rahmenfahrt zunächst ohne Laseremission.
-- Grenzen und Leistungsskalierung validieren, anschließend beaufsichtigte Materialtests.
-- Manuellen 2-%-Positionier-/Fokuspunkt nach Prüfung der Leistungsskalierung, Verriegelungen und geräteseitigen Abschaltmöglichkeiten integrieren.
-- Zustandswechsel, Loslassen, Zeitlimit, Jobkonflikte und Verbindungsfehler gezielt prüfen; nach Wiederverbindung keine erneute Emission.
-- Schrittbewegungen, Arbeitsnullpunkt und Rahmenfahrt; weitere Funktionen nur nach ermittelten Gerätefähigkeiten.
-- Jobübertragung, Pause/Fortsetzen soweit vom Gerät unterstützt und Abbruch.
+- DXF-/Rasterimport, erweiterte Pfad-/Knotenwerkzeuge, Text, Boolesche Operationen und Schnittfugen/Haltestege.
+- Linien-, Füll-, Konturfüllungs- und Rastergravur, Scan-/Ditheroptionen und Unteroperationen.
+- Reihenfolge, Startpunkte und Leerfahrten optimieren; Zeiten am realen Gerät vergleichen.
+- Materialbibliothek, Material-/Fokus-/Intervalltests und Kalibrierungsassistenten.
+- Migration vorhandener LightBurn-Projekte/-Bibliotheken untersuchen und mit Verlustberichten testen.
+- Empfohlene Ergänzungen: Gruppen direkt bearbeiten, reichhaltige Profile, Bildmaßstab und nachvollziehbare Profilabweichungen.
 
-## 5. Alltagstauglichkeit
+## P3 – Erweiterte Gestaltung und Produktion
 
-- Rastergravur und weitere Importformate nach Bedarf.
-- Laufzeitschätzung anhand echter Messungen verbessern.
-- Linux-Paketierung, nachvollziehbare Fehlerberichte und Dokumentation.
+- Weitere Vektor-/Rasterformate, variable Texte, CSV-/Serienproduktion und Codes.
+- Kontur-Nesting über mehrere Platten; Verformung, komplexe Muster, Vorlagen und Grafikbibliothek ausbauen.
+- 3D-Import/Tiefenkarten und PCB-Datenimport.
+- Kamerakalibrierung, Overlays und Print-and-Cut bei vorhandenem Zubehör.
+- Lokale API, externe Tools und Netzwerk-/Bridge-Workflow abhängig vom Geräteprotokoll.
+- Zusatzvorschläge getrennt einplanen: Parametrik/Generatoren, Warteschlange, Testbuch und Restflächenverwaltung.
 
-Keine Termine oder vollständige LightBurn-Funktionsparität zugesagt.
+## P4 – Hardwaregebundene Spezialmodule
+
+- Rotary, Zylinder-/Konuskorrektur, Vorschub, Split Marking und zusätzliche Achsen.
+- Galvo-/MOPA-/Mehrquellenfunktionen und Linsenkorrektur, LiDAR/Oberflächenkompensation und Autofokus.
+- Je Funktion dokumentieren, ob sie beim BlazerX vorhanden, nachrüstbar oder nicht anwendbar ist. Keine stillschweigende Streichung aus der Vergleichsmatrix; weitere Controller erst als eigenen Ausbau planen.
+
+## Abnahme und Auslieferung
+
+- Jede F-ID mit Umsetzung, Einschränkungen und aussagekräftigen Nachweisen verfolgen; Zielgleichheit erst nach Prüfung beanspruchen.
+- Importmaße, Geometrie, Raster-/Werkzeugwege, Koordinaten, Leistungswerte und Jobzustände mit unabhängigen Beispielen testen.
+- Simulatorprüfungen um Verbindungsabbruch, Alarm, Stop und Wiederverbindung ergänzen; anschließend beaufsichtigte Gerätetests.
+- Wayland/X11, HiDPI, Tastatur, Dezimalkomma und Linux-Paketierung abnehmen; Diagnose- und Wiederherstellungsweg dokumentieren.
+
+Bestehende Schutzfunktionen bleiben erhalten. Ein Software-Stop ersetzt keinen Hardware-Not-Aus.
