@@ -1,0 +1,17 @@
+{
+  "name": "Blaze X M3",
+  "profileName": "M3",
+  "controller": "GRBL",
+  "width": 200,
+  "height": 150,
+  "baudRate": 115200,
+  "lastPort": "ttyUSB0",
+  "powerScale": 1000,
+  "focusPower": 2,
+  "zEnabled": false,
+  "homeOnStartupConfigured": true,
+  "originCode": 0,
+  "source": "LightBurn prefs.ini · 09.11.2026",
+  "hardwareVerified": false,
+  "note": "Konfiguration aus LightBurn; keine Live-Abfrage. Modellbezeichnung zusätzlich aus Katzenschild/Hinweise.txt."
+}

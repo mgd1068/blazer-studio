@@ -2,7 +2,7 @@
 
 Stand: 09.11.2026. Zielumfang: **LightBurn 2.2.01 einschließlich Pro-Funktionen** als funktionale Referenz, native Linux-Oberfläche nach OrcaSlicer und BlazerX als erste Geräteintegration. Siehe [Zielmatrix F01–F53](LIGHTBURN_SCOPE.md) und [recherchierte Zusatzvorschläge Z01–Z13](USER_WISHES.md).
 
-Die nachstehenden Etappen bestimmen die Reihenfolge. Der erste Prototyp ist keine Begrenzung des Gesamtziels. Noch keine Funktion implementiert; keine Termine zugesagt. Zusätzliche Z-Funktionen bleiben Vorschläge bis zu ihrer Übernahme.
+Die nachstehenden Etappen bestimmen die Reihenfolge. Der erste Prototyp ist keine Begrenzung des Gesamtziels. Entwurf 0.1 implementiert bereits Editor-Grundfunktionen, SVG-Layoutimport, Projektdateien und Simulator; keine Termine zugesagt. Zusätzliche Z-Funktionen bleiben Vorschläge bis zu ihrer Übernahme.
 
 ## P0 – Gerätebestand und Architektur
 
@@ -53,3 +53,9 @@ Die nachstehenden Etappen bestimmen die Reihenfolge. Der erste Prototyp ist kein
 - Wayland/X11, HiDPI, Tastatur, Dezimalkomma und Linux-Paketierung abnehmen; Diagnose- und Wiederherstellungsweg dokumentieren.
 
 Bestehende Schutzfunktionen bleiben erhalten. Ein Software-Stop ersetzt keinen Hardware-Not-Aus.
+
+## Stand Entwurf 0.1
+
+Erledigt: LightBurn-Profil gelesen (M3/GRBL, 200 × 150 mm, 115200 Baud, S-Max 1000, Fokuspunkt 2 %, Z aus), C++/Qt-Projekt gebaut, Editor mit einfachen Formen/Text und SVG-Grafiken, numerische Maße, zwei Bearbeitungen, Undo/Redo, eigene Projektdatei und Gerätebedienung im Simulator. Kern- und Qt-Quick-Bedientests bestehen.
+
+Noch offen: Live-Geräteabfrage, einheitliche Maschinen-/Objektkoordinaten, echte Laserpfade/Übertragung, Materialbibliothek, Autosave und Mehrseitenmodell. Die Übersicht ist kein Abschlussvermerk für ganze F-IDs. Details: [Prototyp](PROTOTYPE.md).

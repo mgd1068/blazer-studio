@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Blazer Studio
+Comment=Laser-Workspace für den Blaze X M3 – erster Entwurf mit Simulator
+Exec=@PROJECT_DIR@/run.sh
+Icon=@PROJECT_DIR@/assets/blazer-studio.svg
+Terminal=false
+Categories=Graphics;Engineering;
+StartupNotify=true

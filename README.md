@@ -2,7 +2,19 @@
 
 Geplante Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Status:** Projektentwurf. Noch keine ausführbare Anwendung und keine verifizierte Geräteanbindung.
+**Status:** Bedienbarer Entwurf 0.1 in C++20 / Qt Quick. Editor, SVG-Layoutimport, Projektdateien und Gerätesimulator sind ausführbar. Echte Geräteanbindung und Laserpfadberechnung folgen.
+
+## Entwurf starten
+
+```bash
+./run.sh
+```
+
+[Bedienung, Build und Grenzen des Prototyps](docs/PROTOTYPE.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md)
+
+![Blazer Studio – erster Entwurf](assets/prototype.png)
+
+Auf Mathias’ Rechner ist der Startmenüeintrag **Blazer Studio** eingerichtet. Alle Geräteaktionen sind simuliert. Die Anwendung enthält noch keinen seriellen Treiber und sendet keine Laserbefehle.
 
 ## Ziel
 
@@ -26,7 +38,7 @@ Mathias hat am 09.11.2026 den Funktionsumfang der aktuellen LightBurn-Version al
 - [Nutzerwünsche und Zusatzvorschläge Z01–Z13](docs/USER_WISHES.md): Quellen, heutiger Vergleichsstand und priorisierte Empfehlungen.
 - [Entwicklungsplan](docs/ROADMAP.md): Umsetzung in Etappen; Spezialfunktionen werden nach tatsächlicher Hardwarefähigkeit bewertet.
 
-Mehrseitige Projekte, True Nest, Mittellinien-Nachzeichnen und REST-API sind bereits Teil von LightBurn 2.2 und daher Vergleichsbasis. Der erste BlazerX-Prototyp ist ein Meilenstein auf dem Weg zum Gesamtziel. Die Anwendung ist noch nicht implementiert; zusätzliche Vorschläge sind noch keine beschlossenen Anforderungen.
+Mehrseitige Projekte, True Nest, Mittellinien-Nachzeichnen und REST-API sind bereits Teil von LightBurn 2.2 und daher Vergleichsbasis. Der erste BlazerX-Prototyp ist ein Meilenstein auf dem Weg zum Gesamtziel. Der erste Entwurf deckt einen kleinen Teil des Zielkatalogs ab; zusätzliche Vorschläge sind noch keine beschlossenen Anforderungen.
 
 ## Technische Entscheidung
 
@@ -38,7 +50,7 @@ Editor, Jobmodell, Werkzeugwegerzeugung und Geräteadapter sollen getrennt sein.
 
 ## BlazerX-Unterstützung
 
-Hersteller, genaue Modellvariante, Controller, Firmware, Transport und Befehlsprotokoll sind noch zu ermitteln. Insbesondere ist **GRBL-Unterstützung nicht bestätigt**. Keine Kompatibilitätszusage vor der Bestandsaufnahme und den Gerätetests.
+Die installierte LightBurn-Konfiguration enthält das Profil **M3 / GRBL**, **200 × 150 mm**, seriell **115200 Baud**, S-Max **1000** und **2 %** für den Fokuspunkt; Z-Steuerung ist deaktiviert. Vorhandene Projekthinweise nennen das Gerät **Blaze X M3 / 5-W-Modul**. Siehe [Profilherkunft](docs/DEVICE_PROFILE.md). Firmwareversion, reale Controllerparameter und Abschaltverhalten sind noch live zu prüfen. Ausgelesene Einstellungen sind keine Live-Kompatibilitätsprüfung.
 
 ## Direkte Gerätefunktionen
 
