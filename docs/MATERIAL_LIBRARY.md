@@ -20,6 +20,6 @@ Die Bibliothek liegt im Qt-Anwendungsdatenverzeichnis, auf diesem Rechner normal
 
 Ein Projekt speichert eine eigene Kopie des angewendeten Profils. Spätere Bibliotheksänderungen oder Löschen verändern diesen Stand nicht automatisch; erneutes Auswählen übernimmt den aktuellen Bibliotheksstand. Individuelle Bearbeitungsänderungen werden als Abweichung angezeigt. Die Profilübernahme ist im Projekt rückgängig zu machen; Bibliotheksänderungen selbst haben keinen Undo-Verlauf.
 
-Projektformat 2 verwendet Millimeter und Ursprung unten links. Alte Projektdateien der Version 1 werden beim Öffnen umgerechnet und beim nächsten Speichern als Version 2 geschrieben. Profilrevisionen werden mitgeführt; eine vollständige Versionsverwaltung, Fotos, Suchfilter, Import/Export fremder Bibliotheken und Materialtestgeneratoren bleiben weitere Ausbauschritte.
+Projektformat 3 speichert zusätzlich Objektgruppen und Mehrfachauswahl; Maße bleiben Millimeter mit Ursprung unten links. Projektdateien der Versionen 1 und 2 bleiben lesbar; Version 1 wird beim Öffnen umgerechnet. Profilrevisionen werden mitgeführt; eine vollständige Versionsverwaltung, Fotos, Suchfilter, Import/Export fremder Bibliotheken und Materialtestgeneratoren bleiben weitere Ausbauschritte.
 
 ![Materialprofil bearbeiten](../assets/material-editor.png)

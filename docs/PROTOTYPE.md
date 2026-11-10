@@ -1,4 +1,4 @@
-# Entwurf 0.2 ausprobieren
+# Entwurf 0.3 ausprobieren
 
 ## Start
 
@@ -13,7 +13,9 @@ Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** 
 - Bereiche Vorbereiten, Layoutvorschau und Gerät.
 - Arbeitsfläche 200 × 150 mm, Zoom, Einpassen und Verschieben mit mittlerer Maustaste.
 - Rechtecke, Ellipsen und Text anlegen; auswählen, ziehen, kopieren, ausblenden und löschen.
-- Position/Größe numerisch ändern, Textinhalt bearbeiten, Gravur/Schnitt zuweisen.
+- Objekte links einzeln auswählen, sichtbar hervorheben und Namen/Text bearbeiten; Gravieren/Schneiden direkt pro Objekt.
+- X/Y, Breite/Höhe und proportionale Prozentskalierung numerisch ändern, auch für Mehrfachauswahl und Gruppen.
+- Mehrfachauswahl per Häkchen oder Strg-/Umschalt-Klick, Gruppieren/Auflösen, gemeinsam Ziehen/Platzieren/Kopieren/Löschen; [Bedienung](OBJECTS_GROUPS.md).
 - Zwei Bearbeitungen mit Geschwindigkeit, Sollleistung, Durchgängen und Ausgabeschalter.
 - Toolkopf-Auswahl mit 5 W als Voreinstellung; Materialliste nach Modulleistung gefiltert.
 - Persistente Materialbibliothek mit allen 64 Herstellervorgaben als Profilen: auswählen, bearbeiten, kopieren, anlegen und löschen; Gravurintervall, Modell, Modul, Stärke und Notizen. Profilstand bleibt im Projekt erhalten.

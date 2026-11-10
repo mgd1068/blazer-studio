@@ -10,6 +10,7 @@
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <algorithm>
 #include <functional>
 
 class UiTest : public QObject {
@@ -53,6 +54,21 @@ class UiTest : public QObject {
         };
         auto click = [w](QQuickItem *i) {
             QTest::qWait(50);
+            for (auto *parent = i->parentItem(); parent; parent = parent->parentItem()) {
+                if (!parent->property("contentY").isValid())
+                    continue;
+                const auto point = i->mapToItem(parent, QPointF());
+                double delta = point.y() < 5 ? point.y() - 5
+                               : point.y() + i->height() > parent->height() - 5
+                                   ? point.y() + i->height() - parent->height() + 5
+                                   : 0;
+                const auto limit =
+                    std::max(0., parent->property("contentHeight").toDouble() - parent->height());
+                parent->setProperty(
+                    "contentY",
+                    std::clamp(parent->property("contentY").toDouble() + delta, 0., limit));
+            }
+            QTest::qWait(30);
             QTest::mouseClick(w, Qt::LeftButton, {},
                               i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint());
         };
@@ -195,6 +211,115 @@ class UiTest : public QObject {
         click(edit);
         QCOMPARE(item("materialCutPower")->property("inputText").toString(), "42.5");
         QTest::keyClick(w, Qt::Key_Escape);
+        project.demo();
+        auto *list = item("objectList");
+        QVERIFY(list);
+        auto clickObject = [&](int row) {
+            QVERIFY(QMetaObject::invokeMethod(list, "positionViewAtIndex", Q_ARG(int, row),
+                                              Q_ARG(int, 1)));
+            QTest::qWait(50);
+            auto *object = item(qPrintable(QString("objectRow%1").arg(row)));
+            QVERIFY(object);
+            // Use the name area, leaving the row's operation selector and checkbox independent.
+            auto point = object->mapToScene(
+                QPointF(60, object->property("artGroupFirst").toBool() ? 44 : 14));
+            QTest::mouseClick(w, Qt::LeftButton, {}, point.toPoint());
+        };
+        clickObject(3);
+        QCOMPARE(project.selected(), 3);
+        auto *objectName = item("objectNameInput");
+        QVERIFY(objectName);
+        click(objectName);
+        QTest::keyClick(w, Qt::Key_A, Qt::ControlModifier);
+        for (char c : QByteArray("Mein Titel"))
+            QTest::keyClick(w, c);
+        clickObject(4);
+        QCOMPARE(project.selected(), 4);
+        QCOMPARE(project.items()[3].name, QString("Mein Titel"));
+        clickObject(3);
+        auto *operation = item("objectOperation3");
+        QVERIFY(operation);
+        click(operation);
+        QTest::keyClick(w, Qt::Key_End);
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.items()[3].layer, 1);
+        QCOMPARE(project.items()[4].layer, 0);
+        auto *widthInput = item("objectWidthInput");
+        QVERIFY(widthInput);
+        click(widthInput);
+        widthInput->setProperty("inputText", "49");
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.items()[3].bounds.width(), 49.);
+        auto *xInput = item("objectXInput");
+        QVERIFY(xInput);
+        click(xInput);
+        xInput->setProperty("inputText", "61,5");
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.items()[3].bounds.x(), 61.5);
+        QVERIFY(
+            QMetaObject::invokeMethod(list, "positionViewAtIndex", Q_ARG(int, 4), Q_ARG(int, 1)));
+        QTest::qWait(50);
+        auto *check = item("objectCheck4");
+        QVERIFY(check);
+        click(check);
+        QTRY_COMPARE(project.selectedRows().size(), 2);
+        auto *groupButton = item("groupObjectsButton");
+        QVERIFY(groupButton);
+        click(groupButton);
+        QTRY_VERIFY(project.selection()["grouped"].toBool());
+        auto *scale = item("objectScaleInput");
+        QVERIFY(scale);
+        click(scale);
+        const double width = project.selectionBounds().width();
+        scale->setProperty("inputText", "200");
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.selectionBounds().width(), width * 2);
+        auto *canvas = qobject_cast<Workspace *>(item("workspace"));
+        QVERIFY(canvas);
+        QVERIFY(canvas->boundingRect().contains(canvas->selectedScreenBounds()));
+        click(xInput);
+        xInput->setProperty("inputText", "5");
+        QTest::keyClick(w, Qt::Key_Return);
+        auto *yInput = item("objectYInput");
+        QVERIFY(yInput);
+        click(yInput);
+        yInput->setProperty("inputText", "10");
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.selectionBounds().topLeft(), QPointF(5, 10));
+        click(objectName);
+        QTest::keyClick(w, Qt::Key_A, Qt::ControlModifier);
+        for (char c : QByteArray("Beschriftung"))
+            QTest::keyClick(w, c);
+        QTest::keyClick(w, Qt::Key_Return);
+        QCOMPARE(project.selection()["name"].toString(), "Beschriftung");
+        if (qEnvironmentVariableIsSet("BLAZER_OBJECT_SCREENSHOT")) {
+            QTest::qWait(80);
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_OBJECT_SCREENSHOT")));
+        }
+        const auto beforeDrag = project.selectionBounds();
+        const auto child3 = project.items()[3].bounds.topLeft(),
+                   child4 = project.items()[4].bounds.topLeft();
+        const auto dragStart =
+            canvas->mapToScene(canvas->selectedScreenBounds().center()).toPoint();
+        QTest::mousePress(w, Qt::LeftButton, {}, dragStart);
+        QTest::mouseMove(w, dragStart + QPoint(15, -15), 40);
+        QTest::mouseRelease(w, Qt::LeftButton, {}, dragStart + QPoint(15, -15));
+        QTRY_VERIFY(project.selectionBounds().topLeft() != beforeDrag.topLeft());
+        QCOMPARE(project.items()[3].bounds.topLeft() - child3,
+                 project.items()[4].bounds.topLeft() - child4);
+        QCOMPARE(project.selectionBounds().size(), beforeDrag.size());
+        auto *copy = item("copyObjectsButton");
+        QVERIFY(copy);
+        click(copy);
+        QTRY_COMPARE(project.count(), 7);
+        QCOMPARE(project.selectedRows().size(), 2);
+        auto *remove = item("deleteObjectsButton");
+        QVERIFY(remove);
+        click(remove);
+        QTRY_COMPARE(project.count(), 5);
+        QTest::keyClick(w, Qt::Key_Z, Qt::ControlModifier);
+        QTRY_COMPARE(project.count(), 7);
+        QVERIFY(project.selection()["grouped"].toBool());
         project.demo();
         auto *add = item("addRectangle");
         QVERIFY(add);

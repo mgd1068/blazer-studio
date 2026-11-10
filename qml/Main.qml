@@ -41,6 +41,27 @@ ApplicationWindow {
     font.family: "DejaVu Sans"
     font.pixelSize: 12
 
+    function revealObjectSelection() {
+        if (project.selected < 0) return
+        let rows = project.selectedRows
+        objectList.positionViewAtIndex(rows[rows.length-1], ListView.Contain)
+        objectList.positionViewAtIndex(rows[0], ListView.Contain)
+        let delegate = objectList.itemAtIndex(rows[0])
+        let viewport = setupScroll.contentItem
+        if (delegate && viewport) {
+            let point = delegate.mapToItem(viewport, 0, 0)
+            let delta = point.y < 8 ? point.y - 8 : point.y + delegate.height > viewport.height - 8 ? point.y + delegate.height - viewport.height + 8 : 0
+            viewport.contentY = Math.max(0, Math.min(viewport.contentHeight - viewport.height, viewport.contentY + delta))
+        }
+    }
+    function selectObject(index) {
+        // Commit the focused editor before changing the selected object.
+        objectList.forceActiveFocus(Qt.MouseFocusReason)
+        project.select(index)
+        page = 0
+        canvas.ensureSelectionVisible()
+        objectList.positionViewAtIndex(project.selected, ListView.Contain)
+    }
     function requestAction(action) {
         if (project.dirty) { pendingAction = action; discardDialog.open() }
         else performAction(action)
@@ -105,7 +126,12 @@ ApplicationWindow {
     onPageChanged: machine.focus(false)
     Connections {
         target: project
-        function onSelectionChanged() { if (project.selected >= 0) win.operation = project.selection.layer }
+        function onSelectionChanged() {
+            if (project.selected >= 0) {
+                if (project.selection.layer >= 0) win.operation = project.selection.layer
+                Qt.callLater(win.revealObjectSelection)
+            }
+        }
     }
     Shortcut { sequences: [StandardKey.Save]; onActivated: saveDialog.open() }
     Shortcut { sequences: [StandardKey.Open]; onActivated: win.requestAction("open") }
@@ -340,26 +366,75 @@ ApplicationWindow {
                     }
                     ListView {
                         id: objectList
+                        objectName: "objectList"
+                        currentIndex: project.selected
+                        activeFocusOnTab: true
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                                let row = Math.max(0, Math.min(project.count - 1, project.selected + (event.key === Qt.Key_Up ? -1 : 1)))
+                                win.selectObject(row)
+                                event.accepted = true
+                            }
+                        }
                         Layout.fillWidth: true; Layout.preferredHeight: Math.min(contentHeight, 230); Layout.minimumHeight: 65
                         clip: true; model: project; spacing: 3
-                        delegate: Rectangle {
+                        delegate: ItemDelegate {
                             id: objectRow
+                            objectName: "objectRow" + index
                             required property int index
                             required property string artName
                             required property string artKind
                             required property color artColor
                             required property bool artVisible
-                            width: objectList.width; height: 34; radius: 5
-                            color: project.selected === index ? (win.night ? "#2e4845" : "#eaf5f0") : "transparent"
-                            RowLayout {
-                                anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 5; spacing: 8
-                                Rectangle { width: 7; height: 7; radius: 2; color: objectRow.artColor }
-                                Text { text: objectRow.artName; elide: Text.ElideRight; Layout.fillWidth: true; color: objectRow.artVisible ? win.ink : win.muted; font.pixelSize: 11 }
-                                Text { text: objectRow.artKind === "text" ? "T" : objectRow.artKind === "svg" ? "SVG" : objectRow.artKind === "ellipse" ? "○" : "□"; color: win.muted; font.pixelSize: 11 }
+                            required property int artLayer
+                            required property string artGroup
+                            required property string artGroupName
+                            required property bool artGroupFirst
+                            width: objectList.width; height: artGroupFirst ? 94 : 64
+                            padding: 7
+                            onClicked: win.selectObject(index)
+                            background: Rectangle {
+                                radius: 5
+                                color: project.selectedRows.indexOf(objectRow.index) >= 0 ? (win.night ? "#2e4845" : "#eaf5f0") : objectRow.hovered ? win.bg : "transparent"
+                                border.color: project.selectedRows.indexOf(objectRow.index) >= 0 ? "#209b76" : "transparent"
                             }
-                            MouseArea { anchors.fill: parent; onClicked: project.select(objectRow.index) }
+                            contentItem: ColumnLayout {
+                                spacing: 4
+                                ActionButton { objectName: "objectGroup" + objectRow.index; visible: objectRow.artGroupFirst; text: "▣ " + objectRow.artGroupName; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: { objectList.forceActiveFocus(); project.selectGroup(objectRow.index); win.page = 0; canvas.ensureSelectionVisible() } }
+                                RowLayout {
+                                    Layout.fillWidth: true; spacing: 7
+                                    CheckBox { objectName: "objectCheck" + objectRow.index; implicitWidth: 20; implicitHeight: 20; checked: project.selectedRows.indexOf(objectRow.index) >= 0; onClicked: { objectList.forceActiveFocus(Qt.MouseFocusReason); project.toggleSelection(objectRow.index) } }
+                                    Rectangle { width: 7; height: 7; radius: 2; color: objectRow.artColor }
+                                    Text { text: objectRow.artName; elide: Text.ElideRight; Layout.fillWidth: true; color: objectRow.artVisible ? win.ink : win.muted; font.pixelSize: 11 }
+                                    Text { text: objectRow.artKind === "text" ? "T" : objectRow.artKind === "svg" ? "SVG" : objectRow.artKind === "ellipse" ? "○" : "□"; color: win.muted; font.pixelSize: 11 }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true; spacing: 6
+                                    Text { text: "Bearbeitung"; color: win.muted; font.pixelSize: 9; Layout.fillWidth: true }
+                                    ComboBox {
+                                        id: objectOperation
+                                        objectName: "objectOperation" + objectRow.index
+                                        model: ["Gravieren", "Schneiden"]
+                                        currentIndex: objectRow.artLayer
+                                        implicitHeight: 28; implicitWidth: 112
+                                        leftPadding: 7; rightPadding: 7
+                                        onActivated: operation => { win.selectObject(objectRow.index); project.setLayer(operation) }
+                                        contentItem: Text { text: objectOperation.displayText; color: win.ink; font.pixelSize: 10; verticalAlignment: Text.AlignVCenter; rightPadding: objectOperation.indicator.width + 5 }
+                                        indicator: Text { x: objectOperation.width - width - 7; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink; font.pixelSize: 12 }
+                                        background: Rectangle { radius: 4; color: win.bg; border.color: win.line }
+                                    }
+                                }
+                            }
+                            ToolTip.visible: hovered
+                            ToolTip.text: artName
+                            ToolTip.delay: 700
                         }
                         ScrollBar.vertical: ScrollBar { }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 5
+                        ActionButton { objectName: "groupObjectsButton"; text: "Gruppieren"; compact: true; dark: win.night; Layout.fillWidth: true; enabled: project.selectedRows.length > 1 && !project.selection.grouped; onClicked: { objectList.forceActiveFocus(); project.groupSelection() } }
+                        ActionButton { objectName: "ungroupObjectsButton"; text: "Auflösen"; compact: true; dark: win.night; enabled: !!project.selection.grouped; onClicked: { objectList.forceActiveFocus(); project.ungroupSelection() } }
                     }
                     RowLayout {
                         Layout.fillWidth: true; spacing: 5
@@ -370,8 +445,8 @@ ApplicationWindow {
                             MenuItem { text: "Ellipse"; onTriggered: project.addShape("ellipse") }
                             MenuItem { text: "Text"; onTriggered: project.addShape("text") }
                         }
-                        ActionButton { text: "Kopie"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.duplicateSelected() }
-                        ActionButton { text: "−"; hint: "Ausgewähltes Objekt löschen"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.removeSelected() }
+                        ActionButton { objectName: "copyObjectsButton"; text: "Kopie"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.duplicateSelected() }
+                        ActionButton { objectName: "deleteObjectsButton"; text: "−"; hint: "Auswahl löschen"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.removeSelected() }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     SectionLabel { text: "BEARBEITUNGEN"; dark: win.night }
@@ -396,7 +471,7 @@ ApplicationWindow {
                         }
                     }
                     Item { Layout.fillHeight: true }
-                    Text { text: "Blazer Studio · 0.1\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
+                    Text { text: "Blazer Studio · 0.3\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
                     }
                 }
             }
@@ -422,7 +497,7 @@ ApplicationWindow {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     currentIndex: win.page === 2 ? 1 : 0
                     Item {
-                        Workspace { id: canvas; anchors.fill: parent; document: project; simulator: machine; preview: win.page === 1; dark: win.night }
+                        Workspace { id: canvas; objectName: "workspace"; anchors.fill: parent; document: project; simulator: machine; preview: win.page === 1; dark: win.night }
                         Rectangle {
                             anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 20
                             width: 168; height: 30; radius: 15; color: win.panel; border.color: win.line
@@ -529,6 +604,7 @@ ApplicationWindow {
                 Rectangle { width: 1; height: parent.height; color: win.line }
                 ScrollView {
                     id: inspectorScroll
+                    objectName: "inspectorScroll"
                     anchors.fill: parent; clip: true; contentWidth: availableWidth
                     ColumnLayout {
                         width: inspectorScroll.availableWidth; spacing: 15
@@ -555,7 +631,8 @@ ApplicationWindow {
                             Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                             SectionLabel { text: "AUSGEWÄHLTES OBJEKT"; dark: win.night }
                             TextField {
-                                Layout.fillWidth: true; enabled: project.selected >= 0
+                                objectName: "objectNameInput"
+                                Layout.fillWidth: true; enabled: project.selected >= 0 && project.selection.kind !== "selection"
                                 text: project.selection.name || "Nichts ausgewählt"
                                 color: win.ink; font.pixelSize: 12; implicitHeight: 34; selectByMouse: true
                                 background: Rectangle { radius: 5; color: win.bg; border.color: win.line }
@@ -564,14 +641,17 @@ ApplicationWindow {
                             GridLayout {
                                 Layout.fillWidth: true; columns: 2; columnSpacing: 8; rowSpacing: 9
                                 enabled: project.selected >= 0
-                                NumberField { label: "X"; value: project.selection.x || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("x",n) }
-                                NumberField { label: "Y"; value: project.selection.y || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("y",n) }
-                                NumberField { label: "B"; value: project.selection.width || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("width",n) }
+                                NumberField { objectName: "objectXInput"; label: "X"; value: project.selection.x || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("x",n) }
+                                NumberField { objectName: "objectYInput"; label: "Y"; value: project.selection.y || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("y",n) }
+                                NumberField { objectName: "objectWidthInput"; label: "B"; value: project.selection.width || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("width",n) }
                                 NumberField { label: "H"; value: project.selection.height || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("height",n) }
                             }
                             Text { visible: project.issues.length > 0; text: project.issues.join("\n"); color: "#cf645b"; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { text: "Skalieren · 100 % = aktuelle Größe"; color: win.muted; font.pixelSize: 9; Layout.fillWidth: true }
+                            NumberField { objectName: "objectScaleInput"; label: "S"; value: 100; unit: "%"; dark: win.night; Layout.fillWidth: true; enabled: project.selected >= 0; onEdited: n => project.scaleSelection(n) }
                             Text { text: "Koordinaten: links unten · Y nach oben"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             TextField {
+                                objectName: "objectTextInput"
                                 visible: project.selection.kind === "text"; Layout.fillWidth: true
                                 text: project.selection.text || ""; color: win.ink; font.pixelSize: 12; selectByMouse: true
                                 background: Rectangle { radius: 5; color: win.bg; border.color: win.line }
@@ -579,8 +659,8 @@ ApplicationWindow {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
-                                ActionButton { text: "Gravur"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 0; enabled: project.selected >= 0; onClicked: project.setLayer(0) }
-                                ActionButton { text: "Schnitt"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 1; enabled: project.selected >= 0; onClicked: project.setLayer(1) }
+                                ActionButton { objectName: "engraveObjectButton"; text: "Gravieren"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 0; enabled: project.selected >= 0; onClicked: project.setLayer(0) }
+                                ActionButton { objectName: "cutObjectButton"; text: "Schneiden"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 1; enabled: project.selected >= 0; onClicked: project.setLayer(1) }
                             }
                             ActionButton { text: project.selection.visible ? "Objekt ausblenden" : "Objekt einblenden"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: project.selected >= 0; onClicked: project.toggleVisible(project.selected) }
                             Rectangle { Layout.fillWidth: true; height: 1; color: win.line }

@@ -16,7 +16,10 @@ void Workspace::setDocument(Document *d) {
     m_document = d;
     if (d) {
         connect(d, &Document::changed, this, [this] { update(); });
-        connect(d, &Document::selectionChanged, this, [this] { update(); });
+        connect(d, &Document::selectionChanged, this, [this] {
+            ensureSelectionVisible();
+            update();
+        });
     }
     emit documentChanged();
     update();
@@ -41,15 +44,43 @@ QPointF Workspace::toWorld(QPointF p) const {
 void Workspace::zoomBy(double factor) {
     if (!std::isfinite(factor) || factor <= 0)
         return;
-    m_zoom = std::clamp(m_zoom * factor, .45, 5.);
+    m_zoom = std::clamp(m_zoom * factor, .02, 5.);
     update();
     emit zoomChanged();
+}
+QRectF Workspace::selectedScreenBounds() const {
+    if (!m_document || m_document->selected() < 0)
+        return {};
+    const auto r = Geometry::worldToCanvas(m_document->selectionBounds());
+    return {origin() + r.topLeft() * scale(), r.size() * scale()};
+}
+void Workspace::ensureSelectionVisible() {
+    if (!m_document || m_document->selected() < 0 || width() < 100 || height() < 100)
+        return;
+    const QRectF visible(28, 28, width() - 56, height() - 90);
+    auto selected = selectedScreenBounds().adjusted(-8, -8, 8, 8);
+    if (visible.contains(selected))
+        return;
+    const double factor =
+        std::min(visible.width() / selected.width(), visible.height() / selected.height());
+    if (factor < 1) {
+        m_zoom = std::clamp(m_zoom * factor * .95, .02, 5.);
+        emit zoomChanged();
+    }
+    selected = selectedScreenBounds();
+    m_pan += visible.center() - selected.center();
+    update();
+}
+void Workspace::geometryChange(const QRectF &now, const QRectF &before) {
+    QQuickPaintedItem::geometryChange(now, before);
+    ensureSelectionVisible();
 }
 void Workspace::wheelEvent(QWheelEvent *e) {
     zoomBy(e->angleDelta().y() > 0 ? 1.12 : 1 / 1.12);
     e->accept();
 }
 void Workspace::mousePressEvent(QMouseEvent *e) {
+    forceActiveFocus(Qt::MouseFocusReason);
     m_last = e->position();
     if (e->button() == Qt::MiddleButton) {
         m_panning = true;
@@ -61,8 +92,18 @@ void Workspace::mousePressEvent(QMouseEvent *e) {
     for (int i = m_document->items().size() - 1; i >= 0; --i) {
         auto &a = m_document->items()[i];
         if (a.visible && a.bounds.adjusted(-1, -1, 1, 1).contains(pos)) {
-            m_document->select(i);
-            m_offset = pos - a.bounds.topLeft();
+            const bool toggle = e->modifiers().testFlag(Qt::ControlModifier) ||
+                                e->modifiers().testFlag(Qt::ShiftModifier);
+            if (toggle)
+                m_document->toggleSelection(i);
+            else if (!a.groupId.isEmpty() && !e->modifiers().testFlag(Qt::AltModifier))
+                m_document->selectGroup(i);
+            else
+                m_document->select(i);
+            if (!m_document->isSelected(i))
+                return;
+            // Auto-reveal may have changed the viewport during selection.
+            m_offset = toWorld(e->position()) - m_document->selectionBounds().topLeft();
             m_document->beginMove();
             m_drag = true;
             return;
@@ -116,6 +157,7 @@ void Workspace::paint(QPainter *p) {
     for (int y = 0; y <= 150; y += 25)
         p->drawLine(QPointF(o.x(), o.y() + y * s), QPointF(o.x() + 200 * s, o.y() + y * s));
     if (m_document) {
+        p->setClipRect(boundingRect());
         p->translate(o);
         p->scale(s, s);
         int idx = 0;
@@ -124,12 +166,13 @@ void Workspace::paint(QPainter *p) {
             Artwork a = world;
             a.bounds = Geometry::worldToCanvas(world.bounds);
             const bool enabled = m_document->layers()[a.layer].toMap()["enabled"].toBool();
-            if (!a.visible || (!enabled && m_preview)) {
+            const bool selected = m_document->isSelected(idx);
+            if ((!a.visible && (!selected || m_preview)) || (!enabled && m_preview)) {
                 ++idx;
                 continue;
             }
             QColor c = m_document->layerColor(a.layer);
-            p->setOpacity(enabled ? 1 : .3);
+            p->setOpacity(!a.visible ? .18 : enabled ? 1 : .3);
             if (m_preview) {
                 p->setPen(QPen(QColor("#a4b6bb"), .35, Qt::DashLine));
                 p->drawLine(previous, a.bounds.topLeft());
@@ -175,7 +218,7 @@ void Workspace::paint(QPainter *p) {
                 p->setFont(n);
                 p->drawText(QRectF(a.bounds.topLeft() - QPointF(1.4, 1.4), QSizeF(2.8, 2.8)),
                             Qt::AlignCenter, QString::number(idx + 1));
-            } else if (idx == m_document->selected()) {
+            } else if (selected) {
                 p->setBrush(Qt::NoBrush);
                 p->setPen(QPen(QColor("#1c956f"), .35, Qt::DashLine));
                 p->drawRect(a.bounds.adjusted(-1.5, -1.5, 1.5, 1.5));
@@ -186,6 +229,12 @@ void Workspace::paint(QPainter *p) {
                     p->drawRect(QRectF(point - QPointF(.9, .9), QSizeF(1.8, 1.8)));
             }
             ++idx;
+        }
+        if (!m_preview && m_document->selectedRows().size() > 1) {
+            p->setPen(QPen(QColor("#1c956f"), .6, Qt::DashLine));
+            p->setBrush(Qt::NoBrush);
+            p->drawRect(
+                Geometry::worldToCanvas(m_document->selectionBounds()).adjusted(-2, -2, 2, 2));
         }
         p->resetTransform();
     }

@@ -2,6 +2,7 @@
 #include "geometry.h"
 #include "materiallibrary.h"
 #include "simulator.h"
+#include "workspace.h"
 #include <QAbstractItemModelTester>
 #include <QFile>
 #include <QJsonArray>
@@ -265,6 +266,130 @@ class CoreTest : public QObject {
         QCOMPARE(d.items().last().asset, asset);
         d.duplicateSelected();
         QCOMPARE(d.items().last().asset, asset);
+    }
+    void groupsAndTransforms() {
+        Document d;
+        QAbstractItemModelTester tester(&d, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        d.select(3);
+        d.toggleSelection(4);
+        QCOMPARE(d.selectedRows().size(), 2);
+        const auto original = d.items();
+        d.groupSelection();
+        QVERIFY(d.selection()["grouped"].toBool());
+        d.setProperty("name", "Beschriftung");
+        const auto bounds = d.selectionBounds();
+        d.setProperty("x", bounds.x() + 10.);
+        QCOMPARE(d.items()[3].bounds.x(), original[3].bounds.x() + 10.);
+        QCOMPARE(d.items()[4].bounds.x(), original[4].bounds.x() + 10.);
+        QCOMPARE(d.items()[0].bounds, original[0].bounds);
+        d.scaleSelection(200);
+        QCOMPARE(d.selectionBounds().width(), bounds.width() * 2);
+        QCOMPARE(d.items()[4].bounds.width(), original[4].bounds.width() * 2);
+        d.undo();
+        QCOMPARE(d.selectionBounds().width(), bounds.width());
+        d.redo();
+        const auto group = d.items()[3].groupId;
+        d.duplicateSelected();
+        QCOMPARE(d.count(), 7);
+        QCOMPARE(d.selectedRows().size(), 2);
+        QVERIFY(d.selection()["grouped"].toBool());
+        QVERIFY(d.items()[5].groupId != group);
+        QCOMPARE(d.items()[5].groupId, d.items()[6].groupId);
+        d.removeSelected();
+        QCOMPARE(d.count(), 5);
+        d.undo();
+        QCOMPARE(d.count(), 7);
+        d.ungroupSelection();
+        QVERIFY(d.items()[5].groupId.isEmpty());
+        QVERIFY(d.items()[6].groupId.isEmpty());
+        d.selectGroup(3);
+        QCOMPARE(d.selectedRows().size(), 2);
+        d.setLayer(1);
+        QCOMPARE(d.items()[3].layer, 1);
+        QCOMPARE(d.items()[4].layer, 1);
+        d.select(4);
+        QCOMPARE(d.selectedRows().size(), 1);
+        d.setLayer(0);
+        QCOMPARE(d.items()[3].layer, 1);
+        QCOMPARE(d.items()[4].layer, 0);
+        const auto before = d.items()[4].bounds;
+        d.scaleSelection(0);
+        d.scaleSelection(1e300);
+        QCOMPARE(d.items()[4].bounds, before);
+    }
+    void groupPersistenceAndValidation() {
+        QTemporaryDir dir;
+        auto url = QUrl::fromLocalFile(dir.filePath("group.blazer"));
+        Document d;
+        d.select(1);
+        d.toggleSelection(3);
+        d.groupSelection();
+        d.setProperty("name", "Meine Gruppe");
+        QVERIFY(d.save(url));
+        Document loaded;
+        QVERIFY(loaded.open(url));
+        QCOMPARE(loaded.selectedRows().size(), 2);
+        QVERIFY(loaded.selection()["grouped"].toBool());
+        QCOMPARE(loaded.selection()["name"].toString(), "Meine Gruppe");
+        loaded.beginMove();
+        auto pos = loaded.selectionBounds().topLeft();
+        loaded.moveSelection(pos + QPointF(10, 20));
+        loaded.finishMove();
+        loaded.undo();
+        QCOMPARE(loaded.selectionBounds().topLeft(), pos);
+        QVERIFY(!loaded.dirty());
+        QFile f(url.toLocalFile());
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        auto root = QJsonDocument::fromJson(f.readAll()).object();
+        f.close();
+        auto arr = root["objects"].toArray();
+        auto obj = arr[2].toObject();
+        obj["groupName"] = "Wrong name";
+        arr[2] = obj;
+        root["objects"] = arr;
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write(QJsonDocument(root).toJson());
+        f.close();
+        QVERIFY(!loaded.open(url));
+        QCOMPARE(loaded.selection()["name"].toString(), "Meine Gruppe");
+    }
+    void regroupingPreservesValidGroups() {
+        Document d;
+        d.select(0);
+        d.toggleSelection(1);
+        d.toggleSelection(2);
+        d.toggleSelection(3);
+        d.groupSelection();
+        d.select(1);
+        d.toggleSelection(4);
+        d.groupSelection();
+        QTemporaryDir dir;
+        auto url = QUrl::fromLocalFile(dir.filePath("regroup.blazer"));
+        QVERIFY(d.save(url));
+        Document loaded;
+        QVERIFY(loaded.open(url));
+        QCOMPARE(loaded.count(), 5);
+        QCOMPARE(loaded.selectedRows().size(), 2);
+        loaded.selectGroup(2);
+        QCOMPARE(loaded.selectedRows().size(), 3);
+    }
+    void selectionRevealAndNumericalSize() {
+        Document d;
+        Workspace view;
+        view.setWidth(700);
+        view.setHeight(600);
+        view.setDocument(&d);
+        d.select(3);
+        d.setProperty("x", 400.);
+        d.setProperty("y", 300.);
+        view.ensureSelectionVisible();
+        QVERIFY(QRectF(0, 0, 700, 600).contains(view.selectedScreenBounds()));
+        d.setProperty("width", 1000.);
+        view.ensureSelectionVisible();
+        QVERIFY(QRectF(0, 0, 700, 600).contains(view.selectedScreenBounds()));
+        d.toggleVisible(3);
+        QVERIFY(!d.items()[3].visible);
+        QVERIFY(!view.selectedScreenBounds().isEmpty());
     }
     void editingAndHistory() {
         Document d;

@@ -37,6 +37,8 @@ class Workspace : public QQuickPaintedItem {
         emit zoomChanged();
     }
     Q_INVOKABLE void zoomBy(double factor);
+    Q_INVOKABLE void ensureSelectionVisible();
+    QRectF selectedScreenBounds() const;
     void paint(QPainter *p) override;
   signals:
     void documentChanged();
@@ -46,6 +48,7 @@ class Workspace : public QQuickPaintedItem {
     void zoomChanged();
 
   protected:
+    void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     void mousePressEvent(QMouseEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;
     void mouseReleaseEvent(QMouseEvent *) override;

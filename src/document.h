@@ -13,6 +13,7 @@ struct Artwork {
     int layer = 0;
     bool visible = true;
     std::shared_ptr<const SvgAsset> asset;
+    QString groupId{}, groupName{};
     bool operator==(const Artwork &) const = default;
 };
 
@@ -21,6 +22,7 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(int count READ count NOTIFY changed)
     Q_PROPERTY(int selected READ selected WRITE select NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selection READ selection NOTIFY selectionChanged)
+    Q_PROPERTY(QVariantList selectedRows READ selectedRows NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList layers READ layers NOTIFY changed)
     Q_PROPERTY(QString title READ title NOTIFY changed)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
@@ -33,15 +35,32 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QVariantMap material READ material NOTIFY changed)
     Q_PROPERTY(bool materialModified READ materialModified NOTIFY changed)
   public:
-    enum Roles { NameRole = Qt::UserRole + 1, KindRole, ColorRole, VisibleRole };
+    enum Roles {
+        NameRole = Qt::UserRole + 1,
+        KindRole,
+        ColorRole,
+        VisibleRole,
+        LayerRole,
+        GroupRole,
+        GroupNameRole,
+        GroupFirstRole
+    };
     explicit Document(QObject *parent = nullptr);
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
     int count() const { return m_items.size(); }
     int selected() const { return m_selected; }
-    void select(int row);
+    Q_INVOKABLE void select(int row);
     QVariantMap selection() const;
+    QVariantList selectedRows() const;
+    QRectF selectionBounds() const;
+    bool isSelected(int row) const { return m_selection.contains(row); }
+    Q_INVOKABLE void toggleSelection(int row);
+    Q_INVOKABLE void selectGroup(int row);
+    Q_INVOKABLE void groupSelection();
+    Q_INVOKABLE void ungroupSelection();
+    Q_INVOKABLE void scaleSelection(double percent);
     QVariantList layers() const { return m_layers; }
     QString title() const { return m_title; }
     QString message() const { return m_message; }
@@ -87,6 +106,7 @@ class Document : public QAbstractListModel {
         QString title;
         int selected = -1;
         QVariantMap material;
+        QList<int> selection;
     };
     Snapshot snapshot() const;
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
@@ -96,12 +116,15 @@ class Document : public QAbstractListModel {
     void checkpoint();
     void refresh(int row = -1);
     void markClean();
+    bool transformSelection(const QRectF &bounds, bool history = true);
+    void normalizeGroups();
     bool canAppend(const Artwork &item);
     void appendArtwork(const Artwork &item);
     QList<Artwork> m_items;
     QVariantList m_layers;
     QVariantMap m_material;
     int m_selected = -1;
+    QList<int> m_selection;
     QString m_title = "Werkstattschild", m_message;
     bool m_dirty = false;
     Snapshot m_saved;
