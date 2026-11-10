@@ -42,6 +42,33 @@ class CoreTest : public QObject {
         for (const auto &name : reopened.names())
             QVERIFY(!name.trimmed().isEmpty());
     }
+    void toolHeadFiltering() {
+        QTemporaryDir dir;
+        MaterialLibrary library(dir.filePath("materials.json"));
+        QCOMPARE(library.modulePowers(), QVariantList({1., 5., 10.}));
+        QCOMPARE(library.rowsForModule(5).size(), 27);
+        QCOMPARE(library.rowsForModule(10).size(), 25);
+        QCOMPARE(library.rowsForModule(1).size(), 13);
+        for (double watts : {1., 5., 10.}) {
+            for (const auto &row : library.rowsForModule(watts))
+                QCOMPARE(library.profileAt(row.toInt())["moduleW"].toDouble(), watts);
+        }
+        QVERIFY(library.rowsForModule(20).isEmpty());
+        QVERIFY(library.rowsForModule(std::numeric_limits<double>::quiet_NaN()).isEmpty());
+        auto profile = library.newProfile();
+        profile["moduleW"] = 20.;
+        const auto id = library.saveProfile(profile);
+        QVERIFY(!id.isEmpty());
+        QVERIFY(library.modulePowers().contains(20.));
+        QCOMPARE(library.rowsForModule(20), QVariantList({library.indexOf(id)}));
+        profile = library.profileAt(library.indexOf(id));
+        profile["moduleW"] = 10.;
+        QVERIFY(!library.saveProfile(profile).isEmpty());
+        QVERIFY(!library.modulePowers().contains(20.));
+        QCOMPARE(library.rowsForModule(10).size(), 26);
+        QVERIFY(library.removeProfile(id));
+        QCOMPARE(library.rowsForModule(10).size(), 25);
+    }
     void completeManufacturerLibrary() {
         QTemporaryDir dir;
         MaterialLibrary library(dir.filePath("materials.json"));

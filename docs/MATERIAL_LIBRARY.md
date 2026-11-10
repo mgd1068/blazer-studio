@@ -1,6 +1,10 @@
 # Materialbibliothek
 
-Links unter **Material** ein Profil auswählen. Die Auswahlliste öffnet sich über der Arbeitsfläche mit bis zu 560 Pixeln Breite und bleibt innerhalb des Fensters. Lange Namen werden sowohl in der Liste als auch im geschlossenen Feld umgebrochen. Dadurch werden Gravur- und Schnittparameter samt Ausgabeschaltern ins aktuelle Projekt übernommen. **Bearbeiten** öffnet Namen, Maschinenmodell, Modulleistung, Materialstärke, Geschwindigkeit, Leistung, Durchgänge, Gravurintervall und Notizen. Dezimalkomma ist erlaubt.
+Links zuerst unter **Toolkopf** das Modul auswählen, anschließend unter **Material** ein passendes Profil. Standard ist das eingerichtete **5-W-Modul**. **1 W**, **5 W** und **10 W** stehen zur Auswahl; weitere in eigenen Profilen eingetragene Modulleistungen erscheinen ebenfalls. Die Materialliste enthält ausschließlich Profile mit exakt derselben Modulleistung. Bei unverändertem Startbestand sind dies 27 Profile für 5 W einschließlich Beispiel, 25 für 10 W und 13 für 1 W.
+
+Ein Toolkopf-Wechsel filtert zunächst nur die Liste. Die bisherigen Projektparameter bleiben erhalten, bis ein Material ausgewählt wird; bei abweichendem Projektprofil wird dessen Modulleistung angezeigt. Ein angewendetes Profil einer anderen Leistung stellt den Filter entsprechend um. Beim Anlegen eines eigenen Profils wird der ausgewählte Kopf vorbelegt. Fehlen Profile für einen Kopf, lassen sie sich mit **+** anlegen.
+
+Die Auswahlliste öffnet sich über der Arbeitsfläche mit bis zu 560 Pixeln Breite und bleibt innerhalb des Fensters. Lange Namen werden sowohl in der Liste als auch im geschlossenen Feld umgebrochen. Die Auswahl eines Profils übernimmt Gravur- und Schnittparameter samt Ausgabeschaltern ins aktuelle Projekt. **Bearbeiten** öffnet Namen, Maschinenmodell, Modulleistung, Materialstärke, Geschwindigkeit, Leistung, Durchgänge, Gravurintervall und Notizen. Dezimalkomma ist erlaubt.
 
 **Profil speichern & übernehmen** speichert die Bibliothek und aktualisiert das Projekt. **Abbrechen** verwirft den Entwurf. **+** legt eine eigene Kopie an; im Menü **⋯** lassen sich Profile duplizieren und nach Bestätigung löschen. Auch eine vollständig geleerte Bibliothek erlaubt neue Profile.
 

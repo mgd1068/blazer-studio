@@ -2,6 +2,7 @@
   "name": "Blaze X M3",
   "profileName": "M3",
   "controller": "GRBL",
+  "modulePowerW": 5,
   "width": 200,
   "height": 150,
   "baudRate": 115200,

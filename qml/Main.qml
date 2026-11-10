@@ -15,6 +15,15 @@ ApplicationWindow {
     property int page: 0
     property int operation: 1
     property real step: 10
+    property real selectedModuleW: deviceProfile.modulePowerW || 5
+    readonly property real appliedModuleW: project.material.moduleW || deviceProfile.modulePowerW || 5
+    onAppliedModuleWChanged: selectedModuleW = appliedModuleW
+    readonly property var toolHeadPowers: { let names = materialLibrary.names; return materialLibrary.modulePowers() }
+    readonly property var toolHeadNames: toolHeadPowers.map(watts => watts + " W" + (watts === deviceProfile.modulePowerW ? " · eingerichtet" : ""))
+    readonly property var materialRows: { let names = materialLibrary.names; return materialLibrary.rowsForModule(selectedModuleW) }
+    readonly property var materialNames: materialRows.map(row => materialLibrary.profileAt(row).name)
+    readonly property int materialRow: materialRows.indexOf(libraryIndex)
+    readonly property bool projectHeadMatches: appliedModuleW === selectedModuleW
     property string pendingAction: ""
     property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
@@ -52,11 +61,17 @@ ApplicationWindow {
     }
     function applyLibraryProfile(index) {
         let profile = materialLibrary.profileAt(index)
-        if (profile.id) project.applyMaterial(profile)
+        if (profile.id) {
+            selectedModuleW = profile.moduleW
+            project.applyMaterial(profile)
+        }
     }
     function editMaterial(asNew) {
-        let profile = libraryIndex >= 0 ? materialLibrary.profileAt(libraryIndex) : project.material
-        if (!profile.id) profile = materialLibrary.newProfile()
+        let profile = projectHeadMatches ? (libraryIndex >= 0 ? materialLibrary.profileAt(libraryIndex) : project.material) : ({})
+        if (!profile.id) {
+            profile = materialLibrary.newProfile()
+            profile.moduleW = selectedModuleW
+        }
         materialEditor.edit(profile, asNew)
     }
     MaterialEditor {
@@ -219,6 +234,23 @@ ApplicationWindow {
                     }
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true
+                        Text { text: "Toolkopf"; color: win.muted; font.pixelSize: 11 }
+                        ComboBox {
+                            id: toolHeadChoice
+                            objectName: "toolHeadChoice"
+                            Layout.fillWidth: true
+                            implicitHeight: 38
+                            leftPadding: 10; rightPadding: 10
+                            model: win.toolHeadNames
+                            // ComboBox selects row 0 during a model reset; restore the bound selection afterwards.
+                            onModelChanged: Qt.callLater(function() { toolHeadChoice.currentIndex = Qt.binding(function() { return win.toolHeadPowers.indexOf(win.selectedModuleW) }) })
+                            currentIndex: win.toolHeadPowers.indexOf(win.selectedModuleW)
+                            displayText: currentIndex >= 0 ? currentText : win.selectedModuleW + " W"
+                            onActivated: index => win.selectedModuleW = win.toolHeadPowers[index]
+                            contentItem: Text { text: toolHeadChoice.displayText; color: win.ink; font: toolHeadChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: toolHeadChoice.indicator.width + 8 }
+                            indicator: Text { x: toolHeadChoice.width - width - 10; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink; font.pixelSize: 14 }
+                            background: Rectangle { color: win.night ? "#202d37" : "#f7f9fa"; radius: 5; border.color: toolHeadChoice.activeFocus ? "#209b76" : win.line }
+                        }
                         Text { text: "Material"; color: win.muted; font.pixelSize: 11 }
                         ComboBox {
                             id: materialChoice
@@ -271,22 +303,26 @@ ApplicationWindow {
                                 }
                                 background: Rectangle { color: win.panel; border.color: win.line; radius: 6 }
                             }
-                            model: materialLibrary.names
-                            currentIndex: win.libraryIndex
-                            displayText: currentIndex >= 0 ? currentText : (project.material.name || "Material wählen")
-                            onActivated: index => win.applyLibraryProfile(index)
+                            model: win.materialNames
+                            onModelChanged: Qt.callLater(function() { materialChoice.currentIndex = Qt.binding(function() { return win.materialRow }) })
+                            enabled: win.materialRows.length > 0
+                            currentIndex: win.materialRow
+                            displayText: currentIndex >= 0 ? currentText : (win.projectHeadMatches ? (project.material.name || "Material wählen") : "Material für " + win.selectedModuleW + " W wählen")
+                            onActivated: index => win.applyLibraryProfile(win.materialRows[index])
                         }
                         RowLayout {
                             Layout.fillWidth: true; spacing: 4
-                            ActionButton { objectName: "editMaterialButton"; text: "Bearbeiten"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: win.libraryIndex >= 0; onClicked: win.editMaterial(false) }
+                            ActionButton { objectName: "editMaterialButton"; text: "Bearbeiten"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: win.materialRow >= 0; onClicked: win.editMaterial(false) }
                             ActionButton { objectName: "newMaterialButton"; text: "+"; hint: "Eigenes Profil als Kopie anlegen"; dark: win.night; compact: true; onClicked: win.editMaterial(true) }
                             ActionButton { text: "⋯"; dark: win.night; compact: true; onClicked: materialMenu.popup() }
                             Menu {
                                 id: materialMenu
-                                MenuItem { text: "Profil duplizieren"; enabled: win.libraryIndex >= 0; onTriggered: { let id = materialLibrary.duplicateProfile(win.libraryIndex); if (id) win.applyLibraryProfile(materialLibrary.indexOf(id)) } }
-                                MenuItem { text: "Profil aus Bibliothek löschen"; enabled: win.libraryIndex >= 0; onTriggered: deleteMaterialDialog.open() }
+                                MenuItem { text: "Profil duplizieren"; enabled: win.materialRow >= 0; onTriggered: { let id = materialLibrary.duplicateProfile(win.libraryIndex); if (id) win.applyLibraryProfile(materialLibrary.indexOf(id)) } }
+                                MenuItem { text: "Profil aus Bibliothek löschen"; enabled: win.materialRow >= 0; onTriggered: deleteMaterialDialog.open() }
                             }
                         }
+                        Text { visible: win.materialRows.length === 0; text: "Noch kein Materialprofil für diesen Kopf · mit + anlegen"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { visible: !win.projectHeadMatches; text: "Projektprofil: " + win.appliedModuleW + " W · passendes Material wählen"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Text { text: project.materialModified ? "Projektwerte weichen vom Profil ab" : (project.material.model !== "M3" ? "M3 Pro · Zuordnung zum M3 offen" : "Eigene Werte · noch nicht am Material geprüft"); color: project.materialModified ? "#bd8b40" : win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Text { visible: !!project.material.sourceParameters && project.material.sourceParameters.passes === null; text: "Gravur-Durchgänge: keine Herstellerangabe · Projektwert " + project.layers[0].passes; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Text { visible: materialLibrary.message.length > 0; text: materialLibrary.message; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }

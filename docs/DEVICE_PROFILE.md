@@ -6,6 +6,7 @@ Quelle: `~/.config/LightBurn/prefs.ini`, ein Geräteprofil mit Anzeigename **M3*
 
 | Eigenschaft | Hinterlegter Wert |
 |---|---|
+| Eingerichtetes Modul | 5 W laut vorhandenen Projekthinweisen; Voreinstellung der Toolkopf-Auswahl |
 | Arbeitsraum | 200 × 150 mm |
 | Controller/Transport | GRBL / seriell |
 | Baudrate | 115200 |
@@ -21,7 +22,7 @@ Das bereinigte Profil liegt in `profiles/blaze-x-m3.json` und wird in die Anwend
 
 Im Prototyp erfolgt jede Geräteaktion über `Simulator`. Es gibt weder eine serielle Implementierung noch eine GCode-Ausgabe. Die voreingestellten Schnitt-/Gravurwerte des Beispiels sind Layout-Demowerte und keine geprüften Materialrezepte.
 
-Objektkoordinaten werden in diesem Entwurf ab der linken oberen Ecke gespeichert; der Maschinenmarker benutzt die linke untere Ecke. Die Bedienoberfläche kennzeichnet diesen Unterschied. Vor echter Geräteanbindung muss eine einheitlich geprüfte Koordinatentransformation eingeführt werden.
+Seit Projektformat 2 verwenden Objektkoordinaten und Maschinenmarker einheitlich Millimeter mit Ursprung links unten. Dateien der Version 1 werden beim Öffnen umgerechnet.
 
 ## Ergänzte Herstellerquelle
 

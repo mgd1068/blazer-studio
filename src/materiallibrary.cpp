@@ -12,6 +12,7 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
+#include <algorithm>
 #include <cmath>
 
 // Referencing the initializer retains the bundled catalog in static-library consumers/tests.
@@ -240,6 +241,28 @@ QStringList MaterialLibrary::names() const {
     for (const auto &p : m_profiles)
         names << p.toMap()["name"].toString();
     return names;
+}
+QVariantList MaterialLibrary::modulePowers() const {
+    QList<double> powers{1., 5., 10.};
+    for (const auto &p : m_profiles) {
+        const auto watts = p.toMap()["moduleW"].toDouble();
+        if (!powers.contains(watts))
+            powers.append(watts);
+    }
+    std::sort(powers.begin(), powers.end());
+    QVariantList result;
+    for (double watts : powers)
+        result.append(watts);
+    return result;
+}
+QVariantList MaterialLibrary::rowsForModule(double watts) const {
+    QVariantList rows;
+    if (!std::isfinite(watts))
+        return rows;
+    for (int row = 0; row < m_profiles.size(); ++row)
+        if (m_profiles[row].toMap()["moduleW"].toDouble() == watts)
+            rows.append(row);
+    return rows;
 }
 QVariantMap MaterialLibrary::profileAt(int row) const {
     return row >= 0 && row < m_profiles.size() ? m_profiles[row].toMap() : QVariantMap{};

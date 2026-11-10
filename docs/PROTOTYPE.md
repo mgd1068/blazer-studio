@@ -15,6 +15,7 @@ Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** 
 - Rechtecke, Ellipsen und Text anlegen; auswählen, ziehen, kopieren, ausblenden und löschen.
 - Position/Größe numerisch ändern, Textinhalt bearbeiten, Gravur/Schnitt zuweisen.
 - Zwei Bearbeitungen mit Geschwindigkeit, Sollleistung, Durchgängen und Ausgabeschalter.
+- Toolkopf-Auswahl mit 5 W als Voreinstellung; Materialliste nach Modulleistung gefiltert.
 - Persistente Materialbibliothek mit allen 64 Herstellervorgaben als Profilen: auswählen, bearbeiten, kopieren, anlegen und löschen; Gravurintervall, Modell, Modul, Stärke und Notizen. Profilstand bleibt im Projekt erhalten.
 - Einheitliche Millimeterkoordinaten mit Ursprung unten links; Rahmenfahrt um aktive Objektgrenzen.
 - Herstellerreferenz mit 64 Materialeinträgen für M3 Pro (5/10/1 W), getrennt von den aktiven Projektwerten; Quelle und offene Modellzuordnung sichtbar.

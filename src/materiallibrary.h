@@ -13,6 +13,8 @@ class MaterialLibrary : public QObject {
     QStringList names() const;
     int count() const { return m_profiles.size(); }
     QString message() const { return m_message; }
+    Q_INVOKABLE QVariantList modulePowers() const;
+    Q_INVOKABLE QVariantList rowsForModule(double watts) const;
     Q_INVOKABLE QVariantMap profileAt(int row) const;
     Q_INVOKABLE int indexOf(const QString &id) const;
     Q_INVOKABLE QString saveProfile(QVariantMap profile);
