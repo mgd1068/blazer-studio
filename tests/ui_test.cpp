@@ -52,6 +52,7 @@ class UiTest : public QObject {
             return visit(w->contentItem());
         };
         auto click = [w](QQuickItem *i) {
+            QTest::qWait(50);
             QTest::mouseClick(w, Qt::LeftButton, {},
                               i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint());
         };
@@ -69,10 +70,50 @@ class UiTest : public QObject {
         auto *choice = item("materialChoice");
         QVERIFY(choice);
         click(choice);
+        auto *popup = w->findChild<QObject *>("materialPopup");
+        QVERIFY(popup);
+        QTRY_VERIFY(popup->property("visible").toBool());
+        QVERIFY(popup->property("width").toDouble() > choice->width());
+        auto verifyMaterialText = [&]() {
+            QList<QQuickItem *> texts;
+            std::function<void(QQuickItem *)> collect = [&](QQuickItem *node) {
+                if (node->objectName() == "materialOptionText")
+                    texts.append(node);
+                for (auto *child : node->childItems())
+                    collect(child);
+            };
+            collect(w->contentItem());
+            QVERIFY(!texts.isEmpty());
+            for (auto *text : texts) {
+                if (text->isVisible()) {
+                    QVERIFY(!text->property("truncated").toBool());
+                    QVERIFY(text->width() > 0);
+                }
+            }
+        };
+        QTest::qWait(80);
+        verifyMaterialText();
+        if (qEnvironmentVariableIsSet("BLAZER_MATERIAL_SCREENSHOT"))
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_MATERIAL_SCREENSHOT")));
+        w->resize(1180, 760);
+        w->setProperty("night", true);
+        QTest::qWait(80);
+        verifyMaterialText();
+        QVERIFY(popup->property("x").toDouble() + popup->property("width").toDouble() <=
+                w->width());
+        if (qEnvironmentVariableIsSet("BLAZER_MATERIAL_SCREENSHOT"))
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_MATERIAL_SCREENSHOT") +
+                                         ".compact.png"));
+        w->resize(1480, 920);
+        w->setProperty("night", false);
         QTest::keyClick(w, Qt::Key_Down);
         QTest::keyClick(w, Qt::Key_Return);
         QTRY_COMPARE(project.layers()[1].toMap()["speed"].toDouble(), 250.);
         QCOMPARE(project.material()["id"].toString(), "vendor-copy-pro5w-plywood-3");
+        auto *selectedText = choice->property("contentItem").value<QQuickItem *>();
+        QVERIFY(selectedText);
+        QVERIFY(!selectedText->property("truncated").toBool());
+        QTRY_VERIFY(choice->height() > 38);
         auto *edit = item("editMaterialButton");
         QVERIFY(edit);
         click(edit);

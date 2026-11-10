@@ -1,6 +1,6 @@
 # Materialbibliothek
 
-Links unter **Material** ein Profil auswählen. Dadurch werden Gravur- und Schnittparameter samt Ausgabeschaltern ins aktuelle Projekt übernommen. **Bearbeiten** öffnet Namen, Maschinenmodell, Modulleistung, Materialstärke, Geschwindigkeit, Leistung, Durchgänge, Gravurintervall und Notizen. Dezimalkomma ist erlaubt.
+Links unter **Material** ein Profil auswählen. Die Auswahlliste öffnet sich über der Arbeitsfläche mit bis zu 560 Pixeln Breite und bleibt innerhalb des Fensters. Lange Namen werden sowohl in der Liste als auch im geschlossenen Feld umgebrochen. Dadurch werden Gravur- und Schnittparameter samt Ausgabeschaltern ins aktuelle Projekt übernommen. **Bearbeiten** öffnet Namen, Maschinenmodell, Modulleistung, Materialstärke, Geschwindigkeit, Leistung, Durchgänge, Gravurintervall und Notizen. Dezimalkomma ist erlaubt.
 
 **Profil speichern & übernehmen** speichert die Bibliothek und aktualisiert das Projekt. **Abbrechen** verwirft den Entwurf. **+** legt eine eigene Kopie an; im Menü **⋯** lassen sich Profile duplizieren und nach Bestätigung löschen. Auch eine vollständig geleerte Bibliothek erlaubt neue Profile.
 

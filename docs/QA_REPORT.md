@@ -45,3 +45,7 @@ ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build-sanitize --output-on-failure
 Der ergänzte Bedienungstest reproduzierte zunächst den Fehler: Nach „Verwerfen“ blieb das Fenster offen. `Qt.quit()` führte erneut durch den Schließen-Handler, der wegen des weiterhin geänderten Projekts wieder nachfragte. Die bestätigte Aktion schließt jetzt das Fenster mit einer nur während dieses Schließvorgangs gültigen Freigabe. Der Dialog wird vorher geschlossen; Abbrechen entfernt die vorgemerkte Aktion. Projektänderungen werden dabei nicht fälschlich als gespeichert markiert.
 
 Regressionstest: geändertes Projekt schließen, Fokusfreigabe aufgehoben, Abbrechen erhält Fenster und Änderungen, erneutes Schließen und Verwerfen beendet das Fenster ohne erneute Abfrage. Alle drei CTest-Programme bestehen nach der Korrektur.
+
+## Korrektur: abgeschnittene Materialauswahl (10.11.2026)
+
+Die Standard-ComboBox begrenzte die Liste auf die Breite der Seitenleiste. Ein eigenes Popup im Fenster-Overlay öffnet jetzt bis zu 560 Pixel breit und hält Abstand zum Fensterrand. Einträge und geschlossenes Auswahlfeld brechen lange Namen um; Farben berücksichtigen das helle und dunkle Design. Der Bedienungstest prüft sichtbare Textobjekte ohne Abschneiden, Popupbreite und Fenstergrenzen sowie die gewählte mehrzeilige Anzeige. Nach Fenstergrößenänderungen wartet der Maushelfer auf die Layoutaktualisierung. Qt-Quick-Bedienungstest bestanden; Screenshots in 1480 × 920 hell und 1180 × 760 dunkel visuell geprüft.

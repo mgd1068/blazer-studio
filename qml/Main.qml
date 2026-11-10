@@ -224,6 +224,53 @@ ApplicationWindow {
                             id: materialChoice
                             objectName: "materialChoice"
                             Layout.fillWidth: true
+                            implicitHeight: Math.max(38, contentItem.implicitHeight + 16)
+                            leftPadding: 10; rightPadding: 10
+                            contentItem: Text {
+                                text: materialChoice.displayText
+                                font: materialChoice.font
+                                color: win.ink
+                                rightPadding: materialChoice.indicator.width + 8
+                                wrapMode: Text.Wrap
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            indicator: Text {
+                                x: materialChoice.width - width - 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "▾"; color: win.ink; font.pixelSize: 14
+                            }
+                            background: Rectangle { color: win.night ? "#202d37" : "#f7f9fa"; radius: 5; border.color: materialChoice.activeFocus ? "#209b76" : win.line }
+                            delegate: ItemDelegate {
+                                required property var modelData
+                                required property int index
+                                width: ListView.view.width
+                                implicitHeight: Math.max(40, contentItem.implicitHeight + 16)
+                                highlighted: materialChoice.highlightedIndex === index
+                                contentItem: Text {
+                                    objectName: "materialOptionText"
+                                    text: modelData; font: materialChoice.font; color: win.ink
+                                    wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle { color: parent.highlighted ? (win.night ? "#304e49" : "#e3f3ed") : "transparent"; radius: 4 }
+                            }
+                            popup: Popup {
+                                objectName: "materialPopup"
+                                parent: Overlay.overlay
+                                width: Math.min(560, parent.width - 32)
+                                height: Math.min(contentItem.implicitHeight + topPadding + bottomPadding, 360, parent.height - 32)
+                                x: Math.max(16, Math.min(materialChoice.mapToItem(parent, 0, 0).x, parent.width - width - 16))
+                                y: Math.max(16, Math.min(materialChoice.mapToItem(parent, 0, materialChoice.height).y + 4, parent.height - height - 16))
+                                padding: 6
+                                contentItem: ListView {
+                                    clip: true
+                                    implicitHeight: contentHeight
+                                    model: materialChoice.popup.visible ? materialChoice.delegateModel : null
+                                    currentIndex: materialChoice.highlightedIndex
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ScrollBar { }
+                                }
+                                background: Rectangle { color: win.panel; border.color: win.line; radius: 6 }
+                            }
                             model: materialLibrary.names
                             currentIndex: win.libraryIndex
                             displayText: currentIndex >= 0 ? currentText : (project.material.name || "Material wählen")
