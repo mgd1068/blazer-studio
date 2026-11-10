@@ -69,7 +69,7 @@ ApplicationWindow {
         return true
     }
     OnboardingDialog {
-        id: onboarding; dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
+        id: onboarding; onAboutToShow: machine.focus(false); dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
         onPracticeRequested: {
             if(machine.busy || machine.firing) { project.notify("Bitte den laufenden Geräteauftrag zuerst beenden."); return }
             if(typeof machine.useSimulator==="function")machine.useSimulator()
@@ -77,7 +77,7 @@ ApplicationWindow {
         }
     }
     BetaHelpDialog {
-        id: betaHelp; dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
+        id: betaHelp; onAboutToShow: machine.focus(false); dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
         onIntroductionRequested: onboarding.open()
         onDiagnosticsRequested: diagnosticsDialog.open()
     }

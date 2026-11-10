@@ -134,7 +134,10 @@ class UiTest : public QObject {
         QVERIFY(!project.dirty());
         auto *betaPopup = w->findChild<QObject *>("betaHelpDialog");
         QVERIFY(betaPopup);
+        machine.focus(true);
+        QVERIFY(machine.firing());
         click(item("betaHelpButton"));
+        QVERIFY(!machine.firing());
         QTRY_VERIFY(betaPopup->property("visible").toBool());
         QTest::qWait(50);
         if (qEnvironmentVariableIsSet("BLAZER_BETA_SCREENSHOT"))

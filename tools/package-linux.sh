@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build a source-matched Debian candidate. Run inside Ubuntu 26.04 amd64.
 set -euo pipefail
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
 source_dir="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 output_dir="${1:-$source_dir/dist}"
 mkdir -p "$output_dir"
