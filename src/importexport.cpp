@@ -409,101 +409,17 @@ bool Document::importProject(const QUrl &url) {
     return true;
 }
 bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &pattern) {
-    if (!csv.isLocalFile() || !directory.isLocalFile() || pattern.size() > 1000)
-        return false;
-    QFile f(csv.toLocalFile());
-    if (!f.open(QIODevice::ReadOnly) || f.size() > 1024 * 1024)
-        return false;
-    // RFC-style quoted fields, embedded newlines, escaped quotes.
-    auto text = QString::fromUtf8(f.readAll());
-    QChar delimiter = text.section('\n', 0, 0).contains(';') ? ';' : ',';
-    QList<QStringList> rows;
-    QStringList row;
-    QString field;
-    bool quoted = false;
-    for (int i = 0; i < text.size(); ++i) {
-        QChar c = text[i];
-        if (c == '"') {
-            if (quoted && i + 1 < text.size() && text[i + 1] == '"') {
-                field += '"';
-                ++i;
-            } else
-                quoted = !quoted;
-        } else if (!quoted && (c == delimiter || c == '\n')) {
-            row << field;
-            field.clear();
-            if (c == '\n') {
-                rows << row;
-                row.clear();
-            }
-        } else if (c != '\r')
-            field += c;
-    }
-    if (quoted)
-        return false;
-    if (!field.isEmpty() || !row.isEmpty()) {
-        row << field;
-        rows << row;
-    }
-    if (rows.size() < 2 || rows.size() > 1001)
-        return false;
-    auto headers = rows.takeFirst();
-    if (headers.isEmpty())
-        return false;
-    QDir dir(directory.toLocalFile());
-    if (!dir.exists())
-        return false;
-    auto original = snapshot();
-    QList<QPair<QString, QByteArray>> jobs;
-    qint64 stagedBytes = 0;
-    for (int r = 0; r < rows.size(); ++r) {
-        m_items = original.items;
-        for (auto &a : m_items)
-            if (a.page == m_activePage && a.kind == "text") {
-                QString value = pattern.isEmpty() ? a.text : pattern;
-                for (int c = 0; c < headers.size(); ++c)
-                    value.replace("{" + headers[c] + "}", rows[r].value(c));
-                value.replace("{number}", QString::number(r + 1));
-                if (value.size() > 1000) {
-                    applySnapshot(original);
-                    return false;
-                }
-                a.text = value;
-            }
-        m_job.reset();
-        auto j = job();
-        if (!j.valid()) {
-            applySnapshot(original);
-            notify("CSV-Zeile " + QString::number(r + 1) + ": " + j.errors.join(";"));
+    if (m_background) {
+        if (!m_batch.start(jobInput(), csv, directory, pattern)) {
+            notify("Ein CSV-Stapel wird bereits exportiert.");
             return false;
         }
-        QString name = dir.filePath(QString("job-%1.gcode").arg(r + 1, 4, 10, QChar('0')));
-        if (QFile::exists(name)) {
-            applySnapshot(original);
-            notify("Stapelexport überschreibt keine vorhandenen Jobs.");
-            return false;
-        }
-        auto bytes = (j.gcode().join('\n') + '\n').toUtf8();
-        stagedBytes += bytes.size();
-        if (stagedBytes > 64 * 1024 * 1024) {
-            applySnapshot(original);
-            notify("CSV-Stapel überschreitet 64 MiB; kleinere Teilstapel verwenden.");
-            return false;
-        }
-        jobs.append({name, bytes});
+        notify("CSV-Stapel wird aus dem aktuellen Projektstand im Hintergrund erzeugt.");
+        return true;
     }
-    applySnapshot(original);
-    QStringList written;
-    for (const auto &entry : jobs) {
-        QSaveFile out(entry.first);
-        if (!out.open(QIODevice::WriteOnly) || out.write(entry.second) != entry.second.size() ||
-            !out.commit()) {
-            for (auto path : written)
-                QFile::remove(path);
-            return false;
-        }
-        written << entry.first;
-    }
-    notify(QString::number(jobs.size()) + " Jobs exportiert; keine automatische Ausführung.");
-    return true;
+    const auto result = BatchExport::run(jobInput(), csv, directory, pattern);
+    notify(result.error.isEmpty()
+               ? QString::number(result.count) + " Jobs exportiert; keine automatische Ausführung."
+               : result.error);
+    return result.error.isEmpty() && !result.cancelled;
 }

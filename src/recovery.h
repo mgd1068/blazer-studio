@@ -1,13 +1,17 @@
 #pragma once
 #include "document.h"
+#include <QLockFile>
 #include <QTimer>
+#include <memory>
 class Recovery : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool writable READ writable CONSTANT)
     Q_PROPERTY(bool available READ available NOTIFY changed)
     Q_PROPERTY(QString location READ location CONSTANT)
   public:
     explicit Recovery(Document *document, const QString &directory = {}, QObject *parent = nullptr);
     bool available() const;
+    bool writable() const { return lock && lock->isLocked(); }
     QString location() const { return path; }
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool restore();
@@ -16,8 +20,9 @@ class Recovery : public QObject {
     void changed();
 
   private:
+    std::unique_ptr<QLockFile> lock;
     Document *document;
     QString path;
     QTimer timer;
-    bool written = false;
+    bool written = false, preservePrevious = false;
 };

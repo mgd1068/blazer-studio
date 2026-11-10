@@ -311,7 +311,7 @@ ApplicationWindow {
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
                     objectName: "startJobButton"; text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
-                    primary: true; compact: true; enabled: win.page === 0 || (machine.ready && project.jobSummary.valid && (!win.basic || win.simulationMode || (!project.beginnerSummary.requiresAdvanced && !project.beginnerSummary.modified && win.projectHeadMatches && (win.proofConfirmed || win.isBasicProbe))))
+                    primary: true; compact: true; enabled: win.page === 0 || (machine.ready && !project.planningBusy && project.jobSummary.valid && (!win.basic || win.simulationMode || (!project.beginnerSummary.requiresAdvanced && !project.beginnerSummary.modified && win.projectHeadMatches && (win.proofConfirmed || win.isBasicProbe))))
                     onClicked: { if (win.page === 0) win.page = 1; else { win.page = 2; machine.start() } }
                 }
             }
@@ -557,7 +557,7 @@ ApplicationWindow {
                         }
                     }
                     Item { Layout.fillHeight: true }
-                    Text { text: "Blazer Studio · 0.7\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 11; lineHeight: 1.5 }
+                    Text { text: "Blazer Studio · 0.8\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 11; lineHeight: 1.5 }
                     }
                 }
             }
@@ -598,6 +598,16 @@ ApplicationWindow {
                             ActionButton { objectName: "basicProbe"; text: "5-mm-Probe vorbereiten"; dark: win.night; hint: "Erzeugt ein neues Projekt mit einer kleinen Probe und genau den gewählten Materialwerten. Ungespeicherte Änderungen werden vorher abgefragt."; onClicked: win.requestAction("basicprobe") }
                         }
                         CheckBox { objectName: "basicProof"; text: "Diese Werte habe ich am tatsächlichen Material geprüft"; checked: win.proofConfirmed; onClicked: win.proofConfirmed=checked; HelpBubble {target: parent; description: "Eine persönliche Bestätigung nach einer echten Materialprobe. Das Programm misst das Ergebnis nicht selbst. Bei geänderten Materialwerten wird die Bestätigung zurückgesetzt."} }
+                    }
+                }
+                Rectangle {
+                    visible: project.planningBusy || project.planningState==="cancelled" || project.planningState==="cancelling" || project.planningState==="failed"
+                    Layout.fillWidth: true; Layout.preferredHeight: Math.max(58,planningRow.implicitHeight+20); color: win.panel
+                    RowLayout { id: planningRow; anchors.fill: parent; anchors.margins: 10
+                        BusyIndicator { running: project.planningBusy; visible: running; implicitWidth: 26; implicitHeight: 26 }
+                        Text { text: project.batchBusy ? "CSV-Stapel wird aus dem angeforderten Projektstand exportiert …" : project.planningBusy ? "Auftrag wird berechnet … Änderungen werden automatisch berücksichtigt." : project.planningState==="failed" ? project.jobSummary.errors.join("\n") : "Berechnung abgebrochen. Das Projekt bleibt erhalten."; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: win.ink; font.pixelSize: 12 }
+                        ActionButton { objectName: "cancelPlanning"; visible: project.planningBusy; text: "Berechnung abbrechen"; hint: "Bricht die Vorbereitung des Auftrags ab. Dies ist kein Laser-Stop. Dein Projekt bleibt erhalten."; onClicked: project.cancelPlanning() }
+                        ActionButton { objectName: "retryPlanning"; visible: !project.planningBusy; text: "Neu berechnen"; hint: "Berechnet den aktuellen Projektstand erneut. Ein Laserauftrag startet dadurch nicht."; onClicked: project.retryPlanning() }
                     }
                 }
                 StackLayout {

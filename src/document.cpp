@@ -1,4 +1,5 @@
 #include "document.h"
+#include "atomicfile.h"
 #include "geometry.h"
 #include "imagelimits.h"
 #include "materiallibrary.h"
@@ -49,6 +50,9 @@ QVariantList materialLayers(const QVariantList &current, const QVariantMap &prof
 }
 } // namespace
 Document::Document(QObject *p) : QAbstractListModel(p) {
+    connect(&m_preparation, &JobPreparation::changed, this, &Document::changed);
+    connect(&m_batch, &BatchExport::changed, this, &Document::changed);
+    connect(&m_batch, &BatchExport::finished, this, &Document::notify);
     demo();
 }
 int Document::rowCount(const QModelIndex &p) const {
@@ -309,6 +313,8 @@ bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
 }
 void Document::refresh(int row) {
     m_job.reset();
+    if (m_background)
+        m_preparation.submit(jobInput());
     m_dirty = !sameContent(snapshot(), m_saved);
     if (row >= 0 && row < m_items.size())
         emit dataChanged(index(row), index(row));
@@ -1082,16 +1088,9 @@ bool Document::save(const QUrl &url) {
         notify("Projekt ist größer als 64 MiB; Speichern abgebrochen.");
         return false;
     }
-    if (QFile::exists(url.toLocalFile())) {
-        QFile::remove(url.toLocalFile() + ".bak");
-        if (!QFile::copy(url.toLocalFile(), url.toLocalFile() + ".bak")) {
-            notify("Projektbackup fehlgeschlagen; Speichern abgebrochen.");
-            return false;
-        }
-    }
-    QSaveFile file(url.toLocalFile());
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
-        notify("Speichern fehlgeschlagen; vorhandene Datei bleibt erhalten.");
+    QString error;
+    if (!AtomicFile::write(url.toLocalFile(), bytes, error, ".bak")) {
+        notify(error);
         return false;
     }
     markClean();
@@ -1162,6 +1161,8 @@ QStringList Document::issues() const {
 }
 
 const JobPlan &Document::job() const {
+    if (m_background)
+        return m_preparation.plan();
     if (!m_job)
         m_job = JobPlanner::build(*this);
     return *m_job;
@@ -1449,4 +1450,58 @@ bool Document::applyBasicMaterial(const QVariantMap &profile) {
         refresh();
     }
     return true;
+}
+
+void Document::setBackgroundPlanning(bool enabled) {
+    if (m_background == enabled)
+        return;
+    m_background = enabled;
+    m_job.reset();
+    if (enabled)
+        m_preparation.submit(jobInput());
+    else
+        m_preparation.cancel();
+    emit changed();
+}
+JobInput Document::jobInput() const {
+    JobInput result{m_items, m_layers, m_activePage};
+    // Do not transfer GUI-owned QSvgRenderer instances, even by shared_ptr.
+    QHash<const SvgAsset *, std::shared_ptr<const SvgAsset>> assets;
+    for (auto &art : result.items)
+        if (art.asset) {
+            auto key = art.asset.get();
+            if (!assets.contains(key)) {
+                auto copy = std::make_shared<SvgAsset>();
+                copy->bytes = art.asset->bytes;
+                copy->sizeMm = art.asset->sizeMm;
+                assets.insert(key, copy);
+            }
+            art.asset = assets[key];
+        }
+    return result;
+}
+QVariantMap Document::jobSummary() const {
+    auto summary = job().summary();
+    summary["state"] = planningState();
+    summary["busy"] = planningBusy();
+    return summary;
+}
+QString Document::planningState() const {
+    return m_background ? m_preparation.state() : "synchronous";
+}
+bool Document::planningBusy() const {
+    return m_background && (m_preparation.busy() || m_batch.busy());
+}
+void Document::cancelPlanning() {
+    m_batch.cancel();
+    if (m_background)
+        m_preparation.cancel();
+}
+void Document::retryPlanning() {
+    if (m_background)
+        m_preparation.submit(jobInput());
+}
+QImage Document::imagePreview(const Artwork &item) const {
+    const auto &plan = job();
+    return plan.previews.value(item.id, item.reliefAsset ? item.reliefAsset->image : QImage());
 }

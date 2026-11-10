@@ -1,26 +1,43 @@
 #include "imageprocessing.h"
 #include <algorithm>
 #include <cmath>
-QImage ImageProcessing::apply(const QImage &source, const QVariantMap &s, QString &error) {
+bool ImageProcessing::validate(const QSize &source, const QVariantMap &s, QString &error) {
     double brightness = s.value("brightness", 0).toDouble(),
            contrast = s.value("contrast", 1).toDouble(), gamma = s.value("gamma", 1).toDouble();
     QString mode = s.value("imageMode", "dither").toString();
     double threshold = s.value("threshold", 128).toDouble();
     double sharpness = s.value("sharpness", 0).toDouble();
-    if (!std::isfinite(sharpness) || sharpness < 0 || sharpness > 3 || source.isNull() ||
+    if (!std::isfinite(sharpness) || sharpness < 0 || sharpness > 3 || !source.isValid() ||
         !std::isfinite(brightness) || brightness < -1 || brightness > 1 ||
         !std::isfinite(contrast) || contrast < 0 || contrast > 3 || !std::isfinite(gamma) ||
         gamma < .1 || gamma > 5 || !std::isfinite(threshold) || threshold < 0 || threshold > 255 ||
         !QStringList{"dither", "atkinson", "threshold", "grayscale"}.contains(mode)) {
         error = "Ungültige Bildeinstellungen.";
-        return {};
+        return false;
     }
     QRect crop(s.value("cropX", 0).toInt(), s.value("cropY", 0).toInt(),
                s.value("cropW", source.width()).toInt(), s.value("cropH", source.height()).toInt());
-    if (crop.isEmpty() || !source.rect().contains(crop)) {
+    if (crop.isEmpty() || !QRect(QPoint(), source).contains(crop)) {
         error = "Bildzuschnitt außerhalb des Originals.";
+        return false;
+    }
+    return true;
+}
+QImage ImageProcessing::apply(const QImage &source, const QVariantMap &s, QString &error,
+                              const Cancellation &cancel) {
+    if (isCancelled(cancel)) {
+        error = "Berechnung abgebrochen.";
         return {};
     }
+    if (!validate(source.size(), s, error))
+        return {};
+    double brightness = s.value("brightness", 0).toDouble(),
+           contrast = s.value("contrast", 1).toDouble(), gamma = s.value("gamma", 1).toDouble();
+    QString mode = s.value("imageMode", "dither").toString();
+    double threshold = s.value("threshold", 128).toDouble(),
+           sharpness = s.value("sharpness", 0).toDouble();
+    QRect crop(s.value("cropX", 0).toInt(), s.value("cropY", 0).toInt(),
+               s.value("cropW", source.width()).toInt(), s.value("cropH", source.height()).toInt());
     auto image = source.copy(crop).convertToFormat(QImage::Format_ARGB32);
     auto original = image;
     const bool invert = s.value("invert", false).toBool(),
@@ -31,6 +48,10 @@ QImage ImageProcessing::apply(const QImage &source, const QVariantMap &s, QStrin
     QVector<double> errors[3] = {QVector<double>(w + 4), QVector<double>(w + 4),
                                  QVector<double>(w + 4)};
     for (int y = 0; y < h; ++y) {
+        if (isCancelled(cancel)) {
+            error = "Berechnung abgebrochen.";
+            return {};
+        }
         double *current = errors[y % 3].data(), *next = errors[(y + 1) % 3].data(),
                *afterNext = errors[(y + 2) % 3].data();
         for (int x = 0; x < w; ++x) {

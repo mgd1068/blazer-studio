@@ -104,6 +104,27 @@ class UiTest : public QObject {
             QTest::mouseClick(w, Qt::LeftButton, {},
                               i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint());
         };
+        // Real QML controls must stay usable while a large raster is processed.
+        project.newProject();
+        QImage large(2048, 2048, QImage::Format_ARGB32);
+        large.fill(Qt::black);
+        auto largePath = storage.filePath("background.png");
+        QVERIFY(large.save(largePath));
+        project.setBackgroundPlanning(true);
+        QVERIFY(project.importImage(QUrl::fromLocalFile(largePath)));
+        QTRY_COMPARE_WITH_TIMEOUT(project.planningState(), QString("running"), 5000);
+        QVERIFY(item("cancelPlanning")->isVisible());
+        QSignalSpy cancelledClick(item("cancelPlanning"), SIGNAL(clicked()));
+        click(item("cancelPlanning"));
+        QCOMPARE(cancelledClick.count(), 1);
+        QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy(), 3000);
+        QVERIFY(!project.job().valid());
+        QTRY_VERIFY(item("retryPlanning")->isVisible());
+        click(item("retryPlanning"));
+        QTRY_VERIFY_WITH_TIMEOUT(project.job().valid(), 15000);
+        QVERIFY(!item("cancelPlanning")->isVisible());
+        project.setBackgroundPlanning(false);
+        project.demo();
         // Basic is a view mode: switching itself must never rewrite a project.
         w->setProperty("basic", true);
         QTRY_VERIFY(!item("exportGcodeButton")->isVisible());

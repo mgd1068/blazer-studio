@@ -1,4 +1,5 @@
 #pragma once
+#include "cancellation.h"
 #include <QImage>
 #include <QVariantMap>
 #include <memory>
@@ -28,5 +29,5 @@ struct ReliefRaster {
     QVector<int> counts; // world rows from bottom to top
     QString error;
     static ReliefRaster build(const ReliefAsset &asset, const ReliefSettings &settings,
-                              const QSizeF &size);
+                              const QSizeF &size, const Cancellation &cancel = {});
 };

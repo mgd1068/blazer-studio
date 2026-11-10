@@ -1,5 +1,7 @@
 #pragma once
+#include "batchexport.h"
 #include "job.h"
+#include "jobpreparation.h"
 #include "relief.h"
 #include "svgasset.h"
 #include <QAbstractListModel>
@@ -9,26 +11,12 @@
 #include <QVariantMap>
 #include <optional>
 
-struct Artwork {
-    QString id, name, kind, text;
-    QRectF bounds; // mm, lower-left origin, y points up
-    int layer = 0;
-    bool visible = true;
-    std::shared_ptr<const SvgAsset> asset;
-    QString groupId{}, groupName{};
-    QVariantMap settings{};
-    std::shared_ptr<const ReliefAsset> reliefAsset{};
-    ReliefSettings relief{};
-    QPainterPath path{}; // normalized coordinates, lower-left convention
-    QVariantMap style{};
-    QList<int> extraOperations{};
-    int page = 0;
-    bool operator==(const Artwork &) const = default;
-};
-
 class Document : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QVariantMap beginnerSummary READ beginnerSummary NOTIFY changed)
+    Q_PROPERTY(bool batchBusy READ batchBusy NOTIFY changed)
+    Q_PROPERTY(QString planningState READ planningState NOTIFY changed)
+    Q_PROPERTY(bool planningBusy READ planningBusy NOTIFY changed)
     Q_PROPERTY(QVariantMap jobSummary READ jobSummary NOTIFY changed)
     Q_PROPERTY(QStringList pages READ pages NOTIFY changed)
     Q_PROPERTY(int activePage READ activePage NOTIFY changed)
@@ -61,6 +49,15 @@ class Document : public QAbstractListModel {
         OnPageRole
     };
     explicit Document(QObject *parent = nullptr);
+    void setBackgroundPlanning(bool enabled);
+    bool backgroundPlanning() const { return m_background; }
+    JobInput jobInput() const;
+    Q_INVOKABLE void cancelPlanning();
+    Q_INVOKABLE void retryPlanning();
+    QString planningState() const;
+    bool planningBusy() const;
+    bool batchBusy() const { return m_batch.busy(); }
+    QImage imagePreview(const Artwork &item) const;
     QStringList pages() const { return m_pages; }
     int activePage() const { return m_activePage; }
     QVariantList nodes() const;
@@ -105,7 +102,7 @@ class Document : public QAbstractListModel {
     bool canRedo() const { return !m_redo.isEmpty(); }
     double pathLength() const;
     const JobPlan &job() const;
-    QVariantMap jobSummary() const { return job().summary(); }
+    QVariantMap jobSummary() const;
     Q_INVOKABLE bool exportGcode(const QUrl &url);
     Q_INVOKABLE bool importImage(const QUrl &url);
     Q_INVOKABLE bool importRelief(const QUrl &url);
@@ -186,4 +183,7 @@ class Document : public QAbstractListModel {
     QList<Snapshot> m_undo, m_redo;
     std::optional<Snapshot> m_beforeMove;
     mutable std::optional<JobPlan> m_job;
+    JobPreparation m_preparation;
+    BatchExport m_batch;
+    bool m_background = false;
 };

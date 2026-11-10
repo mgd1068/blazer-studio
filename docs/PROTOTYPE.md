@@ -1,4 +1,4 @@
-# Entwurf 0.7 ausprobieren
+# Entwurf 0.8 ausprobieren
 
 ## Start
 
@@ -69,3 +69,5 @@ Der aktuelle Prüfumfang steht im [Prüfbericht](QA_REPORT.md). Reale serielle V
 Der zusätzliche Bereich **04 Relief** erzeugt geschichtete Gravurjobs aus Graustufen-Tiefenkarten. Bedienung, Kalibrierung und Hardwaregrenzen: [Relief](RELIEF.md). CLI: `--new --import-relief /pfad/depth.png --view 3`; kein automatischer Laserstart.
 
 **05 Werkzeuge** bietet Pfade/Transformation, Operationen, Bildbearbeitung und Produktion. [Bedienung, optionale KI und konkrete Grenzen](EXPANSION.md).
+
+Seit 0.8 laufen Job-/Rasterberechnung und CSV-Stapel im Hintergrund. Abbruch und Neuberechnung stehen im Arbeitsbereich zur Verfügung. [Verhalten, Stabilitätsprüfungen und verbleibende Grenzen](STABILIZATION_08.md).

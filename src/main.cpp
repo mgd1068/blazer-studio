@@ -19,10 +19,12 @@ int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("Blazer Studio");
     app.setOrganizationName("BlazerStudio");
+    app.setApplicationVersion(QStringLiteral(BLAZER_VERSION));
     QQuickStyle::setStyle("Basic");
     qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
     qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
     Document document;
+    document.setBackgroundPlanning(!app.arguments().contains("--export-gcode"));
     Registration registration;
     QTemporaryDir transientRecovery;
     bool transient =
@@ -33,6 +35,17 @@ int main(int argc, char **argv) {
         script = QDir(QCoreApplication::applicationDirPath())
                      .absoluteFilePath("../share/blazer-studio/tools/photo_depth.py");
     DepthService depthService(&document, script);
+    if (!recovery.writable()) {
+        QQmlApplicationEngine errorEngine;
+        errorEngine.rootContext()->setContextProperty(
+            "startupErrorMessage",
+            "Die Anwendungsdaten sind bereits durch eine andere Instanz belegt oder nicht "
+            "beschreibbar. Bitte das vorhandene Fenster verwenden oder die Zugriffsrechte prüfen.");
+        errorEngine.loadFromModule("BlazerStudio", "StartupError");
+        if (errorEngine.rootObjects().isEmpty())
+            return 3;
+        return app.exec();
+    }
     MaterialLibrary materialLibrary;
     Machine simulator(&document);
     QFile f(":/profiles/blaze-x-m3.json");

@@ -265,9 +265,8 @@ void Workspace::paint(QPainter *p) {
                     p->drawEllipse(a.bounds);
                 else if ((a.kind == "relief" || a.kind == "image") && a.reliefAsset) {
                     QString error;
-                    auto image = a.kind == "image"
-                                     ? ImageProcessing::apply(a.reliefAsset->image, a.style, error)
-                                     : a.reliefAsset->image;
+                    auto image =
+                        a.kind == "image" ? m_document->imagePreview(world) : a.reliefAsset->image;
                     p->drawImage(a.bounds, image);
                 } else if (a.kind == "svg") {
                     if (a.asset)

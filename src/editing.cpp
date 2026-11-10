@@ -129,6 +129,8 @@ void Document::activatePage(int page) {
     m_selection.clear();
     m_selected = -1;
     m_job.reset();
+    if (m_background)
+        m_preparation.submit(jobInput());
     emit dataChanged(index(0), index(m_items.size() - 1));
     emit changed();
     emit selectionChanged();
@@ -307,8 +309,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
             if (style.size() > 20)
                 return false;
             QString error;
-            auto preview = ImageProcessing::apply(a.reliefAsset->image, style, error);
-            if (!error.isEmpty())
+            if (!ImageProcessing::validate(a.reliefAsset->image.size(), style, error))
                 return fail(error);
             a.style = style;
         } else if (action == "imageRotate" || action == "imageMirror") {

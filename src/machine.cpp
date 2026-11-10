@@ -59,6 +59,10 @@ void Machine::frame(const QVariantMap &b) {
         Simulator::frame(b);
 }
 void Machine::start() {
+    if (document->planningBusy()) {
+        document->notify("Auftragsberechnung oder Export läuft noch.");
+        return;
+    }
     if (busy() || firing())
         return;
     const auto &job = document->job();
@@ -104,7 +108,7 @@ QVariantList Machine::capabilities() const {
         QVariantMap{{"name", "Rotary / Z / Autofokus"},
                     {"status", "Nicht nachgewiesen"},
                     {"detail", "Geräteprofil verwendet nur X/Y. Keine ungeprüften Achsenbefehle."}},
-        QVariantMap{{"name", "Oberflächenvermessung / Kieselkrümmung"},
+        QVariantMap{{"name", "Oberflächenvermessung / Fokusnachführung"},
                     {"status", "Keine Messhardware"},
                     {"detail", "Keine automatische Höhen- oder Fokuskompensation."}},
         QVariantMap{{"name", "Absaugung separat schalten"},

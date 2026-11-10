@@ -1,4 +1,5 @@
 #include "recovery.h"
+#include "atomicfile.h"
 #include "imagelimits.h"
 #include <QDir>
 #include <QFile>
@@ -11,6 +12,9 @@ Recovery::Recovery(Document *d, const QString &directory, QObject *parent)
                    : directory;
     QDir().mkpath(dir);
     path = dir + "/autosave.blazer";
+    lock = std::make_unique<QLockFile>(dir + "/session.lock");
+    lock->setStaleLockTime(0);
+    lock->tryLock(0);
     timer.setSingleShot(true);
     timer.setInterval(1500);
     connect(d, &Document::changed, this, [this] {
@@ -22,33 +26,47 @@ Recovery::Recovery(Document *d, const QString &directory, QObject *parent)
     connect(&timer, &QTimer::timeout, this, &Recovery::save);
 }
 bool Recovery::available() const {
-    return QFile::exists(path);
+    return writable() && (QFile::exists(path) || QFile::exists(path + ".previous"));
 }
 bool Recovery::save() {
+    if (!writable())
+        return false;
     if (!document->dirty())
         return true;
     auto bytes = document->projectBytes();
     if (bytes.size() > ImageLimits::projectBytes)
         return false;
-    if (QFile::exists(path)) {
-        QFile::remove(path + ".previous");
-        QFile::copy(path, path + ".previous");
-    }
-    QSaveFile f(path);
-    bool ok = f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size() && f.commit();
-    if (ok)
+    QString error;
+    bool ok =
+        AtomicFile::write(path, bytes, error, preservePrevious ? QString() : QString(".previous"));
+    if (ok) {
         written = true;
-    else
-        document->notify("Automatische Sicherung fehlgeschlagen: " + path);
+        preservePrevious = false;
+    } else
+        document->notify("Automatische Sicherung fehlgeschlagen: " + error);
     emit changed();
     return ok;
 }
 bool Recovery::restore() {
-    QFile f(path);
-    return f.open(QIODevice::ReadOnly) &&
-           document->restoreBytes(f.read(ImageLimits::projectBytes + 1));
+    if (!writable())
+        return false;
+    for (const QString &candidate : {path, path + ".previous"}) {
+        QFile f(candidate);
+        if (f.open(QIODevice::ReadOnly) &&
+            document->restoreBytes(f.read(ImageLimits::projectBytes + 1))) {
+            preservePrevious = candidate != path;
+            document->notify(
+                candidate == path
+                    ? "Automatische Sicherung wiederhergestellt; bitte speichern."
+                    : "Vorherige Sicherung wiederhergestellt; jüngste Sicherung war unlesbar.");
+            return true;
+        }
+    }
+    return false;
 }
 void Recovery::clear() {
+    if (!writable())
+        return;
     timer.stop();
     written = false;
     QFile::remove(path);

@@ -67,3 +67,8 @@ Eigener Reliefbereich mit Graustufen-Tiefenkarten, 1–256 Schichten, Umkehr/Gam
 ## Stand 0.6: Editor, Produktion und Wiederherstellung
 
 Großes Ausbaupaket nach dem Programmvergleich: Datensicherung, weitere Operationen und Mehrfachbearbeitung, Pfad-/Text-/Bildwerkzeuge, zusätzliche Importvarianten, Schnitt-/Scanoptionen, Nesting/Arbeitsblätter/CSV/QR, gepuffertes GRBL/Overrides sowie 16-Bit-/Modell-/Foto-Tiefenworkflow. Die genaue Tabelle [EXPANSION.md](EXPANSION.md) benennt verbleibende Format-, Qualitäts- und Hardwaregrenzen. Sie ersetzt keine vollständige Abnahme der F01–F53-Zielmatrix. Tatsächliche Emissions-/Materialprüfung und geeignete zusätzliche Hardware bleiben offen.
+
+
+## Stabilisierung 0.8 und Beta-Ziel 0.9
+
+0.8 ergänzt Hintergrundberechnung mit Abbruch/Generationenprüfung, bildbasierte Vorschau aus dem Rechenergebnis, eingefrorene CSV-Stapel, Dateisperren, atomare Backups, abgesicherten Autosave-Rückfall und zusätzliche Fehlerfalltests. [Implementierung und Grenzen](STABILIZATION_08.md). 0.9 benötigt anschließend reale Geräte-/Materialabnahme, ein geprüftes Downloadpaket und externe Bedienungstests; keine Spezialisierung auf Stein, sondern allgemeine Reliefgravur.

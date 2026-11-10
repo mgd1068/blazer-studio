@@ -98,7 +98,7 @@ std::shared_ptr<const ReliefAsset> ReliefAsset::parse(const QByteArray &png) {
 }
 
 ReliefRaster ReliefRaster::build(const ReliefAsset &asset, const ReliefSettings &settings,
-                                 const QSizeF &size) {
+                                 const QSizeF &size, const Cancellation &cancel) {
     ReliefRaster raster;
     ReliefSettings p;
     if (!ReliefSettings::fromMap(settings.toMap(), p) || asset.image.isNull() ||
@@ -116,7 +116,12 @@ ReliefRaster ReliefRaster::build(const ReliefAsset &asset, const ReliefSettings 
     }
     raster.counts.resize(int(cells));
     const auto &image = asset.image;
-    for (int row = 0; row < raster.rows; ++row)
+    for (int row = 0; row < raster.rows; ++row) {
+        if (isCancelled(cancel)) {
+            raster.counts.clear();
+            raster.error = "Berechnung abgebrochen.";
+            return raster;
+        }
         for (int col = 0; col < raster.columns; ++col) {
             const double x = std::min((col + .5) * p.interval, size.width() - 1e-8);
             const double y = std::min((row + .5) * p.interval, size.height() - 1e-8);
@@ -125,5 +130,6 @@ ReliefRaster ReliefRaster::build(const ReliefAsset &asset, const ReliefSettings 
                                       0, image.height() - 1);
             raster.counts[row * raster.columns + col] = p.count(image.pixelColor(px, py).rgba64());
         }
+    }
     return raster;
 }

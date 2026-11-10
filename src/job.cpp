@@ -316,9 +316,35 @@ QPainterPath JobPlanner::geometry(const Artwork &a, QString &error, bool fill) {
     return p;
 }
 JobPlan JobPlanner::build(const Document &d) {
+    return build(d.jobInput());
+}
+JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     JobPlan job;
+    auto aborted = [&]() {
+        JobPlan result;
+        result.cancelled = true;
+        result.errors = {"Berechnung abgebrochen."};
+        return result;
+    };
+    if (isCancelled(cancel))
+        return aborted();
+    if (d.layers.size() < 2 || d.layers.size() > 64 || d.activePage < 0 || d.activePage >= 100) {
+        job.errors = {"Ungültiger Projektstand für die Berechnung."};
+        return job;
+    }
+    for (const auto &art : d.items) {
+        auto operations = art.extraOperations;
+        operations.prepend(art.layer);
+        for (int operation : operations)
+            if (operation < 0 || operation >= d.layers.size()) {
+                job.errors = {"Ungültige Operationszuordnung."};
+                return job;
+            }
+    }
     QPointF head(0, 0);
     auto add = [&](QPointF point, double feed, double power, int layer, bool rapid, int slice = 0) {
+        if (isCancelled(cancel))
+            return false;
         if (job.moves.size() >= maxMoves) {
             if (!job.errors.contains("Job überschreitet 500000 Segmente."))
                 job.errors << "Job überschreitet 500000 Segmente.";
@@ -348,15 +374,19 @@ JobPlan JobPlanner::build(const Document &d) {
     };
     QList<Shape> shapes;
     QList<QPair<const Artwork *, int>> reliefs, images;
-    for (const auto &original : d.items()) {
-        if (original.page != d.activePage())
+    for (const auto &original : d.items) {
+        if (isCancelled(cancel))
+            return aborted();
+        if (original.page != d.activePage)
             continue;
         QList<int> operations{original.layer};
         operations.append(original.extraOperations);
         for (int op : operations) {
+            if (isCancelled(cancel))
+                return aborted();
             Artwork a = original;
             a.layer = op;
-            auto settings = d.layers()[a.layer].toMap();
+            auto settings = d.layers[a.layer].toMap();
             if (op == original.layer)
                 for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
                     settings[it.key()] = it.value();
@@ -410,20 +440,22 @@ JobPlan JobPlanner::build(const Document &d) {
     // A constant power/feed per slice makes the number of visits represent depth.
     qint64 reliefChecks = 0;
     for (const auto &item : reliefs) {
+        if (isCancelled(cancel))
+            return aborted();
         auto a = *item.first;
         a.layer = item.second;
         ReliefSettings p;
-        auto settings = d.layers()[a.layer].toMap();
+        auto settings = d.layers[a.layer].toMap();
         for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
             settings[it.key()] = it.value();
         const double speed = settings["speed"].toDouble(), power = settings["power"].toDouble();
-        if (d.layers()[a.layer].toMap()["mode"] == "Schnitt" || !a.reliefAsset ||
+        if (d.layers[a.layer].toMap()["mode"] == "Schnitt" || !a.reliefAsset ||
             !ReliefSettings::fromMap(a.relief.toMap(), p) || !std::isfinite(speed) || speed < 1 ||
             speed > 7000 || !std::isfinite(power) || power <= 0 || power > 100) {
             job.errors << a.name + ": ungültige Reliefparameter (v: 1–7000 mm/min).";
             continue;
         }
-        const auto raster = ReliefRaster::build(*a.reliefAsset, p, a.bounds.size());
+        const auto raster = ReliefRaster::build(*a.reliefAsset, p, a.bounds.size(), cancel);
         if (!raster.error.isEmpty()) {
             job.errors << a.name + ": " + raster.error;
             continue;
@@ -437,12 +469,16 @@ JobPlan JobPlanner::build(const Document &d) {
         const int columns = raster.columns, rows = raster.rows;
         const auto &counts = raster.counts;
         for (int slice = 1; slice <= p.passes && job.errors.isEmpty(); ++slice) {
+            if (isCancelled(cancel))
+                return aborted();
             bool vertical = p.crosshatch && slice % 2 == 0;
             int scanRows = vertical ? columns : rows, scanColumns = vertical ? rows : columns;
             bool cleanup = p.cleanupEvery > 0 && slice % p.cleanupEvery == 0 && p.cleanupPower > 0;
             for (int phase = 0; phase < (cleanup ? 2 : 1) && job.errors.isEmpty(); ++phase) {
                 double requestedPower = phase ? p.cleanupPower : power;
                 for (int row = 0; row < scanRows && job.errors.isEmpty(); ++row) {
+                    if (isCancelled(cancel))
+                        return aborted();
                     bool reverse = (row + slice) % 2;
                     int start = -1;
                     auto point = [&](double edge) {
@@ -477,8 +513,10 @@ JobPlan JobPlanner::build(const Document &d) {
         }
     }
     for (const auto &entry : images) {
+        if (isCancelled(cancel))
+            return aborted();
         const auto &a = *entry.first;
-        auto settings = d.layers()[entry.second].toMap();
+        auto settings = d.layers[entry.second].toMap();
         if (entry.second == a.layer)
             for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
                 settings[it.key()] = it.value();
@@ -487,11 +525,14 @@ JobPlan JobPlanner::build(const Document &d) {
             job.errors << "Bilddaten fehlen.";
             continue;
         }
-        auto image = ImageProcessing::apply(a.reliefAsset->image, a.style, error);
+        auto image = ImageProcessing::apply(a.reliefAsset->image, a.style, error, cancel);
+        if (isCancelled(cancel))
+            return aborted();
         if (!error.isEmpty()) {
             job.errors << error;
             continue;
         }
+        job.previews.insert(a.id, image);
         if (settings["mode"] == "Schnitt") {
             job.errors << "Rasterbilder müssen graviert werden.";
             continue;
@@ -512,6 +553,8 @@ JobPlan JobPlanner::build(const Document &d) {
         }
         for (int pass = 0; pass < passes && job.errors.isEmpty(); ++pass)
             for (int row = 0; row < rows && job.errors.isEmpty(); ++row) {
+                if (isCancelled(cancel))
+                    return aborted();
                 bool reverse = row % 2;
                 double y = std::min((row + .5) * interval, a.bounds.height() - 1e-8);
                 int py =
@@ -551,6 +594,8 @@ JobPlan JobPlanner::build(const Document &d) {
             }
     }
     for (int shapeIndex = 0; shapeIndex < shapes.size(); ++shapeIndex) {
+        if (isCancelled(cancel))
+            return aborted();
         if (shapes[shapeIndex].settings.value("optimize", false).toBool()) {
             int best = shapeIndex;
             double distance = 1e99;
@@ -749,6 +794,8 @@ JobPlan JobPlanner::build(const Document &d) {
                         }
                     bool reverse = false;
                     for (int row = 0; row < rowCount && job.errors.isEmpty(); ++row) {
+                        if (isCancelled(cancel))
+                            return aborted();
                         const double y = box.top() + (row + .5) * interval;
                         auto &hits = rows[row];
                         std::sort(hits.begin(), hits.end(),
@@ -794,6 +841,8 @@ JobPlan JobPlanner::build(const Document &d) {
             }
         }
     }
+    if (isCancelled(cancel))
+        return aborted();
     if (job.moves.isEmpty() && job.errors.isEmpty())
         job.errors << "Keine aktiven Laserpfade vorhanden.";
     if (!job.errors.isEmpty()) {
@@ -802,7 +851,11 @@ JobPlan JobPlanner::build(const Document &d) {
     }
     return job;
 }
-QStringList JobPlan::gcode() const {
+QStringList JobPlan::gcode(const Cancellation &cancel) const {
+    if (isCancelled(cancel))
+        return {};
+    if (valid() && !commands.isEmpty())
+        return commands;
     if (!valid())
         return {};
     QStringList lines{"M5",  "(Blazer Studio: GRBL laser mode, $30=1000, $32=1, G54)",
@@ -813,6 +866,8 @@ QStringList JobPlan::gcode() const {
     double lastPower = -1, lastFeed = -1;
     int lastSlice = 0;
     for (const auto &m : moves) {
+        if (isCancelled(cancel))
+            return {};
         if (m.slice != 0 && m.slice != lastSlice) {
             lines << (m.slice > 0 ? "(Relief slice " : "(Relief cleanup after ") +
                          QString::number(std::abs(m.slice)) + ")";
