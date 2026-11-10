@@ -2,7 +2,7 @@
 
 Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Status:** Version 0.4 in C++20 / Qt Quick: Editor, Gruppen, Materialbibliothek, berechnete Schnitt-/Füllpfade, Vorschau, GCode-Export und GRBL-Anbindung. Verbindung, Referenzfahrt, 5-mm-Jog-Rückfahrt und ein vollständiger Kontur-Trockenlauf am M3 mit Laser-Aus bestätigt; reale Laser-/Materialbearbeitung noch nicht abgenommen.
+**Status:** Version 0.5 in C++20 / Qt Quick: Editor, Gruppen, Materialbibliothek, berechnete Schnitt-/Füllpfade, Vorschau, GCode-Export, GRBL-Anbindung und ein eigener Reliefbereich für geschichtete Graustufen-Tiefenkarten. Verbindung, Referenzfahrt, 5-mm-Jog-Rückfahrt und ein vollständiger Kontur-Trockenlauf am M3 mit Laser-Aus bestätigt; reale Laser-/Materialbearbeitung noch nicht abgenommen.
 
 **Lizenz:** [Source Available, Nutzung auch gewerblich erlaubt, Weitergabe nur kostenlos](LICENSE). Bezahlte Laserarbeiten sind erlaubt; das Programm und abgeleitete Versionen dürfen nicht verkauft oder gegen Bezahlung zugänglich gemacht werden. Das Verkaufsverbot entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
 
@@ -12,7 +12,7 @@ Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX
 ./run.sh
 ```
 
-[Berechnete Jobs und Gerätebetrieb](docs/GRBL_WORKFLOW.md) · [Bedienung und Build](docs/PROTOTYPE.md) · [Objekte und Gruppen](docs/OBJECTS_GROUPS.md) · [Materialbibliothek](docs/MATERIAL_LIBRARY.md) · [Prüfbericht](docs/QA_REPORT.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md) · [Materialreferenz des Herstellers](docs/MANUFACTURER_MATERIALS.md)
+[Relief / 2,5D-Tiefenkarten](docs/RELIEF.md) · [Berechnete Jobs und Gerätebetrieb](docs/GRBL_WORKFLOW.md) · [Bedienung und Build](docs/PROTOTYPE.md) · [Objekte und Gruppen](docs/OBJECTS_GROUPS.md) · [Materialbibliothek](docs/MATERIAL_LIBRARY.md) · [Prüfbericht](docs/QA_REPORT.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md) · [Materialreferenz des Herstellers](docs/MANUFACTURER_MATERIALS.md)
 
 ![Blazer Studio – berechnete Pfadvorschau](assets/prototype.png)
 
@@ -24,7 +24,7 @@ Ein angenehmer, moderner Arbeitsablauf für Gravieren und Schneiden: Werkstücke
 
 ## Bedienkonzept
 
-- Arbeitsbereiche **Vorbereiten · Vorschau · Gerät**.
+- Arbeitsbereiche **Vorbereiten · Vorschau · Gerät · Relief**.
 - Große maßstäbliche 2D-Arbeitsfläche mit Raster, Zoom und direkter Objektbearbeitung.
 - Geräte- und Materialprofile sowie Objektliste links; Bearbeitungsparameter rechts.
 - Einstellungen in den Stufen **Einfach / Erweitert / Experte**.

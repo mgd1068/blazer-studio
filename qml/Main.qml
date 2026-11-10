@@ -60,7 +60,7 @@ ApplicationWindow {
         // Commit the focused editor before changing the selected object.
         objectList.forceActiveFocus(Qt.MouseFocusReason)
         project.select(index)
-        page = 0
+        page = project.selection.kind === "relief" ? 3 : 0
         canvas.ensureSelectionVisible()
         objectList.positionViewAtIndex(project.selected, ListView.Contain)
     }
@@ -147,6 +147,7 @@ ApplicationWindow {
     FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     FileDialog { id: gcodeDialog; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: imageDialog; title: "Bild importieren"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: project.importImage(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
+    FileDialog { id: reliefDialog; title: "Relief-Tiefenkarte importieren"; nameFilters: ["Tiefenkarten (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: { if (project.importRelief(selectedFile)) win.page = 3 } onVisibleChanged: if (visible) machine.focus(false) }
     Dialog {
         id: materialTestDialog
         objectName: "materialTestDialog"
@@ -204,11 +205,11 @@ ApplicationWindow {
             }
             Item { Layout.fillWidth: true }
             Rectangle {
-                Layout.preferredWidth: 368; height: 40; radius: 7; color: "#22313e"
+                Layout.preferredWidth: 489; height: 40; radius: 7; color: "#22313e"
                 Row {
                     anchors.fill: parent; anchors.margins: 4; spacing: 3
                     Repeater {
-                        model: ["01  Vorbereiten", "02  Vorschau", "03  Gerät"]
+                        model: ["01  Vorbereiten", "02  Vorschau", "03  Gerät", "04  Relief"]
                         delegate: Button {
                             required property string modelData
                             required property int index
@@ -498,7 +499,7 @@ ApplicationWindow {
                         }
                     }
                     Item { Layout.fillHeight: true }
-                    Text { text: "Blazer Studio · 0.4\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
+                    Text { text: "Blazer Studio · 0.5\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
                     }
                 }
             }
@@ -517,7 +518,7 @@ ApplicationWindow {
                         ActionButton { text: "↶"; hint: "Rückgängig · Strg+Z"; compact: true; dark: win.night; enabled: project.canUndo; onClicked: project.undo() }
                         ActionButton { text: "↷"; hint: "Wiederholen · Strg+Umschalt+Z"; compact: true; dark: win.night; enabled: project.canRedo; onClicked: project.redo() }
                         Item { Layout.fillWidth: true }
-                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 9; font.letterSpacing: 1 }
+                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : win.page === 3 ? "RELIEF / TIEFENKARTE" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 9; font.letterSpacing: 1 }
                     }
                 }
                 Rectangle {
@@ -528,7 +529,7 @@ ApplicationWindow {
                 }
                 StackLayout {
                     Layout.fillWidth: true; Layout.fillHeight: true
-                    currentIndex: win.page === 2 ? 1 : 0
+                    currentIndex: win.page === 3 ? 2 : win.page === 2 ? 1 : 0
                     Item {
                         Workspace { id: canvas; objectName: "workspace"; anchors.fill: parent; document: project; simulator: machine; preview: win.page === 1; dark: win.night }
                         Rectangle {
@@ -627,6 +628,7 @@ ApplicationWindow {
                             Item { height: 20 }
                         }
                     }
+                    ReliefPanel { dark: win.night; onImportRequested: reliefDialog.open() }
                 }
                 Rectangle {
                     Layout.fillWidth: true; Layout.preferredHeight: 39; color: win.panel
@@ -664,11 +666,11 @@ ApplicationWindow {
                                     Switch { checked: win.currentLayer.enabled; implicitHeight: 24; onToggled: project.setLayerSetting(win.operation,"enabled",checked) }
                                 }
                             }
-                            NumberField { label: "v"; value: win.currentLayer.speed; unit: "mm/min"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"speed",n) }
-                            NumberField { label: "P"; value: win.currentLayer.power; unit: "%"; decimals: 1; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"power",n) }
-                            NumberField { label: "×"; value: win.currentLayer.passes; unit: "Mal"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"passes",n) }
-                            NumberField { visible: win.operation === 0; label: "↕"; value: win.currentLayer.interval; unit: "mm"; decimals: 3; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"interval",n) }
-                            Text { text: "Profilwerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            NumberField { visible: project.selection.kind !== "relief"; label: "v"; value: win.currentLayer.speed; unit: "mm/min"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"speed",n) }
+                            NumberField { visible: project.selection.kind !== "relief"; label: "P"; value: win.currentLayer.power; unit: "%"; decimals: 1; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"power",n) }
+                            NumberField { visible: project.selection.kind !== "relief"; label: "×"; value: win.currentLayer.passes; unit: "Mal"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"passes",n) }
+                            NumberField { visible: win.operation === 0 && project.selection.kind !== "relief"; label: "↕"; value: win.currentLayer.interval; unit: "mm"; decimals: 3; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"interval",n) }
+                            Text { text: project.selection.kind === "relief" ? "Relief: eigene Objektwerte unten; Schichten und Raster im Bereich Relief." : "Profilwerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                             SectionLabel { text: "AUSGEWÄHLTES OBJEKT"; dark: win.night }
                             TextField {

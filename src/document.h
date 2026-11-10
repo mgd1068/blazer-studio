@@ -1,5 +1,6 @@
 #pragma once
 #include "job.h"
+#include "relief.h"
 #include "svgasset.h"
 #include <QAbstractListModel>
 #include <QColor>
@@ -16,6 +17,8 @@ struct Artwork {
     std::shared_ptr<const SvgAsset> asset;
     QString groupId{}, groupName{};
     QVariantMap settings{};
+    std::shared_ptr<const ReliefAsset> reliefAsset{};
+    ReliefSettings relief{};
     bool operator==(const Artwork &) const = default;
 };
 
@@ -75,6 +78,8 @@ class Document : public QAbstractListModel {
     QVariantMap jobSummary() const { return job().summary(); }
     Q_INVOKABLE bool exportGcode(const QUrl &url);
     Q_INVOKABLE bool importImage(const QUrl &url);
+    Q_INVOKABLE bool importRelief(const QUrl &url);
+    Q_INVOKABLE void setReliefSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void setObjectSetting(const QString &key, double value);
     Q_INVOKABLE bool createMaterialTest(double minSpeed, double maxSpeed, double minPower,
                                         double maxPower, int steps, double moduleW);

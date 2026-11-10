@@ -1,6 +1,7 @@
 #include "document.h"
 #include "machine.h"
 #include "materiallibrary.h"
+#include "reliefpreview.h"
 #include "workspace.h"
 #include <QFile>
 #include <QGuiApplication>
@@ -16,6 +17,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("BlazerStudio");
     QQuickStyle::setStyle("Basic");
     qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
+    qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
     Document document;
     MaterialLibrary materialLibrary;
     Machine simulator(&document);
@@ -41,6 +43,8 @@ int main(int argc, char **argv) {
         return 1;
     auto args = app.arguments();
     auto *root = engine.rootObjects().first();
+    if (args.contains("--new"))
+        document.newProject();
     if (args.contains("--dark"))
         root->setProperty("night", true);
     int view = args.indexOf("--view");
@@ -59,6 +63,10 @@ int main(int argc, char **argv) {
     int bitmap = args.indexOf("--import-image");
     if (bitmap >= 0 && bitmap + 1 < args.size())
         document.importImage(QUrl::fromLocalFile(args[bitmap + 1]));
+    int relief = args.indexOf("--import-relief");
+    if (relief >= 0 && relief + 1 < args.size() &&
+        !document.importRelief(QUrl::fromLocalFile(args[relief + 1])))
+        return 2;
     int exported = args.indexOf("--export-gcode");
     if (exported >= 0 && exported + 1 < args.size()) {
         bool ok = document.exportGcode(QUrl::fromLocalFile(args[exported + 1]));

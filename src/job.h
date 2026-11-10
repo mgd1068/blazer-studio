@@ -11,6 +11,7 @@ struct JobMove {
     double speed = 0, power = 0;
     int layer = 0;
     bool rapid = false;
+    int slice = 0;
 };
 struct JobPlan {
     QVector<JobMove> moves;

@@ -17,6 +17,7 @@
 namespace {
 constexpr qint64 maxProjectBytes = 16 * 1024 * 1024;
 constexpr qint64 maxEmbeddedBytes = 8 * 1024 * 1024;
+constexpr qint64 maxReliefPixels = 4 * 1024 * 1024;
 QString id() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
@@ -124,6 +125,7 @@ QVariantMap Document::selection() const {
             {"grouped", group},
             {"groupId", group ? a.groupId : QString()},
             {"customSettings", !a.settings.isEmpty()},
+            {"relief", a.relief.toMap()},
             {"speed", a.settings.value("speed", m_layers[a.layer].toMap()["speed"])},
             {"power", a.settings.value("power", m_layers[a.layer].toMap()["power"])}};
 }
@@ -357,12 +359,23 @@ bool Document::canAppend(const Artwork &a) {
         notify("Maximal 2000 Objekte pro Projekt.");
         return false;
     }
-    qint64 size = a.asset ? a.asset->bytes.size() : 0;
-    for (const auto &i : m_items)
+    qint64 size =
+        (a.asset ? a.asset->bytes.size() : 0) + (a.reliefAsset ? a.reliefAsset->png.size() : 0);
+    qint64 pixels = a.reliefAsset ? a.reliefAsset->image.sizeInBytes() / 4 : 0;
+    for (const auto &i : m_items) {
+        if (i.reliefAsset)
+            pixels += i.reliefAsset->image.sizeInBytes() / 4;
         if (i.asset)
             size += i.asset->bytes.size();
+        if (i.reliefAsset)
+            size += i.reliefAsset->png.size();
+    }
+    if (pixels > maxReliefPixels) {
+        notify("Tiefenkarten dürfen zusammen maximal 4 Megapixel enthalten.");
+        return false;
+    }
     if (size > maxEmbeddedBytes) {
-        notify("Eingebettete SVGs dürfen zusammen maximal 8 MB groß sein.");
+        notify("Eingebettete Grafiken dürfen zusammen maximal 8 MB groß sein.");
         return false;
     }
     return true;
@@ -412,10 +425,15 @@ void Document::duplicateSelected() {
         return;
     QList<Artwork> copies;
     QMap<QString, QString> groups;
-    qint64 bytes = 0;
-    for (const auto &a : m_items)
+    qint64 bytes = 0, pixels = 0;
+    for (const auto &a : m_items) {
         if (a.asset)
             bytes += a.asset->bytes.size();
+        if (a.reliefAsset) {
+            bytes += a.reliefAsset->png.size();
+            pixels += a.reliefAsset->image.sizeInBytes() / 4;
+        }
+    }
     for (int row : m_selection) {
         auto a = m_items[row];
         a.id = id();
@@ -425,6 +443,10 @@ void Document::duplicateSelected() {
             return;
         if (a.asset)
             bytes += a.asset->bytes.size();
+        if (a.reliefAsset) {
+            bytes += a.reliefAsset->png.size();
+            pixels += a.reliefAsset->image.sizeInBytes() / 4;
+        }
         if (!a.groupId.isEmpty()) {
             if (!groups.contains(a.groupId))
                 groups[a.groupId] = id();
@@ -433,7 +455,7 @@ void Document::duplicateSelected() {
         }
         copies.append(a);
     }
-    if (bytes > maxEmbeddedBytes)
+    if (bytes > maxEmbeddedBytes || pixels > maxReliefPixels)
         return;
     checkpoint();
     beginResetModel();
@@ -504,6 +526,11 @@ void Document::setProperty(const QString &key, const QVariant &value) {
 void Document::setLayer(int layerIndex) {
     if (m_selection.isEmpty() || layerIndex < 0 || layerIndex > 1)
         return;
+    for (int row : m_selection)
+        if (m_items[row].kind == "relief" && layerIndex != 0) {
+            notify("Reliefbilder werden ausschließlich graviert.");
+            return;
+        }
     bool change = false;
     for (int row : m_selection)
         change |= m_items[row].layer != layerIndex;
@@ -567,6 +594,8 @@ bool Document::applyMaterial(const QVariantMap &profile) {
     checkpoint();
     m_layers = updated;
     m_material = profile;
+    for (auto &item : m_items)
+        item.relief.depthPerPass = 0;
     refresh();
     notify("Material übernommen: " + profile["name"].toString() +
            " · eigene Prüfung erforderlich.");
@@ -658,9 +687,13 @@ QByteArray Document::serialize() const {
             {"groupId", a.groupId},
             {"groupName", a.groupName},
             {"settings", QJsonObject::fromVariantMap(a.settings)},
+            {"relief",
+             a.reliefAsset ? QJsonObject::fromVariantMap(a.relief.toMap()) : QJsonObject()},
+            {"depthMap",
+             a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
     return QJsonDocument(QJsonObject{{"format", "blazer-studio"},
-                                     {"version", 4},
+                                     {"version", 5},
                                      {"units", "mm"},
                                      {"origin", "bottom-left"},
                                      {"title", m_title},
@@ -678,7 +711,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 4) ||
+        !number(root, "version", 1, 5) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -708,7 +741,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
         state.layers.append(map);
     }
     QSet<QString> ids;
-    qint64 embedded = 0;
+    qint64 embedded = 0, pixels = 0;
     for (const auto &value : objects) {
         if (!value.isObject())
             return {};
@@ -730,7 +763,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
                   o["layer"].toInt(),
                   o["visible"].toBool(),
                   {}};
-        if (!QStringList{"rect", "ellipse", "text", "svg"}.contains(a.kind))
+        if (!QStringList{"rect", "ellipse", "text", "svg", "relief"}.contains(a.kind))
             return {};
         if (version == 1)
             a.bounds.moveTop(Geometry::bedHeight - a.bounds.y() - a.bounds.height());
@@ -777,6 +810,29 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
             }
             a.settings = settings.toVariantMap();
         }
+        if (a.kind == "relief") {
+            if (version < 5 || a.layer != 0 || !o["depthMap"].isString() ||
+                !o["relief"].isObject() ||
+                !ReliefSettings::fromMap(o["relief"].toObject().toVariantMap(), a.relief))
+                return {};
+            auto decoded = QByteArray::fromBase64Encoding(o["depthMap"].toString().toLatin1(),
+                                                          QByteArray::AbortOnBase64DecodingErrors);
+            if (!decoded)
+                return {};
+            embedded += decoded.decoded.size();
+            if (embedded > maxEmbeddedBytes)
+                return {};
+            a.reliefAsset = ReliefAsset::parse(decoded.decoded);
+            if (!a.reliefAsset)
+                return {};
+            pixels += a.reliefAsset->image.sizeInBytes() / 4;
+            if (pixels > maxReliefPixels)
+                return {};
+        } else if (version >= 5 &&
+                   ((!o["depthMap"].isUndefined() && o["depthMap"].toString() != "") ||
+                    (!o["relief"].isUndefined() &&
+                     (!o["relief"].isObject() || !o["relief"].toObject().isEmpty()))))
+            return {};
         state.items.append(a);
     }
     if (root.contains("material")) {
@@ -1050,8 +1106,11 @@ void Document::setObjectSetting(const QString &key, double value) {
     if (!changed)
         return;
     checkpoint();
-    for (int row : m_selection)
+    for (int row : m_selection) {
+        if (m_items[row].settings.value(key) != value)
+            m_items[row].relief.depthPerPass = 0;
         m_items[row].settings[key] = value;
+    }
     refresh();
 }
 bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPower,
@@ -1102,4 +1161,60 @@ bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPo
     notify("Materialtest: Zeilen unten→oben = Geschwindigkeit, Spalten links→rechts = Leistung. "
            "Noch kein Laserstart.");
     return true;
+}
+
+bool Document::importRelief(const QUrl &url) {
+    QImageReader reader(url.toLocalFile());
+    reader.setAutoTransform(true);
+    auto size = reader.size();
+    if (!url.isLocalFile() || !size.isValid() || qint64(size.width()) * size.height() > 16000000) {
+        notify("Tiefenkarte ungültig oder größer als 16 Megapixel.");
+        return false;
+    }
+    auto image = reader.read();
+    if (image.width() > 512 || image.height() > 512)
+        image = image.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    auto asset = ReliefAsset::fromImage(image);
+    if (!asset) {
+        notify("Tiefenkarte konnte nicht gelesen werden.");
+        return false;
+    }
+    Artwork a{id(),
+              QFileInfo(url.toLocalFile()).completeBaseName(),
+              "relief",
+              "",
+              QRectF(10, 10, image.width() * .1, image.height() * .1),
+              0,
+              true,
+              {}};
+    a.reliefAsset = asset;
+    // Keep initial physical size editable, including tiny input maps.
+    a.settings = {{"speed", m_layers[0].toMap()["speed"]}, {"power", m_layers[0].toMap()["power"]}};
+    if (!canAppend(a))
+        return false;
+    appendArtwork(a);
+    notify("Tiefenkarte importiert · Weiß bleibt stehen, Schwarz erhält alle Schichten.");
+    return true;
+}
+void Document::setReliefSetting(const QString &key, const QVariant &value) {
+    if (m_selection.size() != 1 || m_items[m_selected].kind != "relief")
+        return;
+    auto map = m_items[m_selected].relief.toMap();
+    if (!map.contains(key))
+        return;
+    map[key] = value;
+    ReliefSettings result;
+    if (!ReliefSettings::fromMap(map, result)) {
+        notify(
+            "Reliefwerte ungültig: 1–256 Schichten, Raster 0,02–2 mm, Gamma 0,1–5, Abtrag 0–1 mm.");
+        emit selectionChanged();
+        return;
+    }
+    if (result == m_items[m_selected].relief)
+        return;
+    if (result.interval != m_items[m_selected].relief.interval)
+        result.depthPerPass = 0;
+    checkpoint();
+    m_items[m_selected].relief = result;
+    refresh();
 }

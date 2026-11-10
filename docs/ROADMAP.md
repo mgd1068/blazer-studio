@@ -59,3 +59,7 @@ Bestehende Schutzfunktionen bleiben erhalten. Ein Software-Stop ersetzt keinen H
 Erledigt: LightBurn-Profil gelesen (M3/GRBL, 200 × 150 mm, 115200 Baud, S-Max 1000, Fokuspunkt 2 %, Z aus), C++/Qt-Projekt gebaut, Editor mit einfachen Formen/Text und SVG-Grafiken, numerische Maße, zwei Bearbeitungen, Undo/Redo, eigene Projektdatei und Gerätebedienung im Simulator. Persistente bearbeitbare Materialbibliothek mit Toolkopffilter, einheitliche Koordinaten unten links, Mehrfachauswahl, Objektgruppen und numerische Auswahltransformationen sind ergänzt. Kern-, Qt-Quick-Bedien- und Katalogtests bestehen.
 
 Ergänzt in 0.4: Controllerabfrage und Bewegung mit Laser-Aus am M3 bestätigt; Schnitt-/Füllpfade, Text-/SVG-Vektorgeometrie, Bild-Dithering, GCode und GRBL-Übertragung implementiert; Materialtest-Generator. Noch offen: reale Emissions-/Materialabnahme, erweiterte Import-/Zeichen-/Bildfunktionen, Kalibrierung, Autosave und Mehrseitenmodell. Die Übersicht ist kein Abschlussvermerk für ganze F-IDs. Details: [Prototyp](PROTOTYPE.md).
+
+## Stand 0.5: geschichtete Reliefgravur
+
+Eigener Reliefbereich mit Graustufen-Tiefenkarten, 1–256 Schichten, Umkehr/Gamma, Schichtmasken, relativer 3D-Vorschau und optionaler Abtragskalibrierung umgesetzt. Gleiche Pfade für GCode, Simulator und GRBL. Reale Eignung des M3 für fühlbare Kieselreliefs ist offen; keine automatische Foto-Tiefenrekonstruktion oder Z-Nachführung. Siehe [Relief](RELIEF.md).

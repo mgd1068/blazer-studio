@@ -193,6 +193,8 @@ void Workspace::paint(QPainter *p) {
                     p->drawRect(a.bounds);
                 else if (a.kind == "ellipse")
                     p->drawEllipse(a.bounds);
+                else if (a.kind == "relief" && a.reliefAsset)
+                    p->drawImage(a.bounds, a.reliefAsset->image);
                 else if (a.kind == "svg") {
                     if (a.asset)
                         a.asset->renderer->render(p, a.bounds);

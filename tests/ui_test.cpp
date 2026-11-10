@@ -1,5 +1,6 @@
 #include "document.h"
 #include "materiallibrary.h"
+#include "reliefpreview.h"
 #include "simulator.h"
 #include "workspace.h"
 #include <QFile>
@@ -19,6 +20,7 @@ class UiTest : public QObject {
     void editNavigateAndFocus() {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
+        qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
         Document project;
         QTemporaryDir storage;
         MaterialLibrary library(storage.filePath("materials.json"));
@@ -363,6 +365,39 @@ class UiTest : public QObject {
         QVERIFY(prepare);
         click(prepare);
         QTRY_COMPARE(project.count(), 16);
+        project.newProject();
+        QImage reliefMap(16, 16, QImage::Format_ARGB32);
+        reliefMap.fill(QColor(128, 128, 128));
+        const auto reliefPath = storage.filePath("depth.png");
+        QVERIFY(reliefMap.save(reliefPath));
+        QVERIFY(project.importRelief(QUrl::fromLocalFile(reliefPath)));
+        auto *reliefTab = item("workflow3");
+        QVERIFY(reliefTab);
+        click(reliefTab);
+        QTRY_COMPARE(w->property("page").toInt(), 3);
+        QVERIFY(item("reliefPanel"));
+        auto *invert = item("reliefInvert");
+        QVERIFY(invert);
+        click(invert);
+        QTRY_VERIFY(project.items()[0].relief.inverted);
+        auto *gammaInput = item("reliefGamma");
+        QVERIFY(gammaInput);
+        click(gammaInput);
+        gammaInput->setProperty("inputText", "2,0");
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.items()[0].relief.gamma, 2.);
+        project.setReliefSetting("depthPerPass", .02);
+        QTRY_VERIFY(item("reliefDepthLabel")->property("text").toString().contains("0.320"));
+        auto *slice = item("reliefSlice");
+        QVERIFY(slice);
+        click(slice);
+        QTest::mouseClick(
+            w, Qt::LeftButton, {},
+            slice->mapToScene(QPointF(slice->width() - 2, slice->height() / 2)).toPoint());
+        QTRY_COMPARE(item("reliefPreview")->property("slice").toInt(), 16);
+        QVERIFY(!w->grabWindow().isNull());
+        w->setProperty("page", 0);
+
         QVERIFY(project.job().valid());
         project.addShape("rect");
         QVERIFY(project.dirty());

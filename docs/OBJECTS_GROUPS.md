@@ -16,6 +16,6 @@ Eine Gruppe lässt sich gemeinsam ziehen, über X/Y platzieren, über Breite/Hö
 
 Einzelmitglieder bleiben über ihren Objektnamen links erreichbar; auf der Zeichenfläche wählt Alt-Klick ein einzelnes Gruppenmitglied. Gruppen sind zunächst flach. Erneutes Gruppieren ordnet die gewählten Mitglieder einer neuen Gruppe zu, statt verschachtelte Untergruppen anzulegen.
 
-Projektformat **4** ergänzt eigene Leistungs-/Geschwindigkeitswerte, etwa für Materialtest-Zellen; es speichert weiterhin Gruppen, Mitgliedschaften, Namen und Mehrfachauswahl. Dateien der Formate 1, 2 und 3 werden weiter gelesen. Neu gespeicherte Dateien benötigen den neuen Programmstand. SVG-Import bleibt eine zusammenhängende Grafik; die Gruppierungsfunktion zerlegt SVG-Inhalte nicht automatisch.
+Projektformat **5** ergänzt Relief-Tiefenkarten und deren Parameter zusätzlich zu eigenen Leistungs-/Geschwindigkeitswerten, etwa für Materialtest-Zellen; es speichert weiterhin Gruppen, Mitgliedschaften, Namen und Mehrfachauswahl. Dateien der Formate 1, 2, 3 und 4 werden weiter gelesen. Neu gespeicherte Dateien benötigen den neuen Programmstand. SVG-Import bleibt eine zusammenhängende Grafik; die Gruppierungsfunktion zerlegt SVG-Inhalte nicht automatisch.
 
 ![Ausgewählte Objektgruppe mit einzelnen Bearbeitungsarten](../assets/object-groups.png)

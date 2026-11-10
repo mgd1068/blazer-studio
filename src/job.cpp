@@ -174,7 +174,7 @@ QPainterPath JobPlanner::geometry(const Artwork &a, QString &error, bool fill) {
 JobPlan JobPlanner::build(const Document &d) {
     JobPlan job;
     QPointF head(0, 0);
-    auto add = [&](QPointF point, double feed, double power, int layer, bool rapid) {
+    auto add = [&](QPointF point, double feed, double power, int layer, bool rapid, int slice = 0) {
         if (job.moves.size() >= maxMoves) {
             if (!job.errors.contains("Job überschreitet 500000 Segmente."))
                 job.errors << "Job überschreitet 500000 Segmente.";
@@ -188,7 +188,7 @@ JobPlan JobPlanner::build(const Document &d) {
         const double length = QLineF(head, point).length();
         if (length < .000001)
             return true;
-        job.moves.append({head, point, feed, power, layer, rapid});
+        job.moves.append({head, point, feed, power, layer, rapid, slice});
         (rapid ? job.travelLength : job.workLength) += length;
         job.seconds += length / feed * 60;
         head = point;
@@ -200,6 +200,7 @@ JobPlan JobPlanner::build(const Document &d) {
         int layer;
     };
     QList<Shape> shapes;
+    QList<const Artwork *> reliefs;
     for (const auto &a : d.items()) {
         auto settings = d.layers()[a.layer].toMap();
         for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
@@ -208,6 +209,10 @@ JobPlan JobPlanner::build(const Document &d) {
             continue;
         if (!Geometry::insideBed(a.bounds)) {
             job.errors << a.name + ": außerhalb des Arbeitsraums.";
+            continue;
+        }
+        if (a.kind == "relief") {
+            reliefs.append(&a);
             continue;
         }
         QString error;
@@ -239,6 +244,61 @@ JobPlan JobPlanner::build(const Document &d) {
         auto aa = a.path.boundingRect(), bb = b.path.boundingRect();
         return aa.width() * aa.height() < bb.width() * bb.height();
     });
+    // Layer-by-layer threshold slicing. All points of slice n finish before n+1.
+    // A constant power/feed per slice makes the number of visits represent depth.
+    qint64 reliefChecks = 0;
+    for (const auto *item : reliefs) {
+        const auto &a = *item;
+        ReliefSettings p;
+        auto settings = d.layers()[0].toMap();
+        for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
+            settings[it.key()] = it.value();
+        const double speed = settings["speed"].toDouble(), power = settings["power"].toDouble();
+        if (a.layer != 0 || !a.reliefAsset || !ReliefSettings::fromMap(a.relief.toMap(), p) ||
+            !std::isfinite(speed) || speed < 1 || speed > 7000 || !std::isfinite(power) ||
+            power <= 0 || power > 100) {
+            job.errors << a.name + ": ungültige Reliefparameter (v: 1–7000 mm/min).";
+            continue;
+        }
+        const auto raster = ReliefRaster::build(*a.reliefAsset, p, a.bounds.size());
+        if (!raster.error.isEmpty()) {
+            job.errors << a.name + ": " + raster.error;
+            continue;
+        }
+        reliefChecks += qint64(raster.counts.size()) * p.passes;
+        if (reliefChecks > 20000000) {
+            job.errors
+                << "Relief-Gesamtjob zu aufwändig: maximal 20 Millionen Raster-/Schichtprüfungen.";
+            break;
+        }
+        const int columns = raster.columns, rows = raster.rows;
+        const auto &counts = raster.counts;
+        for (int slice = 1; slice <= p.passes && job.errors.isEmpty(); ++slice) {
+            for (int row = 0; row < rows && job.errors.isEmpty(); ++row) {
+                const bool reverse = (row + slice) % 2 != 0;
+                const double y =
+                    a.bounds.y() + std::min((row + .5) * p.interval, a.bounds.height() - 1e-8);
+                int start = -1;
+                for (int step = 0; step <= columns; ++step) {
+                    const int col = reverse ? columns - 1 - step : step;
+                    const bool active = step < columns && counts[row * columns + col] >= slice;
+                    if (active && start < 0)
+                        start = step;
+                    if (!active && start >= 0) {
+                        double x1 = reverse
+                                        ? std::min((columns - start) * p.interval, a.bounds.width())
+                                        : start * p.interval;
+                        double x2 = reverse ? (columns - step) * p.interval
+                                            : std::min(step * p.interval, a.bounds.width());
+                        if (!add({a.bounds.x() + x1, y}, 3000, 0, 0, true, slice) ||
+                            !add({a.bounds.x() + x2, y}, speed, power, 0, false, slice))
+                            break;
+                        start = -1;
+                    }
+                }
+            }
+        }
+    }
     for (const auto &shape : shapes) {
         const auto &settings = shape.settings;
         double speed = settings["speed"].toDouble(), power = settings["power"].toDouble();
@@ -350,7 +410,12 @@ QStringList JobPlan::gcode() const {
                       "G94", "S0"};
     bool emitting = false;
     double lastPower = -1, lastFeed = -1;
+    int lastSlice = 0;
     for (const auto &m : moves) {
+        if (m.slice > 0 && m.slice != lastSlice) {
+            lines << "(Relief slice " + QString::number(m.slice) + ")";
+            lastSlice = m.slice;
+        }
         if (m.rapid) {
             if (emitting) {
                 lines << "M5";

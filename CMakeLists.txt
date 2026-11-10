@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(BlazerStudio VERSION 0.4.0 LANGUAGES CXX)
+project(BlazerStudio VERSION 0.5.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Svg SerialPort)
@@ -9,6 +9,7 @@ option(BLAZER_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer
 option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
+    src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
     src/document.cpp src/document.h src/geometry.h src/job.cpp src/job.h
     src/svgasset.cpp src/svgasset.h src/materiallibrary.cpp src/materiallibrary.h
     src/grbl.cpp src/grbl.h src/machine.cpp src/machine.h
@@ -27,7 +28,7 @@ if(BLAZER_COVERAGE)
 endif()
 
 set(blazer_qml
-    qml/Main.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
+    qml/Main.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml)
 qt_add_executable(blazer-studio src/main.cpp)
 qt_add_qml_module(blazer-studio URI BlazerStudio VERSION 1.0 QML_FILES ${blazer_qml})
@@ -45,6 +46,9 @@ if(BUILD_TESTING)
     add_test(NAME grbl COMMAND blazer-grbl-tests -platform offscreen)
     qt_add_executable(blazer-grbl-probe tools/grbl_probe.cpp)
     target_link_libraries(blazer-grbl-probe PRIVATE blazer-core)
+    qt_add_executable(blazer-relief-tests tests/relief_test.cpp)
+    target_link_libraries(blazer-relief-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME relief COMMAND blazer-relief-tests -platform offscreen)
     qt_add_executable(blazer-job-tests tests/job_test.cpp)
     target_link_libraries(blazer-job-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME job COMMAND blazer-job-tests -platform offscreen)
@@ -53,7 +57,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-ui-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-ui-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME ui COMMAND blazer-ui-tests -platform offscreen)
-    set_tests_properties(core ui job grbl PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software" TIMEOUT 90)
+    set_tests_properties(core ui job grbl relief PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software" TIMEOUT 90)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)

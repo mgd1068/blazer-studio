@@ -1,4 +1,4 @@
-# Entwurf 0.4 ausprobieren
+# Entwurf 0.5 ausprobieren
 
 ## Start
 
@@ -35,7 +35,7 @@ Strg+S: Speichern, Strg+O: Öffnen, Strg+I: SVG importieren, Strg+Z: Undo, Strg+
 
 Die Vorschau zeigt berechnete Schnitt- und Füllbewegungen sowie Leerfahrten. Der Simulator spielt sie im 16-Sekunden-Zeitraffer ab. Die geometrische Zeitangabe berücksichtigt keine Beschleunigungen oder Kommunikationspausen. Vektoren werden linearisiert; SVGs bleiben im Editor zusammenhängend. Bilder sind zunächst schwarzweiß gedithert, keine Graustufen-Leistungsmodulation.
 
-Noch offen sind vollständige SVG-Kompatibilität, DXF-/PDF-/LightBurn-Projektimport, weitere Gestaltungswerkzeuge, mehrere Arbeitsblätter, Autosave, Absturzwiederherstellung sowie die tatsächliche Laser-/Materialabnahme. Undo bleibt auf 50 Schritte begrenzt. Projektformat 4 speichert eigene Zell-/Objektparameter; Formate 1–3 bleiben lesbar. Einzelheiten und konkrete Grenzen stehen im [Geräteworkflow](GRBL_WORKFLOW.md).
+Noch offen sind vollständige SVG-Kompatibilität, DXF-/PDF-/LightBurn-Projektimport, weitere Gestaltungswerkzeuge, mehrere Arbeitsblätter, Autosave, Absturzwiederherstellung sowie die tatsächliche Laser-/Materialabnahme. Undo bleibt auf 50 Schritte begrenzt. Projektformat 5 speichert eigene Zell-/Objektparameter und Tiefenkarten; Formate 1–4 bleiben lesbar. Einzelheiten und konkrete Grenzen stehen im [Geräteworkflow](GRBL_WORKFLOW.md).
 
 SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version abgelehnt. Die zwei Bearbeitungen Gravur und Schnitt sind vorerst fest vorgegeben; ihre Parameter und Ausgabe lassen sich über Profile oder einzeln ändern. Details: [Materialbibliothek](MATERIAL_LIBRARY.md).
 
@@ -63,3 +63,5 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 ```
 
 Der aktuelle Prüfumfang steht im [Prüfbericht](QA_REPORT.md). Reale serielle Verbindung und Bewegung wurden mit Laser-Aus bestätigt; echte Laseremission ist bisher kein Bestandteil der Geräteprüfung.
+
+Der zusätzliche Bereich **04 Relief** erzeugt geschichtete Gravurjobs aus Graustufen-Tiefenkarten. Bedienung, Kalibrierung und Hardwaregrenzen: [Relief](RELIEF.md). CLI: `--new --import-relief /pfad/depth.png --view 3`; kein automatischer Laserstart.
