@@ -288,6 +288,7 @@ ApplicationWindow {
                             }
                         }
                         Text { text: project.materialModified ? "Projektwerte weichen vom Profil ab" : (project.material.model !== "M3" ? "M3 Pro · Zuordnung zum M3 offen" : "Eigene Werte · noch nicht am Material geprüft"); color: project.materialModified ? "#bd8b40" : win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { visible: !!project.material.sourceParameters && project.material.sourceParameters.passes === null; text: "Gravur-Durchgänge: keine Herstellerangabe · Projektwert " + project.layers[0].passes; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Text { visible: materialLibrary.message.length > 0; text: materialLibrary.message; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                     ActionButton {

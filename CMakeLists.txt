@@ -12,6 +12,7 @@ qt_add_library(blazer-core STATIC
     src/document.cpp src/document.h src/geometry.h
     src/svgasset.cpp src/svgasset.h src/materiallibrary.cpp src/materiallibrary.h
     src/simulator.cpp src/simulator.h src/workspace.cpp src/workspace.h)
+qt_add_resources(blazer-core manufacturer_catalog PREFIX /catalog FILES profiles/manufacturer-materials.json)
 target_include_directories(blazer-core PUBLIC src)
 target_link_libraries(blazer-core PUBLIC Qt6::Quick Qt6::Svg)
 target_compile_options(blazer-core PRIVATE -Wall -Wextra -Wpedantic)

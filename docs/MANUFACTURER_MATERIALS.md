@@ -1,6 +1,6 @@
 # Materialvorgaben des Herstellers
 
-Quelle: [BlazeX – Maschineneinstellung](https://de.blazexlaser.com/pages/maschineneinstellung), abgerufen am 09.11.2026. Die Seite wurde direkt per HTTPS gelesen, nachdem der Web-Lesedienst sie nicht öffnen konnte.
+Quelle: [BlazeX – Maschineneinstellung](https://de.blazexlaser.com/pages/maschineneinstellung), erneut abgerufen am 10.11.2026 (Tabellen gegenüber 09.11. unverändert). Die Seite wurde direkt per HTTPS gelesen, nachdem der Web-Lesedienst sie nicht öffnen konnte.
 
 ## Modellzuordnung
 
@@ -31,7 +31,7 @@ Ein auffälliger Quellwert bleibt ausdrücklich unverändert: 5-W-Schnitt von Sp
 
 Links unter Material öffnet **Herstellerwerte ansehen** die Referenztabellen. Die Modul-/Bearbeitungsauswahl wechselt die Tabelle; es gibt bewusst keine automatische Übernahme in die beiden vorhandenen Bearbeitungen. Quelle und offene Modellzuordnung werden angezeigt. Aktive Projektwerte und die ursprüngliche LightBurn-Konfiguration bleiben unverändert.
 
-Zusätzlich existiert jetzt eine [eigene bearbeitbare Materialbibliothek](MATERIAL_LIBRARY.md). Zwei ausdrücklich als M3 Pro bezeichnete Kopien der 5-W-Schnittwerte für 3/5-mm-Sperrholz sind dort auswählbar; ihre Gravur ist deaktiviert. Die Modellzuordnung bleibt offen. Eigene Profile überschreiben die Herstellerquelle nicht.
+Zusätzlich existiert jetzt eine [eigene bearbeitbare Materialbibliothek](MATERIAL_LIBRARY.md). Alle 64 Tabellenzeilen stehen dort jetzt als ausdrücklich mit Modell, Modul und Bearbeitung bezeichnete Kopien zur Auswahl; jeweils nur die zugehörige Bearbeitung ist aktiviert. Fehlende Gravur-Durchgänge bleiben in der Quelle null; das Profil verwendet einen als eigenen Arbeitswert gekennzeichneten Durchgang. Die Modellzuordnung bleibt offen. Eigene Profile überschreiben die Herstellerquelle nicht.
 
 ## Erneut extrahieren
 

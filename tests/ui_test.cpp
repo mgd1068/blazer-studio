@@ -106,6 +106,14 @@ class UiTest : public QObject {
                                          ".compact.png"));
         w->resize(1480, 920);
         w->setProperty("night", false);
+        QTest::keyClick(w, Qt::Key_End);
+        QTest::keyClick(w, Qt::Key_Return);
+        QTRY_COMPARE(project.material()["moduleW"].toInt(), 1);
+        QCOMPARE(project.material()["sourceParameters"].toMap()["material"].toString(), "Kork");
+        QVERIFY(project.layers()[0].toMap()["enabled"].toBool());
+        QVERIFY(!project.layers()[1].toMap()["enabled"].toBool());
+        click(choice);
+        QTest::keyClick(w, Qt::Key_Home);
         QTest::keyClick(w, Qt::Key_Down);
         QTest::keyClick(w, Qt::Key_Return);
         QTRY_COMPARE(project.layers()[1].toMap()["speed"].toDouble(), 250.);

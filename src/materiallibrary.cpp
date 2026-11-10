@@ -6,11 +6,18 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
+#include <QResource>
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
 #include <cmath>
+
+// Referencing the initializer retains the bundled catalog in static-library consumers/tests.
+static void initializeCatalog() {
+    Q_INIT_RESOURCE(manufacturer_catalog);
+}
 
 namespace {
 bool stringValue(const QVariantMap &m, const QString &key, int limit, bool nonempty = false) {
@@ -33,22 +40,96 @@ QVariantMap operation(bool enabled, double speed, double power, int passes) {
             {"passes", passes},
             {"interval", .1}};
 }
+QVariantList manufacturerProfiles() {
+    static const bool initialized = [] {
+        initializeCatalog();
+        return true;
+    }();
+    Q_UNUSED(initialized);
+    QFile file(":/catalog/profiles/manufacturer-materials.json");
+    if (!file.open(QIODevice::ReadOnly))
+        qFatal("Bundled manufacturer catalog missing");
+    const auto catalog = QJsonDocument::fromJson(file.readAll()).object();
+    QVariantList list;
+    static const QRegularExpression thicknessPattern(R"((\d+(?:[.,]\d+)?)\s*mm\s*$)");
+    for (const auto &tableValue : catalog["tables"].toArray()) {
+        auto table = tableValue.toObject();
+        const int watts = table["modulePowerW"].toInt();
+        const QString mode = table["operation"].toString();
+        const bool engraving = mode == "engrave";
+        int row = 0;
+        for (const auto &entryValue : table["entries"].toArray()) {
+            auto entry = entryValue.toObject();
+            const QString material = entry["material"].toString();
+            QString id = QString("vendor-m3pro-%1w-%2-%3").arg(watts).arg(mode).arg(++row);
+            // Preserve the IDs of the two previously supplied editable profiles.
+            if (watts == 5 && !engraving &&
+                (material == "Sperrholz 3mm" || material == "Sperrholz 5mm"))
+                id = QString("vendor-copy-pro5w-plywood-%1").arg(material.contains("3mm") ? 3 : 5);
+            auto p = MaterialLibrary::example();
+            p["id"] = id;
+            p["name"] = QString("%1 · M3 Pro %2 W (%3)")
+                            .arg(material)
+                            .arg(watts)
+                            .arg(engraving ? "Gravur" : "Schnitt");
+            p["model"] = table["model"].toString();
+            p["moduleW"] = watts;
+            auto match = thicknessPattern.match(material);
+            p["thicknessMm"] =
+                match.hasMatch() ? match.captured(1).replace(',', '.').toDouble() : 0.;
+            p["source"] = catalog["sourceUrl"].toString();
+            QString notes =
+                QString(
+                    "Herstellerkopie vom %1 · %2. Quelle nennt M3 Pro; Zuordnung zum M3 offen. ")
+                    .arg(catalog["retrievedOn"].toString(), table["sourceTitle"].toString());
+            if (!match.hasMatch())
+                notes += "Stärke nicht angegeben (Feld 0 als Platzhalter). ";
+            if (engraving)
+                notes += "Gravur-Durchgänge fehlen in der Quelle: 1 ist ein eigener editierbarer "
+                         "Arbeitswert. ";
+            notes += engraving ? "Schneiden ist deaktiviert; dessen Felder sind eigene Platzhalter."
+                               : "Gravur ist deaktiviert; deren Felder sind eigene Platzhalter. "
+                                 "Das Schnittintervall ist ohne Funktion.";
+            if (watts == 5 && !engraving && material == "Sperrholz 10mm")
+                notes += " Quellenauffälligkeit: 10 mm mit 1 Durchgang, 8 mm mit 6; Originalwerte "
+                         "unverändert.";
+            if (watts == 1)
+                notes += " Hersteller empfiehlt das 1-W-Modul nicht zum Schneiden.";
+            p["notes"] = notes;
+            p["sourceTable"] = table["sourceTitle"].toString();
+            p["sourceParameters"] = entry.toVariantMap();
+            p["sourceRetrievedOn"] = catalog["retrievedOn"].toString();
+            p["sourceSha256"] = catalog["sourceSha256"].toString();
+            p["engrave"] = operation(false, 3000, 20, 1);
+            p["cut"] = operation(false, 600, 80, 1);
+            auto values =
+                operation(true, entry["speedMmMin"].toDouble(), entry["powerPercent"].toDouble(),
+                          engraving ? 1 : entry["passes"].toInt());
+            if (engraving)
+                values["interval"] = entry["intervalMm"].toDouble();
+            p[mode] = values;
+            QString error;
+            if (!MaterialLibrary::validate(p, error))
+                qFatal("Invalid bundled material profile: %s", qPrintable(error));
+            list.append(p);
+        }
+    }
+    if (list.size() != 64)
+        qFatal("Incomplete bundled manufacturer catalog");
+    // Keep the initial example and original two profiles at their familiar positions.
+    QVariantList ordered;
+    for (const QString id : {"vendor-copy-pro5w-plywood-3", "vendor-copy-pro5w-plywood-5"})
+        for (const auto &p : list)
+            if (p.toMap()["id"] == id)
+                ordered.append(p);
+    for (const auto &p : list)
+        if (!ordered.contains(p))
+            ordered.append(p);
+    return ordered;
+}
 QVariantList defaults() {
     QVariantList list{MaterialLibrary::example()};
-    for (int thickness : {3, 5}) {
-        auto p = MaterialLibrary::example();
-        p["id"] = QString("vendor-copy-pro5w-plywood-%1").arg(thickness);
-        p["name"] = QString("Sperrholz %1 mm · M3 Pro 5 W (Schnitt)").arg(thickness);
-        p["model"] = "M3 Pro";
-        p["thicknessMm"] = thickness;
-        p["source"] = "https://de.blazexlaser.com/pages/maschineneinstellung";
-        p["notes"] = "Eigene Kopie der Hersteller-Schnittvorgabe vom 09.11.2026. Quelle nennt M3 "
-                     "Pro; Zuordnung zum M3 offen. Gravur ist deaktiviert; deren Felder sind "
-                     "eigene Entwurfswerte, keine Herstellerangabe.";
-        p["engrave"] = operation(false, 3000, 20, 1);
-        p["cut"] = operation(true, thickness == 3 ? 250 : 120, 100, 1);
-        list.append(p);
-    }
+    list.append(manufacturerProfiles());
     return list;
 }
 } // namespace
@@ -128,6 +209,31 @@ MaterialLibrary::MaterialLibrary(QString path, QObject *parent) : QObject(parent
         parsed.append(p);
     }
     m_profiles = parsed;
+    // Add this catalog once to existing libraries; never replace edited user profiles.
+    // The marker also keeps deliberately deleted manufacturer profiles deleted.
+    if (root.value("manufacturerCatalogVersion").toInt() < 1) {
+        auto merged = parsed;
+        for (const auto &profile : manufacturerProfiles()) {
+            auto id = profile.toMap()["id"].toString();
+            if (!ids.contains(id))
+                merged.append(profile);
+        }
+        if (merged.size() > 1000) {
+            message(
+                "Herstellerprofile nicht ergänzt: Bibliothek würde 1000 Profile überschreiten.");
+            return;
+        }
+        const QString backup = m_path + ".before-manufacturer-v1.bak";
+        if (!QFile::exists(backup) && !QFile::copy(m_path, backup)) {
+            message("Herstellerprofile nicht ergänzt: Sicherung der bisherigen Bibliothek "
+                    "fehlgeschlagen.");
+            return;
+        }
+        if (persist(merged)) {
+            m_profiles = merged;
+            message("Hersteller-Materialliste ergänzt; eigene Profile und Änderungen erhalten.");
+        }
+    }
 }
 QStringList MaterialLibrary::names() const {
     QStringList names;
@@ -154,6 +260,7 @@ bool MaterialLibrary::persist(const QVariantList &profiles) {
         return false;
     }
     auto bytes = QJsonDocument(QJsonObject{{"schemaVersion", 1},
+                                           {"manufacturerCatalogVersion", 1},
                                            {"profiles", QJsonArray::fromVariantList(profiles)}})
                      .toJson();
     if (bytes.size() > 4 * 1024 * 1024 || !QDir().mkpath(QFileInfo(m_path).absolutePath())) {

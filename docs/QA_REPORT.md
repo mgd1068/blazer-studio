@@ -49,3 +49,11 @@ Regressionstest: geändertes Projekt schließen, Fokusfreigabe aufgehoben, Abbre
 ## Korrektur: abgeschnittene Materialauswahl (10.11.2026)
 
 Die Standard-ComboBox begrenzte die Liste auf die Breite der Seitenleiste. Ein eigenes Popup im Fenster-Overlay öffnet jetzt bis zu 560 Pixel breit und hält Abstand zum Fensterrand. Einträge und geschlossenes Auswahlfeld brechen lange Namen um; Farben berücksichtigen das helle und dunkle Design. Der Bedienungstest prüft sichtbare Textobjekte ohne Abschneiden, Popupbreite und Fenstergrenzen sowie die gewählte mehrzeilige Anzeige. Nach Fenstergrößenänderungen wartet der Maushelfer auf die Layoutaktualisierung. Qt-Quick-Bedienungstest bestanden; Screenshots in 1480 × 920 hell und 1180 × 760 dunkel visuell geprüft.
+
+## Vollständige auswählbare Herstellerbibliothek (10.11.2026)
+
+Herstellerseite erneut per HTTPS gelesen und mit dem bisherigen Datenbestand verglichen: fünf Tabellen und 64 Zeilen unverändert. Alle Zeilen erzeugen nun bearbeitbare Profile direkt aus dem eingebetteten Quellenkatalog, zusätzlich zum eigenen Beispiel. Es gibt keine zweite manuell gepflegte Parameterliste. Modell, Modul, Bearbeitung und Originalparameter bleiben nachvollziehbar. Gravur-Durchgänge fehlen in der Quelle; ein eigener anfänglicher Arbeitswert von 1 wird sichtbar gekennzeichnet und verändert den ursprünglichen Nullwert nicht. Die andere Bearbeitung ist jeweils deaktiviert.
+
+Bestehende Bibliotheken erhalten fehlende Profile einmalig. IDs, eigene Profile und Änderungen bleiben erhalten; die Originaldatei wird vorher gesichert. Ein gespeicherter Katalogversionsstand verhindert, dass bewusst gelöschte Vorgaben bei jedem Start wieder erscheinen.
+
+Neue Kernfälle prüfen jede einzelne der 64 Quellzeilen gegen genau ein Profil einschließlich Leistung, Geschwindigkeit, Durchgängen/Intervall, Modul und aktivierter Bearbeitung; alle Profile lassen sich ins Projekt übernehmen. Migration, Erhalt geänderter Werte, Sicherung, Löschen und erneutes Laden werden separat geprüft. Der UI-Test wählt auch den letzten 1-W-Eintrag per Tastatur und kehrt zum ursprünglichen Schnittprofil zurück. Alle drei CTest-Programme bestanden (jetzt 17 Kernfälle, kombinierter UI-Bedienfall, vier Python-Katalogfälle). Helle und kompakte dunkle Materiallisten visuell geprüft. Keine Hardwareaktion.

@@ -18,7 +18,7 @@ class CoreTest : public QObject {
         QTemporaryDir dir;
         const auto path = dir.filePath("materials.json");
         MaterialLibrary library(path);
-        QCOMPARE(library.count(), 3);
+        QCOMPARE(library.count(), 65);
         auto profile = library.profileAt(1);
         QCOMPARE(profile["cut"].toMap()["speed"].toDouble(), 250.);
         profile["name"] = "Mein Sperrholz";
@@ -33,14 +33,103 @@ class CoreTest : public QObject {
         const auto copy = reopened.duplicateProfile(reopened.indexOf(id));
         QVERIFY(!copy.isEmpty());
         QVERIFY(copy != id);
-        QCOMPARE(reopened.count(), 4);
+        QCOMPARE(reopened.count(), 66);
         QVERIFY(reopened.removeProfile(copy));
-        QCOMPARE(reopened.count(), 3);
+        QCOMPARE(reopened.count(), 65);
         profile["name"] = " ";
         QVERIFY(reopened.saveProfile(profile).isEmpty());
-        QCOMPARE(reopened.count(), 3);
+        QCOMPARE(reopened.count(), 65);
         for (const auto &name : reopened.names())
             QVERIFY(!name.trimmed().isEmpty());
+    }
+    void completeManufacturerLibrary() {
+        QTemporaryDir dir;
+        MaterialLibrary library(dir.filePath("materials.json"));
+        QFile file(":/catalog/profiles/manufacturer-materials.json");
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        auto catalog = QJsonDocument::fromJson(file.readAll()).object();
+        int sourceCount = 0;
+        for (const auto &tableValue : catalog["tables"].toArray()) {
+            auto table = tableValue.toObject();
+            for (const auto &entryValue : table["entries"].toArray()) {
+                auto source = entryValue.toObject();
+                int matches = 0;
+                for (int i = 0; i < library.count(); ++i) {
+                    auto profile = library.profileAt(i);
+                    if (profile["sourceTable"] != table["sourceTitle"].toVariant() ||
+                        profile["sourceParameters"].toMap() != source.toVariantMap())
+                        continue;
+                    ++matches;
+                    QString error;
+                    QVERIFY2(MaterialLibrary::validate(profile, error), qPrintable(error));
+                    const auto mode = table["operation"].toString();
+                    auto values = profile[mode].toMap();
+                    QCOMPARE(values["speed"].toDouble(), source["speedMmMin"].toDouble());
+                    QCOMPARE(values["power"].toDouble(), source["powerPercent"].toDouble());
+                    QVERIFY(values["enabled"].toBool());
+                    QVERIFY(!profile[mode == "engrave" ? "cut" : "engrave"]
+                                 .toMap()["enabled"]
+                                 .toBool());
+                    QCOMPARE(profile["moduleW"].toInt(), table["modulePowerW"].toInt());
+                    if (mode == "engrave") {
+                        QCOMPARE(values["interval"].toDouble(), source["intervalMm"].toDouble());
+                        QVERIFY(profile["sourceParameters"].toMap()["passes"].isNull());
+                        QVERIFY(profile["notes"].toString().contains("Arbeitswert"));
+                    } else {
+                        QCOMPARE(values["passes"].toInt(), source["passes"].toInt());
+                    }
+                    Document d;
+                    QVERIFY(d.applyMaterial(profile));
+                }
+                QCOMPARE(matches, 1);
+                ++sourceCount;
+            }
+        }
+        QCOMPARE(sourceCount, 64);
+        QCOMPARE(library.profileAt(library.indexOf("vendor-copy-pro5w-plywood-3"))["thicknessMm"]
+                     .toDouble(),
+                 3.);
+        QCOMPARE(
+            library.profileAt(library.indexOf("vendor-m3pro-5w-cut-9"))["thicknessMm"].toDouble(),
+            3.5);
+    }
+    void existingLibraryCatalogMigration() {
+        QTemporaryDir dir;
+        auto path = dir.filePath("materials.json");
+        MaterialLibrary defaults(dir.filePath("unused.json"));
+        auto edited = defaults.profileAt(1);
+        edited["name"] = "Mein eigener Schnitt";
+        auto cut = edited["cut"].toMap();
+        cut["power"] = 33.;
+        edited["cut"] = cut;
+        auto own = MaterialLibrary::example();
+        own["id"] = "my-custom-profile";
+        QJsonObject legacy{{"schemaVersion", 1},
+                           {"profiles", QJsonArray::fromVariantList({own, edited})}};
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        const auto original = QJsonDocument(legacy).toJson();
+        f.write(original);
+        f.close();
+        MaterialLibrary migrated(path);
+        QCOMPARE(migrated.count(), 65);
+        QCOMPARE(migrated.profileAt(migrated.indexOf(edited["id"].toString()))["cut"]
+                     .toMap()["power"]
+                     .toDouble(),
+                 33.);
+        QCOMPARE(migrated.profileAt(0)["id"].toString(), "my-custom-profile");
+        QFile backup(path + ".before-manufacturer-v1.bak");
+        QVERIFY(backup.open(QIODevice::ReadOnly));
+        QCOMPARE(backup.readAll(), original);
+        const auto id = "vendor-m3pro-1w-engrave-13";
+        QVERIFY(migrated.removeProfile(id));
+        MaterialLibrary reopened(path);
+        QCOMPARE(reopened.count(), 64);
+        QCOMPARE(reopened.indexOf(id), -1);
+        auto copy = reopened.duplicateProfile(0);
+        QVERIFY(!copy.isEmpty());
+        MaterialLibrary reopenedAgain(path);
+        QCOMPARE(reopenedAgain.count(), 65);
     }
     void damagedLibraryPreserved() {
         QTemporaryDir dir;
