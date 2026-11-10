@@ -1,6 +1,6 @@
 # Third-party notices
 
-The custom noncommercial license applies to original Blazer Studio code and
+The custom free-redistribution license applies to original Blazer Studio code and
 original documentation. It does not relicense third-party components.
 
 - **Qt 6 Core, Gui, Quick, QML, Quick Controls, SVG and Serial Port:** copyright

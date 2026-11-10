@@ -88,4 +88,4 @@ Dieser Abschnitt ersetzt die früheren Grenzen zu fehlenden Werkzeugwegen, GCode
 
 **Weiter offen:** reale Emissions-/Materialabnahme, Fokus-Puls am Gerät, komplexere Importformate und SVG-Sonderfälle, Beschleunigungs-/Kommunikationsmodell für Laufzeiten und der übrige LightBurn-Zielkatalog. Dies ist keine Produktionsfreigabe oder vollständige LightBurn-Gleichwertigkeit. Details und reproduzierbare Geräteprüfung: [GRBL-Workflow](GRBL_WORKFLOW.md).
 
-Lizenz: eigener Code unter Blazer Studio Noncommercial License 1.0; ausschließlich nichtkommerziell, Weitergabe kostenlos, daher Source Available statt OSI Open Source. Qt-Lizenztexte und Drittanbieterhinweise liegen bei. Rohe Geräteausgaben mit werkseitigen Netzwerkkennungen bleiben außerhalb des öffentlichen Repositorys.
+Lizenz: eigener Code unter Blazer Studio Free Redistribution License 1.0; Nutzung auch gewerblich erlaubt, Softwareverkauf verboten und Weitergabe kostenlos, daher Source Available statt OSI Open Source. Qt-Lizenztexte und Drittanbieterhinweise liegen bei. Rohe Geräteausgaben mit werkseitigen Netzwerkkennungen bleiben außerhalb des öffentlichen Repositorys.

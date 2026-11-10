@@ -1,5 +1,5 @@
-Blazer Studio Noncommercial License 1.0
-SPDX-License-Identifier: LicenseRef-Blazer-Studio-Noncommercial-1.0
+Blazer Studio Free Redistribution License 1.0
+SPDX-License-Identifier: LicenseRef-Blazer-Studio-Free-Redistribution-1.0
 
 Copyright (c) 2026 Mathias (GitHub: mgd1068) and the respective contributors.
 
@@ -7,18 +7,24 @@ Copyright (c) 2026 Mathias (GitHub: mgd1068) and the respective contributors.
 This license covers the original Blazer Studio implementation and original
 project documentation, unless a file identifies a different license or owner.
 Subject to these conditions, you may obtain, inspect, run, reproduce, modify,
-and redistribute this material, including modified versions, for noncommercial
-purposes. You receive no ownership of the authors' copyrights or trademarks.
+and redistribute this material, including modified versions, for any purpose,
+including commercial and professional use. You receive no ownership of the
+authors' copyrights or trademarks.
 
-2. Noncommercial restriction
-Commercial use is not permitted. In particular, you may not sell, rent, license
-for payment, monetize access to, or incorporate the software into a commercial
-product or service. You may not use it to perform paid laser work or otherwise
-use it primarily for commercial advantage or monetary compensation. Private
-hobby use, noncommercial learning, and noncommercial research are permitted.
-Ordinary hosting, mirroring, indexing, security analysis, and automated building
-of freely accessible copies by infrastructure providers are permitted; this
-does not authorize selling this software or charging for access to its copies.
+2. Commercial work permitted; selling the software prohibited
+You may use the software in a business, perform paid laser work, and sell the
+physical products or other output you create with it. You may charge for
+independent services such as training, installation, or support, provided the
+software itself remains freely available to the recipient without buying those
+services. Optional donations are permitted if they are not a condition of
+receiving or using the software.
+
+You may not sell or rent this software or modified versions, charge a license
+fee, charge for downloading or obtaining a copy, or require payment for access
+to or use of the software (including hosted access). Renaming, repackaging, or
+bundling it with another product or mandatory service does not permit charging
+for the software. Free redistribution, mirroring, indexing, security analysis,
+and automated building are permitted, including by commercial organizations.
 
 3. Free distribution and preservation of terms
 Copies and derivative versions may be distributed only without a fee or other
@@ -38,14 +44,13 @@ restrict rights to modify or replace LGPL-covered libraries or to reverse
 engineer a combined work to debug such library modifications. See
 THIRD_PARTY_NOTICES.md. Imported user projects, user artwork, and generated
 job files do not become subject to this license merely because the program
-reads or generates them; the restriction on commercial use of the program
-itself remains applicable. Manufacturer names and reference data are not
+reads or generates them. Commercial use and sale of those projects, artwork,
+and job files are permitted. Manufacturer names and reference data are not
 claimed as original Blazer Studio content.
 
 5. Termination and mandatory rights
-These permissions end if you violate these conditions. No permission for
-commercial exploitation is implied. Rights that applicable law prevents the
-licensor from restricting remain unaffected.
+These permissions end if you violate these conditions. Rights that applicable
+law prevents the licensor from restricting remain unaffected.
 
 6. Responsibility and liability
 You are responsible for evaluating and operating the software and any attached
@@ -55,6 +60,7 @@ legally permitted, they exclude warranties and liability for losses arising
 from use or distribution. Mandatory liability, including liability that cannot
 lawfully be excluded, is unaffected.
 
-This is a custom, source-available, noncommercial license. It is not an
+This is a custom, source-available license requiring free redistribution.
+Commercial use is permitted, but selling the software is prohibited. It is not an
 OSI-approved open-source license. The original authors retain all rights
 that have not been explicitly granted above.

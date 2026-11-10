@@ -4,7 +4,7 @@ Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX
 
 **Status:** Version 0.4 in C++20 / Qt Quick: Editor, Gruppen, Materialbibliothek, berechnete Schnitt-/Füllpfade, Vorschau, GCode-Export und GRBL-Anbindung. Verbindung, Referenzfahrt, 5-mm-Jog-Rückfahrt und ein vollständiger Kontur-Trockenlauf am M3 mit Laser-Aus bestätigt; reale Laser-/Materialbearbeitung noch nicht abgenommen.
 
-**Lizenz:** [Source Available, ausschließlich nichtkommerziell und kostenlos weiterzugeben](LICENSE). Kommerzielle Nutzung einschließlich bezahlter Laserarbeiten ist ausgeschlossen. Diese Einschränkung entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
+**Lizenz:** [Source Available, Nutzung auch gewerblich erlaubt, Weitergabe nur kostenlos](LICENSE). Bezahlte Laserarbeiten sind erlaubt; das Programm und abgeleitete Versionen dürfen nicht verkauft oder gegen Bezahlung zugänglich gemacht werden. Das Verkaufsverbot entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
 
 ## Entwurf starten
 
@@ -78,10 +78,10 @@ Die nächsten Schritte stehen in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Lizenz
 
-**Source Available – nur nichtkommerzielle Nutzung und kostenlose Weitergabe.**
+**Source Available – gewerbliche Nutzung erlaubt, Weitergabe ausschließlich kostenlos.**
 
-Es gilt die [Blazer Studio Noncommercial License 1.0](LICENSE). Änderungen und Weitergabe einschließlich Quellcode sind unter denselben Bedingungen erlaubt. Verkauf, entgeltlicher Zugang, kommerzielle Vermarktung und gewerblicher Einsatz für bezahlte Laseraufträge sind ausgeschlossen. Eigene Designs werden dadurch nicht automatisch unter diese Lizenz gestellt.
+Es gilt die [Blazer Studio Free Redistribution License 1.0](LICENSE). Nutzung, Änderungen und bezahlte Laserarbeiten sind erlaubt. Das Programm und abgeleitete Versionen dürfen ausschließlich kostenlos und unter denselben Bedingungen weitergegeben werden; bei Binärweitergabe muss der zugehörige Quellcode kostenlos mitgeliefert werden. Verkauf, Miet-/Lizenzgebühren und kostenpflichtiger Zugang zum Programm sind ausgeschlossen, auch bei Umbenennung oder Bündelung. Unabhängige Dienstleistungen wie Schulung, Installation und Support dürfen bezahlt werden, solange der Empfänger die Software ohne Kauf dieser Dienste kostenlos erhalten und nutzen kann. Eigene Designs und damit hergestellte Produkte dürfen verkauft werden.
 
-Wegen des Verbots kommerzieller Nutzung ist dies **keine OSI-Open-Source-Lizenz**. GitHub kann die eigene Lizenz als „Other“ anzeigen. Qt und andere Fremdbestandteile behalten ihre eigenen Rechte; siehe [Third-party notices](THIRD_PARTY_NOTICES.md). Die Anwendung nutzt dynamisch eingebundene Qt-Systembibliotheken; GPL-/LGPL-Texte liegen in `LICENSES/`.
+Wegen des Verkaufsverbots für die Software ist dies **keine OSI-Open-Source-Lizenz**. GitHub kann die eigene Lizenz als „Other“ anzeigen. Qt und andere Fremdbestandteile behalten ihre eigenen Rechte; siehe [Third-party notices](THIRD_PARTY_NOTICES.md). Die Anwendung nutzt dynamisch eingebundene Qt-Systembibliotheken; GPL-/LGPL-Texte liegen in `LICENSES/`.
 
-Source available; noncommercial use and free redistribution only. See `LICENSE` for binding terms.
+Source available; commercial use permitted, software redistribution only free of charge. See `LICENSE` for binding terms.
