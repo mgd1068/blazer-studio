@@ -14,5 +14,11 @@
   "originCode": 0,
   "source": "LightBurn prefs.ini · 09.11.2026",
   "hardwareVerified": false,
-  "note": "Konfiguration aus LightBurn; keine Live-Abfrage. Modellbezeichnung zusätzlich aus Katzenschild/Hinweise.txt."
+  "note": "Profil ursprünglich aus LightBurn. Controllerkennung, $30/$32, 200×150 mm und Referenzfahrt/Jog-Rückfahrt am 10.11.2026 seriell bestätigt. Keine optische Leistungs- oder Materialprüfung.",
+  "controllerFirmware": "Grbl_ESP32 1.3a.20211103",
+  "controllerMachineName": "Blaze X M3_C_V01",
+  "controllerReadVerifiedOn": "2026-11-10",
+  "motionCommandRoundTripVerified": true,
+  "laserEmissionVerified": false,
+  "materialParametersVerified": false
 }

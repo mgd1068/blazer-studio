@@ -1,6 +1,6 @@
 #include "document.h"
+#include "machine.h"
 #include "materiallibrary.h"
-#include "simulator.h"
 #include "workspace.h"
 #include <QFile>
 #include <QGuiApplication>
@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
     qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
     Document document;
     MaterialLibrary materialLibrary;
-    Simulator simulator;
+    Machine simulator(&document);
     QFile f(":/profiles/blaze-x-m3.json");
     if (!f.open(QIODevice::ReadOnly))
         return 1;
@@ -54,6 +54,19 @@ int main(int argc, char **argv) {
     int imported = args.indexOf("--import");
     if (imported >= 0 && imported + 1 < args.size())
         document.importSvg(QUrl::fromLocalFile(args[imported + 1]));
+    if (args.contains("--material-test"))
+        document.createMaterialTest(1000, 3000, 10, 50, 4, 5);
+    int bitmap = args.indexOf("--import-image");
+    if (bitmap >= 0 && bitmap + 1 < args.size())
+        document.importImage(QUrl::fromLocalFile(args[bitmap + 1]));
+    int exported = args.indexOf("--export-gcode");
+    if (exported >= 0 && exported + 1 < args.size()) {
+        bool ok = document.exportGcode(QUrl::fromLocalFile(args[exported + 1]));
+        if (!ok)
+            return 2;
+        if (!args.contains("--screenshot"))
+            return 0;
+    }
     if (args.contains("--materials"))
         QMetaObject::invokeMethod(root, "showManufacturerReference");
     int shot = args.indexOf("--screenshot");

@@ -352,6 +352,18 @@ class UiTest : public QObject {
         w->setProperty("night", true);
         QTest::qWait(40);
         QVERIFY(!w->grabWindow().isNull());
+        project.newProject();
+        auto *materialTest = item("materialTestButton");
+        QVERIFY(materialTest);
+        click(materialTest);
+        auto *testDialog = w->findChild<QObject *>("materialTestDialog");
+        QVERIFY(testDialog);
+        QTRY_VERIFY(testDialog->property("visible").toBool());
+        auto *prepare = item("prepareMaterialTestButton");
+        QVERIFY(prepare);
+        click(prepare);
+        QTRY_COMPARE(project.count(), 16);
+        QVERIFY(project.job().valid());
         project.addShape("rect");
         QVERIFY(project.dirty());
         machine.focus(true);

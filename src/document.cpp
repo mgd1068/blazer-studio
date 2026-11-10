@@ -2,6 +2,8 @@
 #include "geometry.h"
 #include "materiallibrary.h"
 #include <QFile>
+#include <QFileInfo>
+#include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,6 +11,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QUuid>
+#include <QXmlStreamWriter>
 #include <algorithm>
 
 namespace {
@@ -119,7 +122,10 @@ QVariantMap Document::selection() const {
             {"visible", visible},
             {"count", m_selection.size()},
             {"grouped", group},
-            {"groupId", group ? a.groupId : QString()}};
+            {"groupId", group ? a.groupId : QString()},
+            {"customSettings", !a.settings.isEmpty()},
+            {"speed", a.settings.value("speed", m_layers[a.layer].toMap()["speed"])},
+            {"power", a.settings.value("power", m_layers[a.layer].toMap()["power"])}};
 }
 void Document::select(int row) {
     if (row < -1 || row >= m_items.size())
@@ -268,6 +274,7 @@ bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
            a.material == b.material;
 }
 void Document::refresh(int row) {
+    m_job.reset();
     m_dirty = !sameContent(snapshot(), m_saved);
     if (row >= 0 && row < m_items.size())
         emit dataChanged(index(row), index(row));
@@ -575,6 +582,12 @@ bool Document::materialModified() const {
             if (expected.contains(key) && expected[key] != actual[key])
                 return true;
     }
+    for (const auto &a : m_items) {
+        auto expected = m_material[a.layer == 0 ? "engrave" : "cut"].toMap();
+        for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
+            if (expected.contains(it.key()) && expected[it.key()] != it.value())
+                return true;
+    }
     return false;
 }
 void Document::beginMove() {
@@ -644,9 +657,10 @@ QByteArray Document::serialize() const {
             {"visible", a.visible},
             {"groupId", a.groupId},
             {"groupName", a.groupName},
+            {"settings", QJsonObject::fromVariantMap(a.settings)},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
     return QJsonDocument(QJsonObject{{"format", "blazer-studio"},
-                                     {"version", 3},
+                                     {"version", 4},
                                      {"units", "mm"},
                                      {"origin", "bottom-left"},
                                      {"title", m_title},
@@ -664,7 +678,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 3) ||
+        !number(root, "version", 1, 4) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -746,6 +760,22 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
                  (QUuid(a.groupId).isNull() || a.groupName.trimmed().isEmpty())) ||
                 (a.groupId.isEmpty() && !a.groupName.isEmpty()))
                 return {};
+        }
+        if (version >= 4 && o.contains("settings")) {
+            if (!o["settings"].isObject())
+                return {};
+            auto settings = o["settings"].toObject();
+            for (auto it = settings.begin(); it != settings.end(); ++it) {
+                if (it.key() == "speed") {
+                    if (!number(settings, it.key(), 1, 100000))
+                        return {};
+                } else if (it.key() == "power") {
+                    if (!number(settings, it.key(), 0, 100))
+                        return {};
+                } else
+                    return {};
+            }
+            a.settings = settings.toVariantMap();
         }
         state.items.append(a);
     }
@@ -891,4 +921,185 @@ QStringList Document::issues() const {
     if (!count)
         result << "Keine sichtbaren Objekte mit aktivierter Bearbeitung.";
     return result;
+}
+
+const JobPlan &Document::job() const {
+    if (!m_job)
+        m_job = JobPlanner::build(*this);
+    return *m_job;
+}
+bool Document::exportGcode(const QUrl &url) {
+    if (!url.isLocalFile() || !job().valid()) {
+        notify(job().errors.join("\n"));
+        return false;
+    }
+    const auto bytes = (job().gcode().join("\n") + "\n").toUtf8();
+    QSaveFile f(url.toLocalFile());
+    if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size() || !f.commit()) {
+        notify("GCode konnte nicht gespeichert werden.");
+        return false;
+    }
+    notify("GRBL-GCode exportiert · G21/G90, M4, S-Max 1000.");
+    return true;
+}
+bool Document::importImage(const QUrl &url) {
+    QImageReader reader(url.toLocalFile());
+    auto size = reader.size();
+    if (!url.isLocalFile() || !size.isValid() || qint64(size.width()) * size.height() > 16000000) {
+        notify("Bild ungültig oder größer als 16 Megapixel.");
+        return false;
+    }
+    auto image = reader.read().convertToFormat(QImage::Format_ARGB32);
+    if (image.isNull()) {
+        notify("Bild konnte nicht gelesen werden.");
+        return false;
+    }
+    if (image.width() > 600 || image.height() > 600)
+        image = image.scaled(600, 600, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const int w = image.width(), h = image.height();
+    QVector<double> next(w + 2), current(w + 2);
+    QString path;
+    for (int y = 0; y < h; ++y) {
+        current = next;
+        next.fill(0);
+        int start = -1;
+        for (int x = 0; x <= w; ++x) {
+            bool black = false;
+            if (x < w) {
+                auto c = image.pixelColor(x, y);
+                double gray = (qGray(c.rgb()) * c.alpha() + 255 * (255 - c.alpha())) / 255.;
+                double value = gray + current[x + 1];
+                black = value < 128;
+                double error = value - (black ? 0 : 255);
+                current[x + 2] += error * 7 / 16;
+                next[x] += error * 3 / 16;
+                next[x + 1] += error * 5 / 16;
+                next[x + 2] += error / 16;
+            }
+            if (black && start < 0)
+                start = x;
+            if (!black && start >= 0) {
+                path += QString("M%1 %2h%3v1h-%3z ").arg(start).arg(y).arg(x - start);
+                start = -1;
+            }
+        }
+    }
+    QByteArray bytes = QString("<svg xmlns='http://www.w3.org/2000/svg' width='%1mm' height='%2mm' "
+                               "viewBox='0 0 %3 %4'><path fill-rule='nonzero' d='%5'/></svg>")
+                           .arg(w * .1)
+                           .arg(h * .1)
+                           .arg(w)
+                           .arg(h)
+                           .arg(path)
+                           .toUtf8();
+    QString error;
+    auto asset = SvgAsset::parse(bytes, error);
+    if (!asset) {
+        notify(error);
+        return false;
+    }
+    Artwork a{id(),
+              QFileInfo(url.toLocalFile()).fileName() + " · Dither",
+              "svg",
+              "",
+              QRectF((200 - w * .1) / 2, (150 - h * .1) / 2, w * .1, h * .1),
+              0,
+              true,
+              asset};
+    if (!canAppend(a))
+        return false;
+    appendArtwork(a);
+    notify("Bild als schwarzweiße Dither-Geometrie importiert · 0,1 mm Pixelraster.");
+    return true;
+}
+
+bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
+                                  double minPower, double maxPower, int steps) {
+    auto plan = JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps);
+    if (!url.isLocalFile() || !plan.valid()) {
+        notify(plan.errors.join("; "));
+        return false;
+    }
+    QString guide =
+        QString("(Material test: %1 x %1 cells, 5mm, pitch 8mm, origin X10 Y10)\n(Rows bottom to "
+                "top: F%2 to F%3 mm/min)\n(Columns left to right: P%4 to P%5 percent)\n")
+            .arg(steps)
+            .arg(minSpeed)
+            .arg(maxSpeed)
+            .arg(minPower)
+            .arg(maxPower);
+    auto bytes = (guide + plan.gcode().join("\n") + "\n").toUtf8();
+    QSaveFile file(url.toLocalFile());
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+        notify("Materialtest konnte nicht gespeichert werden.");
+        return false;
+    }
+    notify("Materialtest exportiert: Zeilen=Geschwindigkeit, Spalten=Leistung; kein automatischer "
+           "Start.");
+    return true;
+}
+
+void Document::setObjectSetting(const QString &key, double value) {
+    if (m_selection.isEmpty() || !std::isfinite(value) || (key != "speed" && key != "power") ||
+        (key == "speed" && (value < 1 || value > 100000)) ||
+        (key == "power" && (value < 0 || value > 100)))
+        return;
+    bool changed = false;
+    for (int row : m_selection)
+        changed |= m_items[row].settings.value(key) != value;
+    if (!changed)
+        return;
+    checkpoint();
+    for (int row : m_selection)
+        m_items[row].settings[key] = value;
+    refresh();
+}
+bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPower,
+                                  double maxPower, int steps, double moduleW) {
+    const auto plan = JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps);
+    if (!plan.valid() || !std::isfinite(moduleW) || moduleW < .1 || moduleW > 100) {
+        notify("Ungültige Materialtest-Parameter.");
+        return false;
+    }
+    newProject();
+    checkpoint();
+    beginResetModel();
+    m_title = "Materialtest";
+    m_material = MaterialLibrary::example();
+    m_material["id"] = id();
+    m_material["name"] = "Materialtest";
+    m_material["moduleW"] = moduleW;
+    m_material["source"] = "Eigener Materialtest · Werte nicht geprüft";
+    m_layers[0] = layer("01 · Gravieren", "Gravur", minSpeed, minPower);
+    auto cut = m_layers[1].toMap();
+    cut["enabled"] = false;
+    m_layers[1] = cut;
+    m_material["engrave"] = m_layers[0];
+    m_material["cut"] = m_layers[1];
+    for (int row = 0; row < steps; ++row)
+        for (int col = 0; col < steps; ++col) {
+            double speed = minSpeed + (maxSpeed - minSpeed) * row / (steps - 1),
+                   power = minPower + (maxPower - minPower) * col / (steps - 1);
+            Artwork a{id(),
+                      QString("Z%1 S%2 · %3 mm/min · %4 %")
+                          .arg(row + 1)
+                          .arg(col + 1)
+                          .arg(speed)
+                          .arg(power),
+                      "rect",
+                      "",
+                      QRectF(10 + col * 8, 10 + row * 8, 5, 5),
+                      0,
+                      true,
+                      {}};
+            a.settings = {{"speed", speed}, {"power", power}};
+            m_items.append(a);
+        }
+    m_selected = 0;
+    m_selection = {0};
+    endResetModel();
+    refresh();
+    notify("Materialtest: Zeilen unten→oben = Geschwindigkeit, Spalten links→rechts = Leistung. "
+           "Noch kein Laserstart.");
+    return true;
 }

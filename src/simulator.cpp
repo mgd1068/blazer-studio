@@ -111,7 +111,8 @@ void Simulator::start() {
     m_elapsedMs = 0;
     m_clock.start();
     m_tick.start();
-    append("Demoablauf gestartet · kein berechneter Maschinenjob");
+    append(m_job.valid() ? "Berechnete Laserpfade simulieren · Zeitraffer 16 Sekunden"
+                         : "Demoablauf gestartet · kein berechneter Maschinenjob");
 }
 void Simulator::pause() {
     if (m_mode == Mode::Running) {
@@ -143,6 +144,21 @@ void Simulator::tick() {
         auto p = Geometry::framePoint(m_frame, m_progress);
         m_x = p.x();
         m_y = p.y();
+    } else if (m_job.valid()) {
+        double time = m_progress * m_job.seconds;
+        for (const auto &move : m_job.moves) {
+            double seconds = QLineF(move.from, move.to).length() / move.speed * 60.;
+            if (time <= seconds) {
+                auto p = move.from + (move.to - move.from) *
+                                         (seconds > 0 ? std::clamp(time / seconds, 0., 1.) : 1.);
+                m_x = p.x();
+                m_y = p.y();
+                break;
+            }
+            time -= seconds;
+            m_x = move.to.x();
+            m_y = move.to.y();
+        }
     } else {
         m_x = 30 + 140 * m_progress;
         m_y = 35 + 80 * (.5 + .5 * std::sin(m_progress * 6.283185307));

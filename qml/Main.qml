@@ -11,6 +11,7 @@ ApplicationWindow {
     visible: true
     title: (project.dirty ? "● " : "") + project.title + " — Blazer Studio"
     color: bg
+    readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
     property bool night: false
     property int page: 0
     property int operation: 1
@@ -32,6 +33,7 @@ ApplicationWindow {
     readonly property color ink: night ? "#e2eaf0" : "#263b4a"
     readonly property color muted: night ? "#92a7b7" : "#81929f"
     readonly property var currentLayer: project.layers[operation]
+    palette.window: panel
     palette.windowText: ink
     palette.text: ink
     palette.base: panel
@@ -69,6 +71,7 @@ ApplicationWindow {
     function performAction(action) {
         if (action === "demo") project.demo()
         else if (action === "new") project.newProject()
+        else if (action === "materialtest") project.createMaterialTest(testMinSpeed.numericValue(),testMaxSpeed.numericValue(),testMinPower.numericValue(),testMaxPower.numericValue(),testSteps.value,win.selectedModuleW)
         else if (action === "open") openDialog.open()
         else if (action === "close") {
             discardCloseApproved = true
@@ -142,6 +145,27 @@ ApplicationWindow {
     FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "SVG importieren"; nameFilters: ["SVG-Grafiken (*.svg)"]; onAccepted: project.importSvg(selectedFile) }
     FileDialog { id: saveDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.save(selectedFile) }
     FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
+    FileDialog { id: gcodeDialog; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
+    FileDialog { id: imageDialog; title: "Bild importieren"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: project.importImage(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
+    Dialog {
+        id: materialTestDialog
+        objectName: "materialTestDialog"
+        anchors.centerIn: parent; width: Math.min(parent.width-40,520); modal: true
+        title: "Materialtest vorbereiten"
+        contentItem: ColumnLayout {
+            spacing: 12
+            Text { text: "5-mm-Gravurfelder mit 8 mm Abstand ab X10/Y10. Zeilen: Geschwindigkeit, Spalten: Leistung. Erzeugt ein neues bearbeitbares Projekt; kein automatischer Laserstart."; wrapMode: Text.WordWrap; Layout.fillWidth: true; color: win.ink }
+            NumberField { id: testMinSpeed; label: "v↓"; value: 1000; unit: "mm/min"; onEdited: n => value=n; Layout.fillWidth: true; dark: win.night }
+            NumberField { id: testMaxSpeed; label: "v↑"; value: 3000; unit: "mm/min"; onEdited: n => value=n; Layout.fillWidth: true; dark: win.night }
+            NumberField { id: testMinPower; label: "P↓"; value: 10; unit: "%"; onEdited: n => value=n; Layout.fillWidth: true; dark: win.night }
+            NumberField { id: testMaxPower; label: "P↑"; value: 50; unit: "%"; onEdited: n => value=n; Layout.fillWidth: true; dark: win.night }
+            RowLayout { Text { text: "Stufen je Achse"; color: win.ink; Layout.fillWidth: true } SpinBox { id: testSteps; from: 2; to: 10; value: 4 } }
+        }
+        footer: DialogButtonBox {
+            ActionButton { text: "Abbrechen"; onClicked: materialTestDialog.close(); dark: win.night }
+            ActionButton { objectName: "prepareMaterialTestButton"; text: "Projekt erzeugen"; primary: true; onClicked: { materialTestDialog.close(); win.requestAction("materialtest") } }
+        }
+    }
     Dialog {
         id: discardDialog
         objectName: "discardDialog"
@@ -200,7 +224,7 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Rectangle {
                 width: 92; height: 26; radius: 13; color: "#243b3c"
-                Text { anchors.centerIn: parent; text: "●  SIMULATOR"; color: "#81c9b3"; font.pixelSize: 9; font.weight: Font.DemiBold }
+                Text { anchors.centerIn: parent; text: win.simulationMode ? "●  SIMULATOR" : "●  GRBL"; color: "#81c9b3"; font.pixelSize: 9; font.weight: Font.DemiBold }
             }
             ActionButton { text: win.night ? "Hell" : "Dunkel"; dark: true; compact: true; onClicked: win.night = !win.night }
         }
@@ -222,11 +246,13 @@ ApplicationWindow {
                 ActionButton { text: "Beispiel"; dark: win.night; compact: true; onClicked: win.requestAction("demo") }
                 ActionButton { text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
                 ActionButton { text: "↓  SVG importieren"; dark: win.night; compact: true; onClicked: importDialog.open() }
+                ActionButton { objectName: "importImageButton"; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
+                ActionButton { objectName: "exportGcodeButton"; text: "GCode"; dark: win.night; compact: true; enabled: project.jobSummary.valid; onClicked: gcodeDialog.open() }
                 ActionButton { text: "Speichern"; dark: win.night; compact: true; onClicked: saveDialog.open() }
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
-                    text: win.page === 0 ? "Vorschau  →" : "▶  Demo starten"
-                    primary: true; compact: true; enabled: win.page === 0 || (machine.connected && !machine.busy && !machine.firing && project.count > 0)
+                    text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? "▶  Simulation starten" : "▶  Laserjob starten"
+                    primary: true; compact: true; enabled: win.page === 0 || (machine.ready && project.jobSummary.valid)
                     onClicked: { if (win.page === 0) win.page = 1; else { win.page = 2; machine.start() } }
                 }
             }
@@ -359,6 +385,7 @@ ApplicationWindow {
                         dark: win.night; compact: true; Layout.fillWidth: true
                         onClicked: win.showManufacturerReference()
                     }
+                    ActionButton { objectName: "materialTestButton"; text: "Materialtest"; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: materialTestDialog.open() }
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     RowLayout {
                         SectionLabel { text: "OBJEKTE"; dark: win.night; Layout.fillWidth: true }
@@ -471,7 +498,7 @@ ApplicationWindow {
                         }
                     }
                     Item { Layout.fillHeight: true }
-                    Text { text: "Blazer Studio · 0.3\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
+                    Text { text: "Blazer Studio · 0.4\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
                     }
                 }
             }
@@ -490,8 +517,14 @@ ApplicationWindow {
                         ActionButton { text: "↶"; hint: "Rückgängig · Strg+Z"; compact: true; dark: win.night; enabled: project.canUndo; onClicked: project.undo() }
                         ActionButton { text: "↷"; hint: "Wiederholen · Strg+Umschalt+Z"; compact: true; dark: win.night; enabled: project.canRedo; onClicked: project.redo() }
                         Item { Layout.fillWidth: true }
-                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "LAYOUTVORSCHAU" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 9; font.letterSpacing: 1 }
+                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 9; font.letterSpacing: 1 }
                     }
+                }
+                Rectangle {
+                    visible: win.page === 1
+                    Layout.fillWidth: true; Layout.preferredHeight: 64
+                    color: win.panel; border.color: win.line; clip: true
+                            Text { anchors.fill: parent; anchors.margins: 9; maximumLineCount: 3; elide: Text.ElideRight; text: project.jobSummary.valid ? project.jobSummary.segments + " Segmente · " + (project.jobSummary.workLength / 1000).toFixed(2) + " m · ca. " + Math.ceil(project.jobSummary.seconds / 60) + " min\nFarbig: Bearbeitung · Grau: Leerfahrt\nGeometrische Schätzung ohne Beschleunigung / Kommunikation" : project.jobSummary.errors.join("\n"); color: win.muted; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                 }
                 StackLayout {
                     Layout.fillWidth: true; Layout.fillHeight: true
@@ -501,13 +534,7 @@ ApplicationWindow {
                         Rectangle {
                             anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 20
                             width: 168; height: 30; radius: 15; color: win.panel; border.color: win.line
-                            Text { anchors.centerIn: parent; text: win.page === 0 ? "Blatt 01  ·  200 × 150 mm" : "Reihenfolge der Objektliste"; color: win.muted; font.pixelSize: 10 }
-                        }
-                        Rectangle {
-                            visible: win.page === 1
-                            anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: zoomBar.top; anchors.bottomMargin: 12
-                            width: Math.min(parent.width - 40, 510); height: 46; radius: 7; color: win.panel; border.color: win.line
-                            Text { anchors.fill: parent; anchors.margins: 9; text: "Layoutvorschau mit Begrenzungen und Verbindungswegen.\nLaserpfade für Text/SVG und Füllgravur folgen im nächsten Ausbau."; color: win.muted; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
+                            Text { anchors.centerIn: parent; text: win.page === 0 ? "Blatt 01  ·  200 × 150 mm" : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 10 }
                         }
                         Row {
                             id: zoomBar
@@ -528,9 +555,22 @@ ApplicationWindow {
                                 Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; spacing: 15
                                 RowLayout {
                                     Text { text: "Gerät & Positionierung"; color: win.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                                    ActionButton { text: machine.connected ? "Trennen" : "Simulator verbinden"; dark: win.night; onClicked: machine.toggleConnection() }
+                                    ActionButton { text: machine.connected ? "Trennen" : "Verbinden"; dark: win.night; onClicked: machine.toggleConnection() }
                                 }
-                                Text { text: "Simulierter Blaze X M3 · Es werden keine Befehle an Hardware gesendet."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : "GRBL / Blaze-X ESP32 · echte Hardwareverbindung · S-Max 1000 / Lasermodus werden geprüft."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                RowLayout {
+                                    visible: typeof machine.simulation !== "undefined"
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: serialPortChoice; objectName: "serialPortChoice"; Layout.fillWidth: true
+                                        model: typeof machine.ports !== "undefined" ? machine.ports : []; displayText: count ? currentText : "Kein serielles Gerät gefunden"
+                                        contentItem: Text { text: serialPortChoice.displayText; color: win.ink; font: serialPortChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: 20 }
+                                        indicator: Text { x: serialPortChoice.width-width-8; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink }
+                                    }
+                                    ActionButton { text: "Suchen"; dark: win.night; onClicked: machine.refreshPorts() }
+                                    ActionButton { text: "GRBL verbinden"; dark: win.night; enabled: !machine.busy && serialPortChoice.count > 0; onClicked: machine.connectHardware(serialPortChoice.currentText) }
+                                    ActionButton { text: "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
+                                }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 233; radius: 9; color: win.panel; border.color: win.line
                                     RowLayout {
@@ -544,6 +584,7 @@ ApplicationWindow {
                                                 spacing: 4
                                                 Repeater { model: [1,10,25]; delegate: ActionButton { required property int modelData; text: modelData + " mm"; dark: win.night; compact: true; selected: win.step === modelData; onClicked: win.step = modelData } }
                                             }
+                                            ActionButton { visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: machine.connected && !machine.busy; onClicked: machine.setWorkZero() }
                                             ActionButton { text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.home() }
                                         }
                                         GridLayout {
@@ -566,10 +607,10 @@ ApplicationWindow {
                                         ColumnLayout {
                                             Layout.fillWidth: true; spacing: 8
                                             SectionLabel { text: "POSITION & FOKUS"; dark: win.night }
-                                            Text { text: machine.firing ? "2 % aktiv · simuliert" : "Fokuspunkt mit 2 %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
-                                            Text { text: "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus."; color: win.muted; font.pixelSize: 10 }
+                                            Text { text: machine.firing ? "2 % angefordert" : "Fokuspunkt mit 2 %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+                                            Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei 2 % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 10 }
                                         }
-                                        ActionButton { objectName: "focusHold"; text: "◎  Halten für 2 %"; primary: true; implicitHeight: 44; enabled: machine.connected && !machine.busy; onPressedChanged: machine.focus(pressed) }
+                                        ActionButton { objectName: "focusHold"; text: "◎  Halten für 2 %"; primary: true; implicitHeight: 44; enabled: machine.ready || machine.firing; onPressedChanged: machine.focus(pressed) }
                                     }
                                 }
                                 RowLayout {
@@ -581,7 +622,7 @@ ApplicationWindow {
                                 ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
                                 SectionLabel { text: "EREIGNISSE"; dark: win.night; Layout.topMargin: 6 }
                                 Repeater { model: machine.log.slice(0,6); delegate: Text { required property string modelData; text: modelData; color: win.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true } }
-                                ActionButton { text: "Verbindungsfehler testen"; dark: win.night; compact: true; enabled: machine.connected; onClicked: machine.disconnectFault() }
+                                ActionButton { text: "Verbindungsfehler testen"; visible: typeof machine.simulation === "undefined" || machine.simulation; dark: win.night; compact: true; enabled: machine.connected; onClicked: machine.disconnectFault() }
                             }
                             Item { height: 20 }
                         }
@@ -638,6 +679,13 @@ ApplicationWindow {
                                 background: Rectangle { radius: 5; color: win.bg; border.color: win.line }
                                 onEditingFinished: project.setProperty("name",text)
                             }
+                            ColumnLayout {
+                                visible: !!project.selection.customSettings
+                                Layout.fillWidth: true
+                                Text { text: "Eigene Objektwerte"; color: win.muted; font.pixelSize: 10 }
+                                NumberField { label: "v"; value: project.selection.speed || 0; unit: "mm/min"; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setObjectSetting("speed",n) }
+                                NumberField { label: "P"; value: project.selection.power || 0; unit: "%"; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setObjectSetting("power",n) }
+                            }
                             GridLayout {
                                 Layout.fillWidth: true; columns: 2; columnSpacing: 8; rowSpacing: 9
                                 enabled: project.selected >= 0
@@ -685,7 +733,7 @@ ApplicationWindow {
             RowLayout {
                 anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
                 Text { text: project.message; color: "#a6bac8"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
-                Text { text: "SIMULATION · KEINE LASEREMISSION"; color: "#81c9b3"; font.pixelSize: 8; font.letterSpacing: .8 }
+                Text { text: win.simulationMode ? "SIMULATION · KEINE LASEREMISSION" : "HARDWARE · " + machine.state; color: "#81c9b3"; font.pixelSize: 8; font.letterSpacing: .8 }
             }
         }
     }

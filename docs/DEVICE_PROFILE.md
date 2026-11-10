@@ -20,7 +20,7 @@ Quelle: `~/.config/LightBurn/prefs.ini`, ein Geräteprofil mit Anzeigename **M3*
 
 Das bereinigte Profil liegt in `profiles/blaze-x-m3.json` und wird in die Anwendung eingebettet. Es enthält keine LightBurn-Lizenzinformationen. Die Werte beschreiben die eingerichtete Software, noch keine Live-Verifikation von Firmware, Nullpunktorientierung, Endschaltern oder Leistungsausgabe. Die Simulationsbeschleunigungen in LightBurn sind Schätzparameter und werden nicht als gemessene Maschinengrenzen ausgegeben.
 
-Im Prototyp erfolgt jede Geräteaktion über `Simulator`. Es gibt weder eine serielle Implementierung noch eine GCode-Ausgabe. Die voreingestellten Schnitt-/Gravurwerte des Beispiels sind Layout-Demowerte und keine geprüften Materialrezepte.
+Version 0.4 startet weiterhin im Simulator und bietet zusätzlich eine ausdrücklich geöffnete serielle GRBL-Anbindung mit GCode-Ausgabe. Am 10.11.2026 meldete der Controller Blaze X M3_C_V01 / Grbl-ESP32 1.3a.20211103. $30=1000, $32=1, mm und 200 × 150 mm wurden bestätigt; Referenzfahrt und 5-mm-Jog-Rückfahrt wurden mit Laser-Aus controllerseitig geprüft. Eine optische Leistungs- oder Materialprüfung ist noch offen. Details: [GRBL-Workflow](GRBL_WORKFLOW.md). Die voreingestellten Schnitt-/Gravurwerte des Beispiels sind Layout-Demowerte und keine geprüften Materialrezepte.
 
 Seit Projektformat 2 verwenden Objektkoordinaten und Maschinenmarker einheitlich Millimeter mit Ursprung links unten. Dateien der Version 1 werden beim Öffnen umgerechnet.
 

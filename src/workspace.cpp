@@ -160,81 +160,91 @@ void Workspace::paint(QPainter *p) {
         p->setClipRect(boundingRect());
         p->translate(o);
         p->scale(s, s);
-        int idx = 0;
-        QPointF previous(0, 150);
-        for (const auto &world : m_document->items()) {
-            Artwork a = world;
-            a.bounds = Geometry::worldToCanvas(world.bounds);
-            const bool enabled = m_document->layers()[a.layer].toMap()["enabled"].toBool();
-            const bool selected = m_document->isSelected(idx);
-            if ((!a.visible && (!selected || m_preview)) || (!enabled && m_preview)) {
-                ++idx;
-                continue;
+        if (m_preview) {
+            for (const auto &move : m_document->job().moves) {
+                QPen pen(move.rapid ? QColor("#9cafb9") : m_document->layerColor(move.layer),
+                         move.rapid ? .7 : 1., move.rapid ? Qt::DashLine : Qt::SolidLine);
+                pen.setCosmetic(true);
+                p->setPen(pen);
+                p->drawLine(Geometry::worldToCanvas(move.from), Geometry::worldToCanvas(move.to));
             }
-            QColor c = m_document->layerColor(a.layer);
-            p->setOpacity(!a.visible ? .18 : enabled ? 1 : .3);
-            if (m_preview) {
-                p->setPen(QPen(QColor("#a4b6bb"), .35, Qt::DashLine));
-                p->drawLine(previous, a.bounds.topLeft());
-                previous = a.bounds.topLeft();
-            }
-            p->setPen(QPen(c, .45));
-            p->setBrush(Qt::NoBrush);
-            if (a.kind == "rect")
-                p->drawRect(a.bounds);
-            else if (a.kind == "ellipse")
-                p->drawEllipse(a.bounds);
-            else if (a.kind == "svg") {
-                if (a.asset)
-                    a.asset->renderer->render(p, a.bounds);
-            } else if (a.kind == "text") {
-                QFont font("DejaVu Sans");
-                font.setWeight(a.text == "MOIN" ? QFont::Black : QFont::DemiBold);
-                font.setPixelSize(100);
-                auto *cached = m_textPaths.object(a.text);
-                if (!cached) {
-                    cached = new QPainterPath;
-                    cached->addText(0, 100, font, a.text);
-                    m_textPaths.insert(a.text, cached);
+        } else {
+            int idx = 0;
+            QPointF previous(0, 150);
+            for (const auto &world : m_document->items()) {
+                Artwork a = world;
+                a.bounds = Geometry::worldToCanvas(world.bounds);
+                const bool enabled = m_document->layers()[a.layer].toMap()["enabled"].toBool();
+                const bool selected = m_document->isSelected(idx);
+                if ((!a.visible && (!selected || m_preview)) || (!enabled && m_preview)) {
+                    ++idx;
+                    continue;
                 }
-                const auto &path = *cached;
-                auto b = path.boundingRect();
-                if (!b.isEmpty()) {
-                    QTransform t;
-                    t.translate(a.bounds.x(), a.bounds.y());
-                    t.scale(a.bounds.width() / b.width(), a.bounds.height() / b.height());
-                    t.translate(-b.x(), -b.y());
-                    p->fillPath(t.map(path), c);
+                QColor c = m_document->layerColor(a.layer);
+                p->setOpacity(!a.visible ? .18 : enabled ? 1 : .3);
+                if (m_preview) {
+                    p->setPen(QPen(QColor("#a4b6bb"), .35, Qt::DashLine));
+                    p->drawLine(previous, a.bounds.topLeft());
+                    previous = a.bounds.topLeft();
                 }
-            }
-            p->setOpacity(1);
-            if (m_preview) {
-                p->setPen(Qt::NoPen);
-                p->setBrush(QColor("#1c956f"));
-                p->drawEllipse(a.bounds.topLeft(), 1.4, 1.4);
-                p->setPen(Qt::white);
-                QFont n("DejaVu Sans");
-                n.setPixelSize(2);
-                p->setFont(n);
-                p->drawText(QRectF(a.bounds.topLeft() - QPointF(1.4, 1.4), QSizeF(2.8, 2.8)),
-                            Qt::AlignCenter, QString::number(idx + 1));
-            } else if (selected) {
+                p->setPen(QPen(c, .45));
                 p->setBrush(Qt::NoBrush);
-                p->setPen(QPen(QColor("#1c956f"), .35, Qt::DashLine));
-                p->drawRect(a.bounds.adjusted(-1.5, -1.5, 1.5, 1.5));
-                p->setBrush(Qt::white);
-                p->setPen(QPen(QColor("#1c956f"), .4));
-                for (auto point : {a.bounds.topLeft(), a.bounds.topRight(), a.bounds.bottomLeft(),
-                                   a.bounds.bottomRight()})
-                    p->drawRect(QRectF(point - QPointF(.9, .9), QSizeF(1.8, 1.8)));
+                if (a.kind == "rect")
+                    p->drawRect(a.bounds);
+                else if (a.kind == "ellipse")
+                    p->drawEllipse(a.bounds);
+                else if (a.kind == "svg") {
+                    if (a.asset)
+                        a.asset->renderer->render(p, a.bounds);
+                } else if (a.kind == "text") {
+                    QFont font("DejaVu Sans");
+                    font.setWeight(a.text == "MOIN" ? QFont::Black : QFont::DemiBold);
+                    font.setPixelSize(100);
+                    auto *cached = m_textPaths.object(a.text);
+                    if (!cached) {
+                        cached = new QPainterPath;
+                        cached->addText(0, 100, font, a.text);
+                        m_textPaths.insert(a.text, cached);
+                    }
+                    const auto &path = *cached;
+                    auto b = path.boundingRect();
+                    if (!b.isEmpty()) {
+                        QTransform t;
+                        t.translate(a.bounds.x(), a.bounds.y());
+                        t.scale(a.bounds.width() / b.width(), a.bounds.height() / b.height());
+                        t.translate(-b.x(), -b.y());
+                        p->fillPath(t.map(path), c);
+                    }
+                }
+                p->setOpacity(1);
+                if (m_preview) {
+                    p->setPen(Qt::NoPen);
+                    p->setBrush(QColor("#1c956f"));
+                    p->drawEllipse(a.bounds.topLeft(), 1.4, 1.4);
+                    p->setPen(Qt::white);
+                    QFont n("DejaVu Sans");
+                    n.setPixelSize(2);
+                    p->setFont(n);
+                    p->drawText(QRectF(a.bounds.topLeft() - QPointF(1.4, 1.4), QSizeF(2.8, 2.8)),
+                                Qt::AlignCenter, QString::number(idx + 1));
+                } else if (selected) {
+                    p->setBrush(Qt::NoBrush);
+                    p->setPen(QPen(QColor("#1c956f"), .35, Qt::DashLine));
+                    p->drawRect(a.bounds.adjusted(-1.5, -1.5, 1.5, 1.5));
+                    p->setBrush(Qt::white);
+                    p->setPen(QPen(QColor("#1c956f"), .4));
+                    for (auto point : {a.bounds.topLeft(), a.bounds.topRight(),
+                                       a.bounds.bottomLeft(), a.bounds.bottomRight()})
+                        p->drawRect(QRectF(point - QPointF(.9, .9), QSizeF(1.8, 1.8)));
+                }
+                ++idx;
             }
-            ++idx;
-        }
-        if (!m_preview && m_document->selectedRows().size() > 1) {
-            p->setPen(QPen(QColor("#1c956f"), .6, Qt::DashLine));
-            p->setBrush(Qt::NoBrush);
-            p->drawRect(
-                Geometry::worldToCanvas(m_document->selectionBounds()).adjusted(-2, -2, 2, 2));
+            if (!m_preview && m_document->selectedRows().size() > 1) {
+                p->setPen(QPen(QColor("#1c956f"), .6, Qt::DashLine));
+                p->setBrush(Qt::NoBrush);
+                p->drawRect(
+                    Geometry::worldToCanvas(m_document->selectionBounds()).adjusted(-2, -2, 2, 2));
+            }
         }
         p->resetTransform();
     }

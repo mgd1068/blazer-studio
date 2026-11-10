@@ -1,0 +1,60 @@
+Blazer Studio Noncommercial License 1.0
+SPDX-License-Identifier: LicenseRef-Blazer-Studio-Noncommercial-1.0
+
+Copyright (c) 2026 Mathias (GitHub: mgd1068) and the respective contributors.
+
+1. Scope and permission
+This license covers the original Blazer Studio implementation and original
+project documentation, unless a file identifies a different license or owner.
+Subject to these conditions, you may obtain, inspect, run, reproduce, modify,
+and redistribute this material, including modified versions, for noncommercial
+purposes. You receive no ownership of the authors' copyrights or trademarks.
+
+2. Noncommercial restriction
+Commercial use is not permitted. In particular, you may not sell, rent, license
+for payment, monetize access to, or incorporate the software into a commercial
+product or service. You may not use it to perform paid laser work or otherwise
+use it primarily for commercial advantage or monetary compensation. Private
+hobby use, noncommercial learning, and noncommercial research are permitted.
+Ordinary hosting, mirroring, indexing, security analysis, and automated building
+of freely accessible copies by infrastructure providers are permitted; this
+does not authorize selling this software or charging for access to its copies.
+
+3. Free distribution and preservation of terms
+Copies and derivative versions may be distributed only without a fee or other
+payment required in exchange for the software or access to it. Each recipient
+must receive this license and the copyright notices. Modified versions must
+identify their changes, remain subject to these same restrictions, and must
+not be represented as an official release by the original authors. When you
+distribute a binary, provide its complete corresponding application source
+and build instructions to the recipients without charge. You may not impose
+additional contractual or technical restrictions on the permissions granted
+by this license.
+
+4. Third-party components and user work
+This license does not replace or limit the licenses of Qt, operating-system
+libraries, fonts, or other third-party material. In particular, it does not
+restrict rights to modify or replace LGPL-covered libraries or to reverse
+engineer a combined work to debug such library modifications. See
+THIRD_PARTY_NOTICES.md. Imported user projects, user artwork, and generated
+job files do not become subject to this license merely because the program
+reads or generates them; the restriction on commercial use of the program
+itself remains applicable. Manufacturer names and reference data are not
+claimed as original Blazer Studio content.
+
+5. Termination and mandatory rights
+These permissions end if you violate these conditions. No permission for
+commercial exploitation is implied. Rights that applicable law prevents the
+licensor from restricting remain unaffected.
+
+6. Responsibility and liability
+You are responsible for evaluating and operating the software and any attached
+machine. The authors do not promise fitness for a particular machine, reliable
+shutdown, a particular processing result, or freedom from defects. To the extent
+legally permitted, they exclude warranties and liability for losses arising
+from use or distribution. Mandatory liability, including liability that cannot
+lawfully be excluded, is unaffected.
+
+This is a custom, source-available, noncommercial license. It is not an
+OSI-approved open-source license. The original authors retain all rights
+that have not been explicitly granted above.

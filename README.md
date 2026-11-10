@@ -1,8 +1,10 @@
 # Blazer Studio
 
-Geplante Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
+Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Status:** Bedienbarer Entwurf 0.3 in C++20 / Qt Quick. Editor, SVG-Layoutimport, Projektdateien und Gerätesimulator sind ausführbar. Echte Geräteanbindung und Laserpfadberechnung folgen.
+**Status:** Version 0.4 in C++20 / Qt Quick: Editor, Gruppen, Materialbibliothek, berechnete Schnitt-/Füllpfade, Vorschau, GCode-Export und GRBL-Anbindung. Verbindung, Referenzfahrt, 5-mm-Jog-Rückfahrt und ein vollständiger Kontur-Trockenlauf am M3 mit Laser-Aus bestätigt; reale Laser-/Materialbearbeitung noch nicht abgenommen.
+
+**Lizenz:** [Source Available, ausschließlich nichtkommerziell und kostenlos weiterzugeben](LICENSE). Kommerzielle Nutzung einschließlich bezahlter Laserarbeiten ist ausgeschlossen. Diese Einschränkung entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
 
 ## Entwurf starten
 
@@ -10,11 +12,11 @@ Geplante Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias�
 ./run.sh
 ```
 
-[Bedienung, Build und Grenzen des Prototyps](docs/PROTOTYPE.md) · [Objekte und Gruppen](docs/OBJECTS_GROUPS.md) · [Materialbibliothek](docs/MATERIAL_LIBRARY.md) · [Prüfbericht](docs/QA_REPORT.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md) · [Materialreferenz des Herstellers](docs/MANUFACTURER_MATERIALS.md)
+[Berechnete Jobs und Gerätebetrieb](docs/GRBL_WORKFLOW.md) · [Bedienung und Build](docs/PROTOTYPE.md) · [Objekte und Gruppen](docs/OBJECTS_GROUPS.md) · [Materialbibliothek](docs/MATERIAL_LIBRARY.md) · [Prüfbericht](docs/QA_REPORT.md) · [Importiertes Geräteprofil](docs/DEVICE_PROFILE.md) · [Materialreferenz des Herstellers](docs/MANUFACTURER_MATERIALS.md)
 
-![Blazer Studio – erster Entwurf](assets/prototype.png)
+![Blazer Studio – berechnete Pfadvorschau](assets/prototype.png)
 
-Auf Mathias’ Rechner ist der Startmenüeintrag **Blazer Studio** eingerichtet. Alle Geräteaktionen sind simuliert. Die Anwendung enthält noch keinen seriellen Treiber und sendet keine Laserbefehle.
+Auf Mathias’ Rechner ist der Startmenüeintrag **Blazer Studio** eingerichtet. Die Anwendung startet im Simulator. Im Gerätebereich kann ausdrücklich eine echte GRBL-Verbindung geöffnet werden; dort können die Aktionen reale Bewegung und Laserfreigabe auslösen. Siehe [Gerätebetrieb und Prüfumfang](docs/GRBL_WORKFLOW.md).
 
 ## Ziel
 
@@ -27,7 +29,7 @@ Ein angenehmer, moderner Arbeitsablauf für Gravieren und Schneiden: Werkstücke
 - Geräte- und Materialprofile sowie Objektliste links; Bearbeitungsparameter rechts.
 - Einstellungen in den Stufen **Einfach / Erweitert / Experte**.
 - Schnitt- und Gravurebenen mit Leistung, Geschwindigkeit und Durchgängen.
-- Vorschau mit Bearbeitungsreihenfolge, Fahrbewegungen und später geschätzter Laufzeit.
+- Vorschau mit Bearbeitungsreihenfolge, Fahrbewegungen und geometrisch geschätzter Laufzeit.
 - Helles und dunkles Design, skalierbare Darstellung und Tastenkürzel.
 
 ## Zielumfang und Recherche
@@ -64,11 +66,11 @@ Anforderung von Mathias (09.11.2026): Ein **Laserpunkt mit 2 % Sollleistung** zu
 - Vorhandene Verriegelungen und Schutzfunktionen gelten auch im manuellen Modus. Niedrige Sollleistung ist keine Zusage für Augensicherheit.
 - Ergänzende direkte Bedienung: X/Y-Schrittbewegungen mit wählbarer Schrittweite und Geschwindigkeit, Arbeitsnullpunkt setzen/anfahren und Rahmenfahrt. Referenzfahrt, Z-/Fokusverstellung, Air Assist oder Absaugung nur anbieten, wenn die Gerätefähigkeiten dafür nachgewiesen sind. Ein Fokuspunkt allein bedeutet keine motorisierte Fokusverstellung.
 
-Der Simulator bildet Halten/Loslassen, Zeitlimit, Zustandswechsel, Jobkonflikte und Verbindungsfehler ab. Echte Emission wird erst nach Prüfung des Geräteprotokolls und der Abschaltmöglichkeiten implementiert und beaufsichtigt getestet.
+Der Simulator bildet Halten/Loslassen, Zeitlimit, Zustandswechsel, Jobkonflikte und Verbindungsfehler ab. Der Hardwareadapter enthält einen ausdrücklich ausgelösten kurzen 2-%-Puls; dessen optische Wirkung und Abschaltung sind noch real abzunehmen. Es erfolgt keine automatische Laserfreigabe beim Verbinden.
 
 ## Erste Ausbaustufe
 
-SVG-Import, Objekttransformationen, Ebenenparameter, Werkzeugwegvorschau und simulierter Jobablauf. Danach schrittweise echte Verbindung, Status, Positionierung, Rahmenfahrt, Jobübertragung und Abbruch.
+SVG-/Bildimport, Objekttransformationen, Schnitt- und Füllpfade, gemeinsame Vorschau/GCode-Ausgabe und GRBL-Übertragung sind implementiert. Der Simulator spielt den Pfadsatz im Zeitraffer ab. Reale Bewegung wurde am eingerichteten M3 bestätigt; eine echte Bearbeitungsprobe folgt mit Material und betriebsbereiter Absaugung.
 
 Bestehende Schutzfunktionen müssen erhalten bleiben. Erste Kommunikation und Bewegung werden ohne Laseremission geprüft; reale Bearbeitung folgt nach Validierung der Einheiten, Grenzen und Leistungsskalierung. Software-Abbruch ersetzt keinen Hardware-Not-Aus.
 
@@ -76,4 +78,10 @@ Die nächsten Schritte stehen in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Lizenz
 
-Noch nicht festgelegt. Das Repository wird zunächst privat geführt.
+**Source Available – nur nichtkommerzielle Nutzung und kostenlose Weitergabe.**
+
+Es gilt die [Blazer Studio Noncommercial License 1.0](LICENSE). Änderungen und Weitergabe einschließlich Quellcode sind unter denselben Bedingungen erlaubt. Verkauf, entgeltlicher Zugang, kommerzielle Vermarktung und gewerblicher Einsatz für bezahlte Laseraufträge sind ausgeschlossen. Eigene Designs werden dadurch nicht automatisch unter diese Lizenz gestellt.
+
+Wegen des Verbots kommerzieller Nutzung ist dies **keine OSI-Open-Source-Lizenz**. GitHub kann die eigene Lizenz als „Other“ anzeigen. Qt und andere Fremdbestandteile behalten ihre eigenen Rechte; siehe [Third-party notices](THIRD_PARTY_NOTICES.md). Die Anwendung nutzt dynamisch eingebundene Qt-Systembibliotheken; GPL-/LGPL-Texte liegen in `LICENSES/`.
+
+Source available; noncommercial use and free redistribution only. See `LICENSE` for binding terms.

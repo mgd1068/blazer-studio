@@ -1,4 +1,5 @@
 #pragma once
+#include "job.h"
 #include <QElapsedTimer>
 #include <QObject>
 #include <QRectF>
@@ -6,6 +7,7 @@
 #include <QVariantMap>
 class Simulator : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool ready READ ready NOTIFY changed)
     Q_PROPERTY(bool connected READ connected NOTIFY changed)
     Q_PROPERTY(QString state READ state NOTIFY changed)
     Q_PROPERTY(double x READ x NOTIFY changed)
@@ -19,27 +21,32 @@ class Simulator : public QObject {
   public:
     enum class Mode { Ready, Disconnected, Running, Paused, Framing, Fault };
     explicit Simulator(QObject *parent = nullptr);
-    bool connected() const { return m_mode != Mode::Disconnected && m_mode != Mode::Fault; }
-    QString state() const;
-    double x() const { return m_x; }
-    double y() const { return m_y; }
-    double progress() const { return m_progress; }
-    bool firing() const { return m_firing; }
-    bool busy() const {
+    void setJob(const JobPlan &job) {
+        if (!busy())
+            m_job = job;
+    }
+    virtual bool ready() const { return connected() && !busy() && !firing(); }
+    virtual bool connected() const { return m_mode != Mode::Disconnected && m_mode != Mode::Fault; }
+    virtual QString state() const;
+    virtual double x() const { return m_x; }
+    virtual double y() const { return m_y; }
+    virtual double progress() const { return m_progress; }
+    virtual bool firing() const { return m_firing; }
+    virtual bool busy() const {
         return m_mode == Mode::Running || m_mode == Mode::Paused || m_mode == Mode::Framing;
     }
-    bool paused() const { return m_mode == Mode::Paused; }
-    bool running() const { return m_mode == Mode::Running; }
-    QStringList log() const { return m_log; }
-    Q_INVOKABLE void toggleConnection();
-    Q_INVOKABLE void jog(double dx, double dy);
-    Q_INVOKABLE void home();
-    Q_INVOKABLE void focus(bool on);
-    Q_INVOKABLE void frame(const QVariantMap &bounds);
-    Q_INVOKABLE void start();
-    Q_INVOKABLE void pause();
-    Q_INVOKABLE void stop();
-    Q_INVOKABLE void disconnectFault();
+    virtual bool paused() const { return m_mode == Mode::Paused; }
+    virtual bool running() const { return m_mode == Mode::Running; }
+    virtual QStringList log() const { return m_log; }
+    Q_INVOKABLE virtual void toggleConnection();
+    Q_INVOKABLE virtual void jog(double dx, double dy);
+    Q_INVOKABLE virtual void home();
+    Q_INVOKABLE virtual void focus(bool on);
+    Q_INVOKABLE virtual void frame(const QVariantMap &bounds);
+    Q_INVOKABLE virtual void start();
+    Q_INVOKABLE virtual void pause();
+    Q_INVOKABLE virtual void stop();
+    Q_INVOKABLE virtual void disconnectFault();
   signals:
     void changed();
 
@@ -47,6 +54,7 @@ class Simulator : public QObject {
     void append(const QString &s);
     void clearOutputs();
     void tick();
+    JobPlan m_job;
     Mode m_mode = Mode::Ready;
     bool m_firing = false;
     double m_x = 100, m_y = 75, m_progress = 0;

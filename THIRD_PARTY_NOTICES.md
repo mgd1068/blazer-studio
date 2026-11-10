@@ -1,0 +1,30 @@
+# Third-party notices
+
+The custom noncommercial license applies to original Blazer Studio code and
+original documentation. It does not relicense third-party components.
+
+- **Qt 6 Core, Gui, Quick, QML, Quick Controls, SVG and Serial Port:** copyright
+  The Qt Company and their respective contributors. The Linux application links
+  dynamically to system Qt libraries. LGPLv3 terms and relevant GPLv3 text are
+  included in `LICENSES/`. Their commercial permissions and library modification,
+  replacement and debugging rights are not restricted by our application license.
+  Qt sources and exact distro patches must be made available as required if a
+  distributor bundles these libraries; this repository supplies application
+  sources, not a bundled Qt distribution. See <https://www.qt.io/licensing/> and
+  <https://doc.qt.io/qt-6/lgpl.html>.
+- **DejaVu Sans:** used through the installed system font. Font binaries are not
+  bundled; their licenses are supplied by the system font package.
+- **BlazeX manufacturer reference:** numerical processing parameters and original
+  labels are attributed to <https://de.blazexlaser.com/pages/maschineneinstellung>.
+  Retrieval date and source digest are in `profiles/manufacturer-materials.json`.
+  Manufacturer material is excluded from claims of original authorship. No
+  endorsement, model equivalence or completed material test is implied.
+- **Beautiful Soup 4:** optional system Python dependency of the table extraction
+  tool, MIT license; its code is not vendored here.
+- **GRBL / Grbl-ESP32 protocol documentation:** consulted to independently implement
+  the host interface. Firmware source code is not copied or bundled; controller
+  firmware remains subject to its original licenses.
+
+For a source distribution preserve this file and `LICENSE`. A binary distributor
+must additionally satisfy the license obligations of whatever dependencies it
+actually includes. User-created designs retain their own rights.

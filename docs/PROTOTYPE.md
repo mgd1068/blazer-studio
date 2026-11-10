@@ -1,4 +1,4 @@
-# Entwurf 0.3 ausprobieren
+# Entwurf 0.4 ausprobieren
 
 ## Start
 
@@ -6,7 +6,7 @@
 ./run.sh
 ```
 
-Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** eingerichtet. Start mit `--dark` öffnet das dunkle Design, `--compact` ein Fenster mit 1180 × 760 Pixeln. Der Simulator ist standardmäßig verbunden; es werden keine Gerätebefehle gesendet.
+Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** eingerichtet. Start mit `--dark` öffnet das dunkle Design, `--compact` ein Fenster mit 1180 × 760 Pixeln. Die Anwendung startet im verbundenen Simulator. Eine echte Geräteverbindung wird im Bereich Gerät ausdrücklich ausgewählt. Siehe [GRBL-Workflow](GRBL_WORKFLOW.md).
 
 ## Bedienbarer Umfang
 
@@ -21,6 +21,9 @@ Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** 
 - Persistente Materialbibliothek mit allen 64 Herstellervorgaben als Profilen: auswählen, bearbeiten, kopieren, anlegen und löschen; Gravurintervall, Modell, Modul, Stärke und Notizen. Profilstand bleibt im Projekt erhalten.
 - Einheitliche Millimeterkoordinaten mit Ursprung unten links; Rahmenfahrt um aktive Objektgrenzen.
 - Herstellerreferenz mit 64 Materialeinträgen für M3 Pro (5/10/1 W), getrennt von den aktiven Projektwerten; Quelle und offene Modellzuordnung sichtbar.
+- Berechnete Schnittkonturen und Gravurfülllinien für Formen, Text und unterstützte SVGs; Vorschau und GCode aus demselben Pfadsatz.
+- PNG-/JPEG-/BMP-Import als schwarzweiße Dither-Geometrie; Materialtest-Generator mit eigenen Zellparametern.
+- Echte GRBL-/Blaze-X-ESP32-Verbindung mit Konfigurationsprüfung, Status, Jog/Home, Rahmenfahrt, Jobübertragung, Pause und Abbruch.
 - SVG maßstäblich als zusammenhängende Grafik importieren. Physische mm-/cm-/inch-Einheiten werden berücksichtigt; Angaben ohne Einheit gelten als CSS-Pixel bei 96 dpi.
 - Eigene `.blazer`-Projektdateien mit eingebettetem SVG und Parametern speichern/öffnen; Undo/Redo.
 - Simulierte Positionierung, Referenzfahrt, Rahmenfahrt, zeitbasierter Demoablauf, Pause, Stop und Verbindungsfehler.
@@ -30,9 +33,9 @@ Strg+S: Speichern, Strg+O: Öffnen, Strg+I: SVG importieren, Strg+Z: Undo, Strg+
 
 ## Noch offen
 
-Die Vorschau ist eine **Layoutvorschau**: Reihenfolge der Objektliste, Begrenzungen und Verbindungswege. Für importierte SVGs gibt es noch keine Elementzerlegung, für Text und Füllgravur noch keine Laserpfadberechnung. Der Demoablauf ist eine unabhängige Animation und führt das Projekt nicht als Maschinenjob aus. Rahmenfahrt und Positionsanzeigen sind simuliert, keine Live-Telemetrie.
+Die Vorschau zeigt berechnete Schnitt- und Füllbewegungen sowie Leerfahrten. Der Simulator spielt sie im 16-Sekunden-Zeitraffer ab. Die geometrische Zeitangabe berücksichtigt keine Beschleunigungen oder Kommunikationspausen. Vektoren werden linearisiert; SVGs bleiben im Editor zusammenhängend. Bilder sind zunächst schwarzweiß gedithert, keine Graustufen-Leistungsmodulation.
 
-Noch nicht vorhanden sind echte Gerätekommunikation, GCode-Ausgabe, vollständige SVG-Kompatibilität, andere Importformate, mehrere Arbeitsblätter, Autosave oder Wiederherstellung nach einem Absturz. Der vorhandene Undo-Verlauf ist auf 50 Schritte begrenzt und wird nicht mitgespeichert. Die vollständige Roadmap bleibt unverändert das Entwicklungsziel.
+Noch offen sind vollständige SVG-Kompatibilität, DXF-/PDF-/LightBurn-Projektimport, weitere Gestaltungswerkzeuge, mehrere Arbeitsblätter, Autosave, Absturzwiederherstellung sowie die tatsächliche Laser-/Materialabnahme. Undo bleibt auf 50 Schritte begrenzt. Projektformat 4 speichert eigene Zell-/Objektparameter; Formate 1–3 bleiben lesbar. Einzelheiten und konkrete Grenzen stehen im [Geräteworkflow](GRBL_WORKFLOW.md).
 
 SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version abgelehnt. Die zwei Bearbeitungen Gravur und Schnitt sind vorerst fest vorgegeben; ihre Parameter und Ausgabe lassen sich über Profile oder einzeln ändern. Details: [Materialbibliothek](MATERIAL_LIBRARY.md).
 
@@ -41,7 +44,7 @@ SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version 
 Getestete Umgebung: Ubuntu 26.04, GCC 15, Qt 6.10.2.
 
 ```bash
-sudo apt-get install qt6-base-dev qt6-declarative-dev qt6-svg-dev \
+sudo apt-get install qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-serialport-dev \
   qml6-module-qtquick qml6-module-qtquick-window \
   qml6-module-qtquick-controls qml6-module-qtquick-layouts \
   qml6-module-qtquick-dialogs qml6-module-qtqml-workerscript
@@ -59,4 +62,4 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
   ./build/blazer-studio --screenshot /tmp/blazer.png
 ```
 
-Der aktuelle Prüfumfang steht im [Prüfbericht](QA_REPORT.md). Keine echte Laseremission ist Bestandteil dieser Prüfungen.
+Der aktuelle Prüfumfang steht im [Prüfbericht](QA_REPORT.md). Reale serielle Verbindung und Bewegung wurden mit Laser-Aus bestätigt; echte Laseremission ist bisher kein Bestandteil der Geräteprüfung.

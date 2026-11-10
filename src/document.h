@@ -1,4 +1,5 @@
 #pragma once
+#include "job.h"
 #include "svgasset.h"
 #include <QAbstractListModel>
 #include <QColor>
@@ -14,11 +15,13 @@ struct Artwork {
     bool visible = true;
     std::shared_ptr<const SvgAsset> asset;
     QString groupId{}, groupName{};
+    QVariantMap settings{};
     bool operator==(const Artwork &) const = default;
 };
 
 class Document : public QAbstractListModel {
     Q_OBJECT
+    Q_PROPERTY(QVariantMap jobSummary READ jobSummary NOTIFY changed)
     Q_PROPERTY(int count READ count NOTIFY changed)
     Q_PROPERTY(int selected READ selected WRITE select NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selection READ selection NOTIFY selectionChanged)
@@ -68,6 +71,15 @@ class Document : public QAbstractListModel {
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
     double pathLength() const;
+    const JobPlan &job() const;
+    QVariantMap jobSummary() const { return job().summary(); }
+    Q_INVOKABLE bool exportGcode(const QUrl &url);
+    Q_INVOKABLE bool importImage(const QUrl &url);
+    Q_INVOKABLE void setObjectSetting(const QString &key, double value);
+    Q_INVOKABLE bool createMaterialTest(double minSpeed, double maxSpeed, double minPower,
+                                        double maxPower, int steps, double moduleW);
+    Q_INVOKABLE bool exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
+                                        double minPower, double maxPower, int steps);
     QVariantMap activeBounds() const;
     QStringList issues() const;
     QVariantMap material() const { return m_material; }
@@ -130,4 +142,5 @@ class Document : public QAbstractListModel {
     Snapshot m_saved;
     QList<Snapshot> m_undo, m_redo;
     std::optional<Snapshot> m_beforeMove;
+    mutable std::optional<JobPlan> m_job;
 };
