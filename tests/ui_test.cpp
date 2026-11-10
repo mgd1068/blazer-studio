@@ -1,5 +1,7 @@
+#include "applicationservices.h"
 #include "document.h"
 #include "materiallibrary.h"
+#include "recovery.h"
 #include "reliefpreview.h"
 #include "simulator.h"
 #include "workspace.h"
@@ -38,9 +40,11 @@ class UiTest : public QObject {
         QTemporaryDir storage;
         MaterialLibrary library(storage.filePath("materials.json"));
         UiMachine machine;
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
         Registration cameraRegistration;
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("project", &project);
+        engine.rootContext()->setContextProperty("appServices", &services);
         engine.rootContext()->setContextProperty("cameraRegistration", &cameraRegistration);
         engine.rootContext()->setContextProperty("materialLibrary", &library);
         engine.rootContext()->setContextProperty("machine", &machine);
@@ -58,6 +62,11 @@ class UiTest : public QObject {
         QVERIFY(w);
         QCOMPARE(w->property("basic").toBool(), true);
         auto originalBytes = project.projectBytes();
+        auto *intro = w->findChild<QObject *>("onboardingDialog");
+        QVERIFY(intro);
+        QTRY_VERIFY(intro->property("visible").toBool());
+        // Hide temporarily for existing layout screenshots; restore before the onboarding tests.
+        QVERIFY(QMetaObject::invokeMethod(intro, "close"));
         QTest::qWait(100);
         if (qEnvironmentVariableIsSet("BLAZER_BASIC_SCREENSHOT"))
             QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_BASIC_SCREENSHOT")));
@@ -104,6 +113,52 @@ class UiTest : public QObject {
             QTest::mouseClick(w, Qt::LeftButton, {},
                               i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint());
         };
+        QVERIFY(QMetaObject::invokeMethod(intro, "open"));
+        QTRY_VERIFY(intro->property("visible").toBool());
+        if (qEnvironmentVariableIsSet("BLAZER_BETA_SCREENSHOT"))
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_BETA_SCREENSHOT") +
+                                         ".intro.png"));
+        click(item("onboardingNext"));
+        QCOMPARE(intro->property("step").toInt(), 1);
+        click(item("onboardingNext"));
+        QCOMPARE(intro->property("step").toInt(), 2);
+        QTest::qWait(50);
+        QVERIFY(item("onboardingFinish")->width() >= item("onboardingFinish")->implicitWidth());
+        QVERIFY(item("onboardingPractice")->width() >= item("onboardingPractice")->implicitWidth());
+        click(item("onboardingPractice"));
+        QTRY_VERIFY(!intro->property("visible").toBool());
+        QVERIFY(!services.firstRun());
+        QVERIFY(machine.simulation());
+        QVERIFY(!machine.busy());
+        QVERIFY(project.count() > 0);
+        QVERIFY(!project.dirty());
+        auto *betaPopup = w->findChild<QObject *>("betaHelpDialog");
+        QVERIFY(betaPopup);
+        click(item("betaHelpButton"));
+        QTRY_VERIFY(betaPopup->property("visible").toBool());
+        QTest::qWait(50);
+        if (qEnvironmentVariableIsSet("BLAZER_BETA_SCREENSHOT"))
+            QVERIFY(
+                w->grabWindow().save(qEnvironmentVariable("BLAZER_BETA_SCREENSHOT") + ".help.png"));
+        if (qEnvironmentVariableIsSet("BLAZER_BETA_SCREENSHOT")) {
+            w->resize(1180, 760);
+            w->setProperty("night", true);
+            QTest::qWait(100);
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_BETA_SCREENSHOT") +
+                                         ".help-dark.png"));
+            QVERIFY(QMetaObject::invokeMethod(betaPopup, "close"));
+            QVERIFY(QMetaObject::invokeMethod(intro, "open"));
+            intro->setProperty("step", 2);
+            QTest::qWait(100);
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_BETA_SCREENSHOT") +
+                                         ".intro-dark.png"));
+            QVERIFY(QMetaObject::invokeMethod(intro, "close"));
+            w->resize(1480, 920);
+            w->setProperty("night", false);
+        }
+        QVERIFY(QMetaObject::invokeMethod(betaPopup, "close"));
+        w->setProperty("basic", false);
+
         // Real QML controls must stay usable while a large raster is processed.
         project.newProject();
         QImage large(2048, 2048, QImage::Format_ARGB32);
@@ -592,6 +647,36 @@ class UiTest : public QObject {
         QVERIFY(project.job().valid());
         project.addShape("rect");
         QVERIFY(project.dirty());
+        // Save prompt: cancelling the picker or a failed write must keep all changes.
+        const auto beforeSave = project.projectBytes();
+        QVERIFY(QMetaObject::invokeMethod(w, "requestAction", Q_ARG(QVariant, "new")));
+        auto *savePicker = w->findChild<QObject *>("saveProjectDialog");
+        QVERIFY(savePicker);
+        click(item("saveChangesButton"));
+        QTRY_VERIFY(savePicker->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(savePicker, "reject"));
+        QCOMPARE(project.projectBytes(), beforeSave);
+        QCOMPARE(w->property("pendingAction").toString(), QString());
+        QVariant result;
+        w->setProperty("pendingAction", "new");
+        QVERIFY(QMetaObject::invokeMethod(
+            w, "finishSave", Q_RETURN_ARG(QVariant, result),
+            Q_ARG(QVariant, QUrl::fromLocalFile(storage.filePath("missing/project.blazer")))));
+        QVERIFY(!result.toBool());
+        QCOMPARE(project.projectBytes(), beforeSave);
+        QVERIFY(project.dirty());
+        QCOMPARE(w->property("pendingAction").toString(), QString());
+        w->setProperty("pendingAction", "new");
+        const auto savedProject = QUrl::fromLocalFile(storage.filePath("saved-before-new.blazer"));
+        QVERIFY(QMetaObject::invokeMethod(w, "finishSave", Q_RETURN_ARG(QVariant, result),
+                                          Q_ARG(QVariant, savedProject)));
+        QVERIFY(result.toBool());
+        QCOMPARE(project.count(), 0);
+        QVERIFY(!project.dirty());
+        Document reopenedProject;
+        QVERIFY(reopenedProject.open(savedProject));
+        QCOMPARE(reopenedProject.projectBytes(), beforeSave);
+        project.addShape("rect");
         machine.focus(true);
         QVERIFY(!w->close());
         QVERIFY(!machine.firing());
@@ -612,6 +697,53 @@ class UiTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(!w->isVisible(), 1500);
         QVERIFY(!discard->property("visible").toBool());
         QVERIFY(!machine.busy());
+    }
+    void recoveryDialogEscapeKeepsOldRecovery() {
+        Document project;
+        QTemporaryDir storage;
+        QString recoveryPath;
+        {
+            Recovery old(&project, storage.filePath("recovery"));
+            project.addShape("rect");
+            QVERIFY(old.save());
+            recoveryPath = old.location();
+        }
+        QFile original(recoveryPath);
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        const auto bytes = original.readAll();
+        original.close();
+        project.newProject();
+        Recovery recovery(&project, storage.filePath("recovery"));
+        MaterialLibrary library(storage.filePath("materials.json"));
+        UiMachine machine;
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        Registration cameraRegistration;
+        QQmlApplicationEngine engine;
+        auto *context = engine.rootContext();
+        context->setContextProperty("project", &project);
+        context->setContextProperty("recovery", &recovery);
+        context->setContextProperty("appServices", &services);
+        context->setContextProperty("machine", &machine);
+        context->setContextProperty("materialLibrary", &library);
+        context->setContextProperty("cameraRegistration", &cameraRegistration);
+        QFile profile(QStringLiteral(BLAZER_SOURCE_DIR "/profiles/blaze-x-m3.json"));
+        QVERIFY(profile.open(QIODevice::ReadOnly));
+        context->setContextProperty("deviceProfile",
+                                    QJsonDocument::fromJson(profile.readAll()).toVariant());
+        engine.load(QUrl::fromLocalFile(QStringLiteral(BLAZER_SOURCE_DIR "/qml/Main.qml")));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        auto *dialog = window->findChild<QObject *>("recoveryDialog");
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QVERIFY(!window->findChild<QObject *>("onboardingDialog")->property("visible").toBool());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::qWait(50);
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!window->isVisible());
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        QCOMPARE(original.readAll(), bytes);
     }
 };
 QTEST_MAIN(UiTest)

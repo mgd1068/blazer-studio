@@ -16,6 +16,7 @@ class Recovery : public QObject {
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool restore();
     Q_INVOKABLE void clear();
+    Q_INVOKABLE void closeSession();
   signals:
     void changed();
 
@@ -24,5 +25,5 @@ class Recovery : public QObject {
     Document *document;
     QString path;
     QTimer timer;
-    bool written = false, preservePrevious = false;
+    bool written = false, preservePrevious = false, restored = false;
 };

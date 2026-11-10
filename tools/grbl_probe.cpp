@@ -10,12 +10,21 @@ int main(int argc, char **argv) {
     GrblSession s;
     int stage = 0;
     const bool motion = argc > 2 && QByteArray(argv[2]) == "--motion";
+    const bool auxiliaryOn = argc > 2 && QByteArray(argv[2]) == "--aux-on";
+    const bool auxiliaryOff = argc > 2 && QByteArray(argv[2]) == "--aux-off";
     const bool dryJob = argc > 2 && QByteArray(argv[2]) == "--dry-job";
     QObject::connect(&s, &GrblSession::changed, &app, [&] {
         if (!s.ready())
             return;
         QTextStream(stdout) << "READY stage=" << stage << " X=" << s.position.x()
                             << " Y=" << s.position.y() << "\n";
+        if ((auxiliaryOn || auxiliaryOff) && stage == 0) {
+            stage = 1;
+            QTextStream(stdout) << "AUXILIARY: " << (auxiliaryOn ? "M8" : "M9")
+                                << " requested, laser disabled, no motion\n";
+            s.commands({"M5 S0", auxiliaryOn ? "M8" : "M9", "$G"});
+            return;
+        }
         if (!motion && !dryJob) {
             s.close();
             app.exit(0);

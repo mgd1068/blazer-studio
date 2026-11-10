@@ -1,0 +1,32 @@
+name: Rückmeldung zum Einstieg
+description: Beobachtungen aus einem tatsächlichen Einsteigertest
+title: "[Bedienung] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version / Revision und Linux-Version
+    validations:
+      required: true
+  - type: dropdown
+    id: experience
+    attributes:
+      label: Bisherige Erfahrung mit Laserprogrammen
+      options:
+        - Keine
+        - Wenig
+        - Regelmäßig
+  - type: textarea
+    id: task
+    attributes:
+      label: Aufgabe und Ablauf
+      description: Was wollte die Person erreichen? Simulator oder echtes Gerät? Keine Namen nötig.
+    validations:
+      required: true
+  - type: textarea
+    id: observations
+    attributes:
+      label: Beobachtete Stolperstellen und benötigte Hilfe
+      description: Wo stockte es? Welche Begriffe oder Werte waren unklar? War Hilfe nötig? Ungefähre Dauer nennen.
+    validations:
+      required: true

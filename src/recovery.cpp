@@ -20,7 +20,7 @@ Recovery::Recovery(Document *d, const QString &directory, QObject *parent)
     connect(d, &Document::changed, this, [this] {
         if (document->dirty())
             timer.start();
-        else if (written)
+        else if (written || restored)
             clear();
     });
     connect(&timer, &QTimer::timeout, this, &Recovery::save);
@@ -55,6 +55,7 @@ bool Recovery::restore() {
         if (f.open(QIODevice::ReadOnly) &&
             document->restoreBytes(f.read(ImageLimits::projectBytes + 1))) {
             preservePrevious = candidate != path;
+            restored = true;
             document->notify(
                 candidate == path
                     ? "Automatische Sicherung wiederhergestellt; bitte speichern."
@@ -69,7 +70,14 @@ void Recovery::clear() {
         return;
     timer.stop();
     written = false;
+    restored = false;
     QFile::remove(path);
     QFile::remove(path + ".previous");
     emit changed();
+}
+
+void Recovery::closeSession() {
+    timer.stop();
+    if (written || restored)
+        clear();
 }

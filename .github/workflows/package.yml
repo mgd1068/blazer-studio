@@ -1,0 +1,24 @@
+name: Debian candidate package
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build candidate and matching source archive
+        run: |
+          docker build -f packaging/builder.Dockerfile -t blazer-builder .
+          mkdir -p dist
+          docker run --rm -v "$GITHUB_WORKSPACE:/source:ro" -v "$GITHUB_WORKSPACE/dist:/output" blazer-builder bash -c 'git config --global --add safe.directory /source; bash /source/tools/package-linux.sh /output'
+      - name: Install and test on a clean runtime system
+        run: docker run --rm -e BLAZER_DISPOSABLE_CONTAINER=1 -v "$GITHUB_WORKSPACE/dist:/packages:ro" -v "$GITHUB_WORKSPACE/tools/test-installed-package.sh:/test-package.sh:ro" ubuntu:26.04 bash /test-package.sh /packages
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: blazer-studio-ubuntu26.04-amd64
+          path: dist/*
+          if-no-files-found: error

@@ -1,0 +1,44 @@
+name: Fehler im Testkandidaten
+description: Reproduzierbaren Software- oder Bedienungsfehler melden
+title: "[Beta] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version und Revision
+      description: Steht unter Hilfe / Beta.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Linux-Version und Architektur
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Betriebsart
+      options:
+        - Simulator
+        - Echtes Gerät
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Schritte zum Fehler
+      description: Vom Programmstart aus beschreiben; bei Gerätetests Modell, Firmware und Leistung nennen.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Erwartetes und tatsächliches Ergebnis
+    validations:
+      required: true
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Freiwillige Anhänge
+      description: Diagnose-JSON aus Hilfe / Beta und kleine unkritische Beispieldatei möglich. Vorher prüfen; keine privaten Projekte oder rohen Geräteprotokolle nötig.

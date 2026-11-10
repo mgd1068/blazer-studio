@@ -1,0 +1,6 @@
+.git
+build*
+dist
+package-out
+.cache
+.qt

@@ -53,7 +53,37 @@ ApplicationWindow {
     Component { id: dialogHelpFactory; HelpBubble {} }
     function helpDialogButton(dialog, buttonType, description) {
         let button=dialog.standardButton(buttonType)
-        if(button)dialogHelpFactory.createObject(button,{target:button,description:description})
+        if(button) {
+            let names=({})
+            names[Dialog.Yes]="Ja"; names[Dialog.No]="Nein"; names[Dialog.Save]="Speichern"; names[Dialog.Discard]="Verwerfen"; names[Dialog.Cancel]="Abbrechen"
+            if(names[buttonType])button.text=names[buttonType]
+            dialogHelpFactory.createObject(button,{target:button,description:description})
+        }
+    }
+    function offerFirstRun() { if(typeof appServices!=="undefined" && appServices.firstRun && !Qt.application.arguments.some(arg=>["--screenshot","--export-gcode","--self-test"].indexOf(arg)>=0))onboarding.open() }
+    function finishSave(file) {
+        let action=win.pendingAction
+        win.pendingAction=""
+        if(!project.save(file))return false
+        if(action.length>0)win.performAction(action)
+        return true
+    }
+    OnboardingDialog {
+        id: onboarding; dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
+        onPracticeRequested: {
+            if(machine.busy || machine.firing) { project.notify("Bitte den laufenden Geräteauftrag zuerst beenden."); return }
+            if(typeof machine.useSimulator==="function")machine.useSimulator()
+            win.basic=true; win.page=0; win.requestAction("demo")
+        }
+    }
+    BetaHelpDialog {
+        id: betaHelp; dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
+        onIntroductionRequested: onboarding.open()
+        onDiagnosticsRequested: diagnosticsDialog.open()
+    }
+    FileDialog {
+        id: diagnosticsDialog; title: "Technischen Diagnosebericht speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "json"; nameFilters: ["JSON-Diagnosebericht (*.json)"]
+        onAccepted: if(typeof appServices!=="undefined")appServices.exportDiagnostics(selectedFile)
     }
     function revealObjectSelection() {
         if (project.selected < 0) return
@@ -156,7 +186,7 @@ ApplicationWindow {
     onClosing: function(close) {
         machine.focus(false)
         if (project.dirty && !discardCloseApproved) { close.accepted = false; pendingAction = "close"; discardDialog.open() }
-        else { machine.stop(); if(typeof recovery!=="undefined") recovery.clear() }
+        else { machine.stop(); if(typeof recovery!=="undefined") recovery.closeSession() }
     }
     onActiveChanged: if (!active) machine.focus(false)
     onPageChanged: { machine.focus(false); if(basic && page>2)basic=false }
@@ -175,9 +205,9 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Undo]; onActivated: project.undo() }
     Shortcut { sequences: [StandardKey.Redo]; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; onActivated: importDialog.open() }
-    Shortcut { sequence: "Escape"; onActivated: { machine.stop(); project.select(-1) } }
+    Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible; onActivated: { machine.stop(); project.select(-1) } }
     FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: win.importMotif(selectedFile) }
-    FileDialog { id: saveDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.save(selectedFile) }
+    FileDialog { id: saveDialog; objectName: "saveProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: win.finishSave(selectedFile); onRejected: win.pendingAction="" }
     FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     FileDialog { id: gcodeDialog; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: imageDialog; title: "Bild importieren"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: project.importImage(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
@@ -190,18 +220,16 @@ ApplicationWindow {
     FileDialog { id: csvImport; title: "CSV für variable Textfelder"; nameFilters: ["CSV (*.csv)"]; onAccepted: {win.csvPath=selectedFile;csvDirectory.open()} }
     FolderDialog { id: csvDirectory; title: "Ausgabeverzeichnis für neue GCode-Dateien"; onAccepted: project.batch(win.csvPath,selectedFolder,"") }
     Dialog {
-        id: recoveryDialog
-        Component.onCompleted: {
-            win.helpDialogButton(recoveryDialog,Dialog.Yes,"Lädt das automatisch gesicherte Projekt. Anschließend separat speichern.")
-            win.helpDialogButton(recoveryDialog,Dialog.No,"Verwirft die automatische Wiederherstellung und öffnet das normale Startprojekt.")
+        id: recoveryDialog; focus: true; objectName: "recoveryDialog"; height: 260; width: Math.min(parent.width-48,600); title: "Automatische Sicherung gefunden"; anchors.centerIn: parent; modal: true
+        contentItem: Text { text: "Ein früherer Projektstand ist noch gesichert. Möchtest du ihn wiederherstellen? Beim Beenden bleibt die Sicherung für den nächsten Start erhalten."; color: win.ink; wrapMode: Text.WordWrap; padding: 20 }
+        onRejected: win.close()
+        footer: DialogButtonBox {
+            ActionButton { objectName: "restoreRecovery"; text: "Wiederherstellen"; primary: true; hint: "Lädt die gespeicherten Projektdaten. Anschließend separat speichern."; onClicked: { if(recovery.restore()) { recoveryDialog.close(); Qt.callLater(win.offerFirstRun) } } }
+            ActionButton { objectName: "discardRecovery"; text: "Sicherung verwerfen"; dark: win.night; destructive: true; hint: "Entfernt die automatische Sicherung ausdrücklich und öffnet das Startprojekt."; onClicked: { recovery.clear(); recoveryDialog.close(); Qt.callLater(win.offerFirstRun) } }
+            ActionButton { objectName: "keepRecovery"; text: "Beenden und behalten"; dark: win.night; hint: "Beendet das Programm. Die Sicherung bleibt für den nächsten Start erhalten."; onClicked: win.close() }
         }
-        width: 460; title: "Sicherung gefunden"; anchors.centerIn: parent; modal: true
-        standardButtons: Dialog.Yes | Dialog.No
-        contentItem: Text { text: "Das letzte automatisch gesicherte Projekt wiederherstellen?"; color: win.ink; padding: 20 }
-        onAccepted: recovery.restore()
-        onRejected: recovery.clear()
     }
-    Component.onCompleted: if(typeof recovery!=="undefined" && recovery.available)recoveryDialog.open()
+    Component.onCompleted: { if(typeof recovery!=="undefined" && recovery.available)recoveryDialog.open(); else win.offerFirstRun() }
     Dialog {
         id: materialTestDialog
         objectName: "materialTestDialog"
@@ -227,6 +255,8 @@ ApplicationWindow {
         Component.onCompleted: {
             standardButton(Dialog.Discard).objectName = "discardChangesButton"
             standardButton(Dialog.Cancel).objectName = "cancelCloseButton"
+            standardButton(Dialog.Save).objectName = "saveChangesButton"
+            win.helpDialogButton(discardDialog,Dialog.Save,"Speichert das Projekt und führt die angeforderte Aktion nur nach erfolgreichem Speichern aus.")
             win.helpDialogButton(discardDialog,Dialog.Discard,"Verwirft die ungespeicherten Änderungen und führt die angeforderte Aktion aus.")
             win.helpDialogButton(discardDialog,Dialog.Cancel,"Bricht die angeforderte Aktion ab. Deine Änderungen bleiben geöffnet; du kannst sie zuerst speichern.")
         }
@@ -234,8 +264,9 @@ ApplicationWindow {
         anchors.centerIn: parent
         title: "Ungespeicherte Änderungen"
         modal: true
-        standardButtons: Dialog.Discard | Dialog.Cancel
-        contentItem: Text { text: "Änderungen verwerfen und fortfahren?"; color: win.ink; padding: 20 }
+        standardButtons: Dialog.Save | Dialog.Discard | Dialog.Cancel
+        contentItem: Text { text: "Das Projekt enthält ungespeicherte Änderungen. Speichern, verwerfen oder zur Bearbeitung zurückkehren?"; color: win.ink; padding: 20 }
+        onAccepted: saveDialog.open()
         onDiscarded: {
             let action = win.pendingAction
             win.pendingAction = ""
@@ -297,7 +328,7 @@ ApplicationWindow {
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: win.line }
             RowLayout {
                 anchors.fill: parent; anchors.leftMargin: 22; anchors.rightMargin: 20; spacing: 8
-                Text { text: project.title; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                Text { Layout.maximumWidth: win.width<1280 ? 140 : 220; elide: Text.ElideRight; text: project.title; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
                 Text { text: project.dirty ? "●" : ""; color: "#d79b54"; font.pixelSize: 12 }
                 Text { text: "/  Blatt 01"; color: win.muted; font.pixelSize: 11 }
                 Item { Layout.fillWidth: true }
@@ -307,6 +338,7 @@ ApplicationWindow {
                 ActionButton { text: win.basic ? "Motiv laden" : "↓  Importieren"; hint: "Lädt ein Bild oder eine Vektorzeichnung als Motiv. Das allein startet noch keinen Laser."; dark: win.night; compact: true; onClicked: importDialog.open() }
                 ActionButton { objectName: "importImageButton"; visible: !win.basic; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
                 ActionButton { objectName: "exportGcodeButton"; text: "GCode"; visible: !win.basic; dark: win.night; compact: true; enabled: project.jobSummary.valid; onClicked: gcodeDialog.open() }
+                ActionButton { objectName: "betaHelpButton"; text: "Hilfe / Beta"; compact: true; dark: win.night; hint: "Öffnet Einführung, bekannte Einschränkungen, Versionsdaten und den freiwilligen Diagnoseexport."; onClicked: betaHelp.open() }
                 ActionButton { text: "Speichern"; dark: win.night; compact: true; onClicked: saveDialog.open() }
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
@@ -557,7 +589,7 @@ ApplicationWindow {
                         }
                     }
                     Item { Layout.fillHeight: true }
-                    Text { text: "Blazer Studio · 0.8\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 11; lineHeight: 1.5 }
+                    Text { text: "Blazer Studio · "+(typeof appServices!=="undefined" ? appServices.version : "0.9-Testkandidat")+"\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 11; lineHeight: 1.5 }
                     }
                 }
             }

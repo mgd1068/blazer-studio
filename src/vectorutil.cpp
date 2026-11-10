@@ -2,6 +2,10 @@
 #include <cmath>
 QJsonArray VectorUtil::encode(const QPainterPath &path) {
     QJsonArray out;
+    // setFillRule() may materialize a dummy MoveTo on an empty Qt path.
+    // Keep empty geometry canonical across project save/open cycles.
+    if (path.isEmpty())
+        return out;
     for (int i = 0; i < path.elementCount(); ++i) {
         auto e = path.elementAt(i);
         out.append(QJsonArray{int(e.type), e.x, e.y});

@@ -2,11 +2,15 @@
 
 Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Status:** Version 0.8 in C++20 / Qt Quick: abbrechbare Hintergrundberechnung für Jobs und CSV-Stapel, abgesicherte Dateispeicherung und Wiederherstellung; Basic/Advanced mit geführtem Einstieg und Tooltips, Originalbilder bis 4096 × 4096 sowie speichersparendere Rasterverarbeitung; weiterhin Editor mit Pfadwerkzeugen, freie zusätzliche Operationen und Arbeitsblätter, Autosave/Wiederherstellung, Bild-/Vektorimporte, Schnitt-/Scanoptionen, Serienexport und Relief mit 16-Bit-/3D-/lokaler Foto-Tiefenschätzung. Verbindung, Referenzfahrt, 5-mm-Jog-Rückfahrt und ein vollständiger Kontur-Trockenlauf am M3 mit Laser-Aus bestätigt; reale Laser-/Materialbearbeitung noch nicht abgenommen.
+**Status:** 0.9.0-beta.1 als Software-Testkandidat für Ubuntu 26.04 / x86_64. Neu: Debian-Paket mit passendem Quellarchiv, Erststartführung, Hilfe / Beta und freiwilliger lokaler Diagnoseexport. Geräte-/Materialabnahme und externe Einsteigertests sind offen. C++20 / Qt Quick: abbrechbare Hintergrundberechnung für Jobs und CSV-Stapel, abgesicherte Dateispeicherung und Wiederherstellung; Basic/Advanced mit geführtem Einstieg und Tooltips, Originalbilder bis 4096 × 4096 sowie speichersparendere Rasterverarbeitung; weiterhin Editor mit Pfadwerkzeugen, freie zusätzliche Operationen und Arbeitsblätter, Autosave/Wiederherstellung, Bild-/Vektorimporte, Schnitt-/Scanoptionen, Serienexport und Relief mit 16-Bit-/3D-/lokaler Foto-Tiefenschätzung. Verbindung, Referenzfahrt, 5-mm-Jog-Rückfahrt und ein vollständiger Kontur-Trockenlauf am M3 mit Laser-Aus bestätigt; reale Laser-/Materialbearbeitung noch nicht abgenommen.
 
 **Lizenz:** [Source Available, Nutzung auch gewerblich erlaubt, Weitergabe nur kostenlos](LICENSE). Bezahlte Laserarbeiten sind erlaubt; das Programm und abgeleitete Versionen dürfen nicht verkauft oder gegen Bezahlung zugänglich gemacht werden. Das Verkaufsverbot entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
 
-## Entwurf starten
+## Testkandidat installieren
+
+[Installation und erster Auftrag](docs/beta/START.md) · [Bekannte Grenzen](docs/beta/KNOWN_LIMITATIONS.md) · [Testprotokoll](docs/beta/TEST_PROTOCOL.md) · [Paketbau und Prüfung](docs/beta/RELEASE_BUILD.md). Downloadpakete werden vor Geräteabnahme als Kandidaten geführt.
+
+## Aus dem Quellcode starten
 
 ```bash
 ./run.sh

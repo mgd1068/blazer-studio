@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Blazer Studio
+Comment=Lasergravur und Schnitt vorbereiten – Beta-Testkandidat mit Simulator
+Exec=blazer-studio %f
+Icon=blazer-studio
+Terminal=false
+Categories=Graphics;Engineering;
+MimeType=application/x-blazer-studio;
+StartupNotify=true
