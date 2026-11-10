@@ -91,3 +91,23 @@ void Machine::disconnectFault() {
     else
         Simulator::disconnectFault();
 }
+
+QVariantList Machine::capabilities() const {
+    return {
+        QVariantMap{{"name", "XY / GRBL / Referenzfahrt"},
+                    {"status", "Vorhanden"},
+                    {"detail", "M3: Konfiguration und Bewegung ohne Laser bestätigt."}},
+        QVariantMap{{"name", "Kamera und Registrierung"},
+                    {"status", "Keine Kamera eingerichtet"},
+                    {"detail", "Kein kalibriertes Kamerabild vorhanden; keine automatische "
+                               "Positionierung freigegeben."}},
+        QVariantMap{{"name", "Rotary / Z / Autofokus"},
+                    {"status", "Nicht nachgewiesen"},
+                    {"detail", "Geräteprofil verwendet nur X/Y. Keine ungeprüften Achsenbefehle."}},
+        QVariantMap{{"name", "Oberflächenvermessung / Kieselkrümmung"},
+                    {"status", "Keine Messhardware"},
+                    {"detail", "Keine automatische Höhen- oder Fokuskompensation."}},
+        QVariantMap{{"name", "Absaugung separat schalten"},
+                    {"status", "Protokoll ungeklärt"},
+                    {"detail", "Keine geratenen Lüfterbefehle; manuelle Bedienung erforderlich."}}};
+}

@@ -123,12 +123,13 @@ ApplicationWindow {
     onClosing: function(close) {
         machine.focus(false)
         if (project.dirty && !discardCloseApproved) { close.accepted = false; pendingAction = "close"; discardDialog.open() }
-        else machine.stop()
+        else { machine.stop(); if(typeof recovery!=="undefined") recovery.clear() }
     }
     onActiveChanged: if (!active) machine.focus(false)
     onPageChanged: machine.focus(false)
     Connections {
         target: project
+        function onChanged() { if(win.operation>=project.layers.length)win.operation=0 }
         function onSelectionChanged() {
             if (project.selected >= 0) {
                 if (project.selection.layer >= 0) win.operation = project.selection.layer
@@ -142,12 +143,27 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Redo]; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; onActivated: importDialog.open() }
     Shortcut { sequence: "Escape"; onActivated: { machine.stop(); project.select(-1) } }
-    FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "SVG importieren"; nameFilters: ["SVG-Grafiken (*.svg)"]; onAccepted: project.importSvg(selectedFile) }
+    FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: project.importFile(selectedFile) }
     FileDialog { id: saveDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.save(selectedFile) }
     FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     FileDialog { id: gcodeDialog; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: imageDialog; title: "Bild importieren"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: project.importImage(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: reliefDialog; title: "Relief-Tiefenkarte importieren"; nameFilters: ["Tiefenkarten (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: { if (project.importRelief(selectedFile)) win.page = 3 } onVisibleChanged: if (visible) machine.focus(false) }
+    FileDialog { id: cameraPhoto; title: "Referenzfoto des Arbeitsraums"; nameFilters: ["Bilder (*.png *.jpg *.jpeg)"]; onAccepted: {if(!cameraRegistration.load(selectedFile))project.notify("Referenzfoto ungültig.")} }
+    FileDialog { id: photoDepth; title: "Foto für lokale Tiefenschätzung"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.webp)"]; onAccepted: depthService.estimate(selectedFile) }
+    property url csvPath
+    FileDialog { id: universalImport; title: "Grafik, Modell oder Projekt importieren"; nameFilters: ["Unterstützte Dateien (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.blazer *.lbrn *.lbrn2)"]; onAccepted: project.importFile(selectedFile) }
+    FileDialog { id: vectorExport; title: "Vektoren exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "svg"; onAccepted: project.exportSvg(selectedFile) }
+    FileDialog { id: csvImport; title: "CSV für variable Textfelder"; nameFilters: ["CSV (*.csv)"]; onAccepted: {win.csvPath=selectedFile;csvDirectory.open()} }
+    FolderDialog { id: csvDirectory; title: "Ausgabeverzeichnis für neue GCode-Dateien"; onAccepted: project.batch(win.csvPath,selectedFolder,"") }
+    Dialog {
+        id: recoveryDialog; width: 460; title: "Sicherung gefunden"; anchors.centerIn: parent; modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        contentItem: Text { text: "Das letzte automatisch gesicherte Projekt wiederherstellen?"; color: win.ink; padding: 20 }
+        onAccepted: recovery.restore()
+        onRejected: recovery.clear()
+    }
+    Component.onCompleted: if(typeof recovery!=="undefined" && recovery.available)recoveryDialog.open()
     Dialog {
         id: materialTestDialog
         objectName: "materialTestDialog"
@@ -205,11 +221,11 @@ ApplicationWindow {
             }
             Item { Layout.fillWidth: true }
             Rectangle {
-                Layout.preferredWidth: 489; height: 40; radius: 7; color: "#22313e"
+                Layout.preferredWidth: 610; height: 40; radius: 7; color: "#22313e"
                 Row {
                     anchors.fill: parent; anchors.margins: 4; spacing: 3
                     Repeater {
-                        model: ["01  Vorbereiten", "02  Vorschau", "03  Gerät", "04  Relief"]
+                        model: ["01  Vorbereiten", "02  Vorschau", "03  Gerät", "04  Relief", "05  Werkzeuge"]
                         delegate: Button {
                             required property string modelData
                             required property int index
@@ -246,7 +262,7 @@ ApplicationWindow {
                 ActionButton { text: "Neu"; dark: win.night; compact: true; onClicked: win.requestAction("new") }
                 ActionButton { text: "Beispiel"; dark: win.night; compact: true; onClicked: win.requestAction("demo") }
                 ActionButton { text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
-                ActionButton { text: "↓  SVG importieren"; dark: win.night; compact: true; onClicked: importDialog.open() }
+                ActionButton { text: "↓  Importieren"; dark: win.night; compact: true; onClicked: importDialog.open() }
                 ActionButton { objectName: "importImageButton"; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
                 ActionButton { objectName: "exportGcodeButton"; text: "GCode"; dark: win.night; compact: true; enabled: project.jobSummary.valid; onClicked: gcodeDialog.open() }
                 ActionButton { text: "Speichern"; dark: win.night; compact: true; onClicked: saveDialog.open() }
@@ -417,8 +433,9 @@ ApplicationWindow {
                             required property int artLayer
                             required property string artGroup
                             required property string artGroupName
+                            required property bool artOnPage
                             required property bool artGroupFirst
-                            width: objectList.width; height: artGroupFirst ? 94 : 64
+                            width: objectList.width; visible: artOnPage; height: artOnPage ? (artGroupFirst ? 94 : 64) : 0
                             padding: 7
                             onClicked: win.selectObject(index)
                             background: Rectangle {
@@ -442,7 +459,7 @@ ApplicationWindow {
                                     ComboBox {
                                         id: objectOperation
                                         objectName: "objectOperation" + objectRow.index
-                                        model: ["Gravieren", "Schneiden"]
+                                        model: project.layers.map(op=>op.name)
                                         currentIndex: objectRow.artLayer
                                         implicitHeight: 28; implicitWidth: 112
                                         leftPadding: 7; rightPadding: 7
@@ -487,7 +504,7 @@ ApplicationWindow {
                             color: win.operation === index ? win.bg : "transparent"; border.color: win.operation === index ? win.line : "transparent"
                             RowLayout {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 8
-                                Rectangle { width: 3; height: 30; radius: 1; color: index === 0 ? "#cb713c" : "#4c7bd9" }
+                                Rectangle { width: 3; height: 30; radius: 1; color: project.layerColor(index) }
                                 Column {
                                     Layout.fillWidth: true; spacing: 4
                                     Text { text: modelData.name; color: win.ink; font.pixelSize: 11; font.weight: Font.Medium }
@@ -499,7 +516,7 @@ ApplicationWindow {
                         }
                     }
                     Item { Layout.fillHeight: true }
-                    Text { text: "Blazer Studio · 0.5\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
+                    Text { text: "Blazer Studio · 0.6\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
                     }
                 }
             }
@@ -513,29 +530,30 @@ ApplicationWindow {
                         ActionButton { text: "↖"; hint: "Auswählen und ziehen · 0,5-mm-Raster"; compact: true; selected: true; dark: win.night; enabled: win.page === 0; onClicked: project.notify("Objekte auf der Fläche auswählen und ziehen.") }
                         ActionButton { objectName: "addRectangle"; text: "□"; hint: "Rechteck"; compact: true; dark: win.night; enabled: win.page === 0; onClicked: project.addShape("rect") }
                         ActionButton { text: "○"; hint: "Ellipse"; compact: true; dark: win.night; enabled: win.page === 0; onClicked: project.addShape("ellipse") }
+                        ActionButton { text: "⋈"; hint: "Knoten ein/aus"; compact: true; dark: win.night; enabled: win.page===0; selected: canvas.nodes; onClicked: canvas.nodes=!canvas.nodes }
                         ActionButton { text: "T"; hint: "Text"; compact: true; dark: win.night; enabled: win.page === 0; onClicked: project.addShape("text") }
                         Rectangle { width: 1; height: 18; color: win.line; Layout.leftMargin: 3; Layout.rightMargin: 3 }
                         ActionButton { text: "↶"; hint: "Rückgängig · Strg+Z"; compact: true; dark: win.night; enabled: project.canUndo; onClicked: project.undo() }
                         ActionButton { text: "↷"; hint: "Wiederholen · Strg+Umschalt+Z"; compact: true; dark: win.night; enabled: project.canRedo; onClicked: project.redo() }
                         Item { Layout.fillWidth: true }
-                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : win.page === 3 ? "RELIEF / TIEFENKARTE" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 9; font.letterSpacing: 1 }
+                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : win.page === 3 ? "RELIEF / TIEFENKARTE" : win.page===4 ? "EDITOR / PRODUKTION" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 9; font.letterSpacing: 1 }
                     }
                 }
                 Rectangle {
                     visible: win.page === 1
                     Layout.fillWidth: true; Layout.preferredHeight: 64
                     color: win.panel; border.color: win.line; clip: true
-                            Text { anchors.fill: parent; anchors.margins: 9; maximumLineCount: 3; elide: Text.ElideRight; text: project.jobSummary.valid ? project.jobSummary.segments + " Segmente · " + (project.jobSummary.workLength / 1000).toFixed(2) + " m · ca. " + Math.ceil(project.jobSummary.seconds / 60) + " min\nFarbig: Bearbeitung · Grau: Leerfahrt\nGeometrische Schätzung ohne Beschleunigung / Kommunikation" : project.jobSummary.errors.join("\n"); color: win.muted; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
+                            Text { anchors.fill: parent; anchors.margins: 9; maximumLineCount: 3; elide: Text.ElideRight; text: project.jobSummary.valid ? project.jobSummary.segments + " Segmente · " + (project.jobSummary.workLength / 1000).toFixed(2) + " m · ca. " + Math.ceil(project.jobSummary.seconds / 60) + " min\nFarbig: Bearbeitung · Grau: Leerfahrt\nSchätzung mit konservativer Beschleunigung; Kommunikation nicht gemessen" : project.jobSummary.errors.join("\n"); color: win.muted; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                 }
                 StackLayout {
                     Layout.fillWidth: true; Layout.fillHeight: true
-                    currentIndex: win.page === 3 ? 2 : win.page === 2 ? 1 : 0
+                    currentIndex: win.page === 4 ? 3 : win.page === 3 ? 2 : win.page === 2 ? 1 : 0
                     Item {
-                        Workspace { id: canvas; objectName: "workspace"; anchors.fill: parent; document: project; simulator: machine; preview: win.page === 1; dark: win.night }
+                        Workspace { id: canvas; objectName: "workspace"; anchors.fill: parent; document: project; registration: typeof cameraRegistration!=="undefined" ? cameraRegistration : null; simulator: machine; preview: win.page === 1; dark: win.night }
                         Rectangle {
                             anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 20
                             width: 168; height: 30; radius: 15; color: win.panel; border.color: win.line
-                            Text { anchors.centerIn: parent; text: win.page === 0 ? "Blatt 01  ·  200 × 150 mm" : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 10 }
+                            Text { anchors.centerIn: parent; text: win.page === 0 ? project.pages[project.activePage]+" · 200 × 150 mm" : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 10 }
                         }
                         Row {
                             id: zoomBar
@@ -621,6 +639,15 @@ ApplicationWindow {
                                     ActionButton { text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }
                                 ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
+                                RowLayout {
+                                    visible: typeof machine.setOverrides!=="undefined"
+                                    NumberField { id: feedOverride; label: "v"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; onEdited: n=>value=n }
+                                    NumberField { id: powerOverride; label: "P"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; onEdited: n=>value=n }
+                                    ActionButton { text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && machine.connected; onClicked: {if(!machine.setOverrides(feedOverride.value,powerOverride.value))project.notify("Override abgelehnt: Statusrückmeldung Ov erforderlich; v 10–200 %, P 10–100 %.")} }
+                                }
+                                Repeater { model: typeof machine.capabilities!=="undefined" ? machine.capabilities : []
+                                    Text { required property var modelData; text: modelData.name+": "+modelData.status+" · "+modelData.detail; color: win.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                }
                                 SectionLabel { text: "EREIGNISSE"; dark: win.night; Layout.topMargin: 6 }
                                 Repeater { model: machine.log.slice(0,6); delegate: Text { required property string modelData; text: modelData; color: win.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true } }
                                 ActionButton { text: "Verbindungsfehler testen"; visible: typeof machine.simulation === "undefined" || machine.simulation; dark: win.night; compact: true; enabled: machine.connected; onClicked: machine.disconnectFault() }
@@ -628,14 +655,15 @@ ApplicationWindow {
                             Item { height: 20 }
                         }
                     }
-                    ReliefPanel { dark: win.night; onImportRequested: reliefDialog.open() }
+                    ReliefPanel { dark: win.night; onImportRequested: reliefDialog.open(); onPhotoRequested: photoDepth.open() }
+                    ToolsPanel { dark: win.night; operation: win.operation; onOperationSelected: index=>win.operation=index; onNodesRequested: {win.page=0;canvas.nodes=true} onImportRequested: universalImport.open(); onExportRequested: vectorExport.open(); onCsvRequested: csvImport.open(); onCameraRequested: cameraPhoto.open() }
                 }
                 Rectangle {
                     Layout.fillWidth: true; Layout.preferredHeight: 39; color: win.panel
                     Rectangle { height: 1; width: parent.width; color: win.line }
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
-                        Text { text: "●  " + (win.page === 2 ? machine.state : "Blatt 01"); color: "#209b76"; font.pixelSize: 10 }
+                        Text { text: "●  " + (win.page === 2 ? machine.state : project.pages[project.activePage]); color: "#209b76"; font.pixelSize: 10 }
                         Item { Layout.fillWidth: true }
                         Text { text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: 0,5 mm   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 9 }
                     }

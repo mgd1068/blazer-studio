@@ -1,5 +1,6 @@
 #include "grbl.h"
 #include "geometry.h"
+#include <QMap>
 #include <QRegularExpression>
 #include <cmath>
 namespace {
@@ -86,6 +87,10 @@ void GrblSession::handshake() {
     focusTimer.stop();
     timeout.stop();
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
+    inFlight.clear();
+    sent = rxBytes = 0;
+    buffering = false;
+    overrideFeedback = false;
     queue = {"M5 S0", "$I", "$$", "$G"};
     total = queue.size();
     acked = 0;
@@ -100,6 +105,9 @@ void GrblSession::close() {
     timeout.stop();
     focusTimer.stop();
     queue.clear();
+    inFlight.clear();
+    sent = rxBytes = 0;
+    buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
     if (serial.isOpen()) {
@@ -119,6 +127,9 @@ void GrblSession::fail(const QString &message) {
     timeout.stop();
     focusTimer.stop();
     queue.clear();
+    inFlight.clear();
+    sent = rxBytes = 0;
+    buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
     version = laserMode = powerScale = knownPosition = false;
@@ -178,7 +189,22 @@ void GrblSession::line(const QByteArray &s) {
         return;
     }
     if (s.startsWith("ALARM:") || s.startsWith("error:")) {
-        fail(QString::fromLatin1(s));
+        static const QMap<int, QString> errors{{1, "Befehl nicht erkannt"},
+                                               {2, "Zahlenformat ungültig"},
+                                               {9, "Controller durch Alarm gesperrt"},
+                                               {15, "Bewegungsgrenze überschritten"},
+                                               {20, "GCode-Befehl nicht unterstützt"},
+                                               {22, "Vorschub fehlt"},
+                                               {33, "Ungültige Bogenbewegung"}};
+        static const QMap<int, QString> alarms{{1, "Endschalter ausgelöst"},
+                                               {2, "Softwaregrenze überschritten"},
+                                               {3, "Reset während Bewegung: Position prüfen"},
+                                               {8, "Referenzschalter wurde nicht freigegeben"},
+                                               {9, "Referenzschalter wurde nicht gefunden"}};
+        int code = s.mid(s.indexOf(':') + 1).toInt();
+        auto message = s.startsWith("ALARM:") ? alarms.value(code, "Controlleralarm")
+                                              : errors.value(code, "Controllerfehler");
+        fail(QString::fromLatin1(s) + " · " + message);
         return;
     }
     if (s.startsWith('<') && s.endsWith('>')) {
@@ -187,6 +213,15 @@ void GrblSession::line(const QByteArray &s) {
         QPointF machine, work;
         bool hasMachine = false, hasWork = false;
         for (const auto &field : fields) {
+            if (field.startsWith("Ov:")) {
+                auto values = field.mid(3).split(',');
+                if (values.size() == 3) {
+                    feedOverride = values[0].toInt();
+                    powerOverride = values[2].toInt();
+                    overrideFeedback = feedOverride >= 10 && feedOverride <= 200 &&
+                                       powerOverride >= 10 && powerOverride <= 200;
+                }
+            }
             if (field.startsWith("WCO:"))
                 knownOffset = point(field.mid(4), offset);
             if (field.startsWith("MPos:"))
@@ -203,6 +238,9 @@ void GrblSession::line(const QByteArray &s) {
         }
         if (controllerState == "Alarm" || controllerState == "Door") {
             queue.clear();
+            inFlight.clear();
+            sent = rxBytes = 0;
+            buffering = false;
             waitingAck = waitingIdle = false;
             timeout.stop();
             firing = false;
@@ -239,9 +277,16 @@ void GrblSession::line(const QByteArray &s) {
         return;
     }
     if (s == "ok" && waitingAck) {
-        if (--pendingAcks > 0)
+        if (buffering) {
+            if (inFlight.isEmpty()) {
+                fail("Unerwartete GRBL-Quittierung.");
+                return;
+            }
+            rxBytes -= inFlight.takeFirst();
+            --sent;
+        } else if (--pendingAcks > 0)
             return;
-        waitingAck = false;
+        waitingAck = buffering && !inFlight.isEmpty();
         timeout.stop();
         if (!queue.isEmpty())
             queue.removeFirst();
@@ -256,7 +301,10 @@ void GrblSession::line(const QByteArray &s) {
             } else {
                 waitingIdle = true;
                 serial.write("?");
-                timeout.start(30000);
+                if (!paused)
+                    timeout.start(30000);
+                else
+                    timeout.stop();
             }
         } else
             pump();
@@ -267,26 +315,41 @@ void GrblSession::line(const QByteArray &s) {
         append(QString::fromLatin1(s));
 }
 void GrblSession::pump() {
-    if (!connected() || waitingAck || paused || queue.isEmpty())
+    if (!connected() || paused || queue.isEmpty() || (!buffering && waitingAck))
         return;
-    auto bytes = queue.first().toLatin1() + "\n";
-    if (bytes.size() > 79) {
-        fail("GCode-Zeile länger als GRBL-Zeilenpuffer.");
-        return;
-    }
-    if (serial.write(bytes) != bytes.size()) {
-        fail("Serieller Schreibfehler.");
-        return;
-    }
-    pendingAcks = bytes.count('\n');
-    waitingAck = true;
-    timeout.start();
+    do {
+        int index = buffering ? sent : 0;
+        if (index >= queue.size())
+            break;
+        auto bytes = queue[index].toLatin1() + "\n";
+        if (bytes.size() > 79) {
+            fail("GCode-Zeile länger als GRBL-Zeilenpuffer.");
+            return;
+        }
+        if (buffering && rxBytes + bytes.size() > 100)
+            break;
+        if (serial.write(bytes) != bytes.size()) {
+            fail("Serieller Schreibfehler.");
+            return;
+        }
+        if (buffering) {
+            inFlight.append(bytes.size());
+            rxBytes += bytes.size();
+            ++sent;
+        } else
+            pendingAcks = bytes.count('\n');
+        waitingAck = true;
+        timeout.start();
+    } while (buffering);
 }
-bool GrblSession::commands(const QStringList &lines) {
+bool GrblSession::commands(const QStringList &lines, bool buffered) {
     if (!ready() || lines.isEmpty()) {
         append("Aktion abgelehnt: GRBL nicht im geprüften Leerlauf.");
         return false;
     }
+    inFlight.clear();
+    sent = rxBytes = 0;
+    buffering = buffered;
     queue = lines;
     total = queue.size();
     acked = 0;
@@ -305,7 +368,7 @@ void GrblSession::start(const JobPlan &job) {
         append(job.errors.join("; "));
         return;
     }
-    commands(job.gcode());
+    commands(job.gcode(), true);
 }
 void GrblSession::pause() {
     if (!connected() || !busy() || firing || handshaking)
@@ -318,8 +381,8 @@ void GrblSession::pause() {
     } else {
         serial.write("~");
         state = "Läuft";
-        if (waitingAck)
-            timeout.start();
+        if (waitingAck || waitingIdle)
+            timeout.start(waitingIdle ? 30000 : 10000);
         pump();
     }
     emit changed();
@@ -331,6 +394,9 @@ void GrblSession::stop() {
     firing = false;
     paused = false;
     queue.clear();
+    inFlight.clear();
+    sent = rxBytes = 0;
+    buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     timeout.stop();
     version = laserMode = powerScale = knownPosition = false;
@@ -403,4 +469,32 @@ void GrblSession::focus(bool on) {
     firing = true;
     focusTimer.start();
     emit changed();
+}
+
+bool GrblSession::overrides(int feed, int power) {
+    if (!connected() || !configurationValid() || !overrideFeedback || feed < 10 || feed > 200 ||
+        power < 10 || power > 100)
+        return false;
+    QByteArray bytes;
+    auto change = [&](int current, int target, int reset, int plus10, int minus10, int plus1,
+                      int minus1) {
+        if (target == 100) {
+            bytes.append(char(reset));
+            return;
+        }
+        int delta = target - current;
+        while (std::abs(delta) >= 10) {
+            bytes.append(char(delta > 0 ? plus10 : minus10));
+            delta += delta > 0 ? -10 : 10;
+        }
+        while (delta) {
+            bytes.append(char(delta > 0 ? plus1 : minus1));
+            delta += delta > 0 ? -1 : 1;
+        }
+    };
+    change(feedOverride, feed, 0x90, 0x91, 0x92, 0x93, 0x94);
+    change(powerOverride, power, 0x99, 0x9a, 0x9b, 0x9c, 0x9d);
+    serial.write(bytes);
+    serial.write("?");
+    return true;
 }

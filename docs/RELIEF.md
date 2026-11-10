@@ -1,6 +1,6 @@
-# Reliefgravur aus Tiefenkarten – Version 0.5
+# Reliefgravur aus Tiefenkarten – Version 0.6
 
-Der eigene Arbeitsbereich **04 Relief** berechnet mehrere Gravurschichten aus den Grauwerten eines Bildes. Es handelt sich um 2,5D: XY-Bearbeitung in mehreren Durchgängen, ohne automatische Z-Nachführung. Die Software rekonstruiert keine räumliche Form aus einem Foto.
+Der eigene Arbeitsbereich **04 Relief** berechnet mehrere Gravurschichten aus den Grauwerten eines Bildes. Es handelt sich um 2,5D: XY-Bearbeitung in mehreren Durchgängen, ohne automatische Z-Nachführung. Die optionale lokale Foto-Tiefenschätzung erzeugt eine relative Tiefenkarte; sie ist keine Vermessung des Werkstücks.
 
 ## Vorhandene Verfahren und Grenzen am Stein
 
@@ -13,7 +13,7 @@ Die [Stein-Hinweise von Boss Laser](https://team.bosslaser.com/applications/glas
 ## Bedienung
 
 1. Bei einem reinen Reliefauftrag mit **Neu** beginnen. Import fügt ein Objekt zum offenen Projekt hinzu und entfernt vorhandene Objekte nicht.
-2. **04 Relief → Tiefenkarte laden**. Unterstützt: PNG, JPEG, BMP, maximal 16 Megapixel Eingang; große Bilder werden auf höchstens 512 × 512 Pixel verkleinert. PNG vermeidet JPEG-Artefakte. Verarbeitung und eingebettete Speicherung verwenden 8-Bit-Graustufen mit Transparenz; 16-Bit-Tiefenkarten werden derzeit auf 8 Bit reduziert. Es wird kein Dithering angewandt.
+2. **04 Relief → Tiefenkarte laden**. Unterstützt: PNG, JPEG, BMP, maximal 16 Megapixel Eingang; große Bilder werden auf höchstens 512 × 512 Pixel verkleinert. PNG vermeidet JPEG-Artefakte. Verarbeitung und eingebettete Speicherung erhalten auch 16-Bit-Graustufen mit Transparenz. Es wird kein Dithering angewandt.
 3. X/Y, Breite und Höhe rechts einstellen. Das neue Bild beginnt bei X10/Y10 mit 0,1 mm je Bildpixel. Leistung und Geschwindigkeit sind eigene Objektwerte rechts; Importwerte sind Entwurfswerte des Projekts, **keine Steinempfehlung**.
 4. Schichtzahl **1–256**, Raster **0,02–2 mm**, Tiefenkurve/Gamma **0,1–5** einstellen. Gamma > 1 verringert die Bearbeitung mittlerer Grauwerte, Gamma < 1 verstärkt sie. **Helligkeit umkehren** tauscht Schwarz-/Weißbedeutung. Vollständig transparente Pixel bleiben immer unbearbeitet.
 5. **3D-Vorschau** zeigt die quantisierte relative Abtragsform mit überhöhter Tiefe. Ohne Haken erscheint die Graustufen-Draufsicht. Der Schichtregler zeigt ab Schicht 1 die tatsächlich aktive Maske orange; 0/Alle zeigt das Gesamtrelief. Das ist eine Sollgeometrie, keine Messung oder Simulation des Materials.
@@ -25,7 +25,7 @@ Zum Ausprobieren liegt eine selbst erzeugte [synthetische Tiefenkarte](../assets
 
 ## Berechnung
 
-Mit Grauwert `g` von 0 bis 255, Gamma `γ` und maximaler Schichtzahl `N` gilt:
+Für 8-Bit-Grauwerte `g` von 0 bis 255 gilt die folgende Formel; 16-Bit-Werte werden entsprechend durch 65535 normalisiert. Gamma `γ`, maximale Schichtzahl `N`:
 
 ```text
 Normal:    Schwärzung = 1 − g / 255
@@ -52,10 +52,12 @@ Beispiel ausschließlich zur Rechnung: 16 × 0,02 mm ergibt 0,32 mm geschätzten
 
 ## Projekte, Grenzen und Prüfung
 
-Format **5** speichert Tiefenkarte, Objektparameter, Schichten, Gamma, Umkehr und Kalibrierwert direkt im Projekt. Alte Formate 1–4 bleiben lesbar; neu gespeicherte Dateien benötigen Version 0.5 oder neuer. Kopien teilen nur unveränderliche Bilddaten, Einstellungen bleiben unabhängig. Änderungen sind mit Undo/Redo rückgängig zu machen, numerische Transformation und Gruppen funktionieren weiter.
+Format **6** speichert Tiefenkarte, Objektparameter, Schichten, Gamma, Umkehr und Kalibrierwert direkt im Projekt. Alte Formate 1–5 bleiben lesbar; neu gespeicherte Dateien benötigen Version 0.6 oder neuer. Kopien teilen nur unveränderliche Bilddaten, Einstellungen bleiben unabhängig. Änderungen sind mit Undo/Redo rückgängig zu machen, numerische Transformation und Gruppen funktionieren weiter.
 
 Grenzen: höchstens eine Million Rasterzellen und 20 Millionen Raster-/Schichtprüfungen pro Gesamtjob, 500000 Bewegungen pro Gesamtjob und insgesamt 8 MiB eingebettete Grafiken sowie vier Megapixel dekodierte Tiefenkarten. Überschreitung, ungültige Parameter oder aktive Objekte außerhalb 200 × 150 mm sperren den gesamten Export/Job. Gröberes Raster, kleinere Abmessungen oder weniger Schichten reduzieren den Aufwand. Das Zeitmodell enthält weiterhin keine Beschleunigungs- oder Kommunikationszeiten.
 
 Automatisiert geprüft: Schwarz/Weiß/Grau, Gamma, Umkehr, Transparenz, tatsächliche Besuche je Zelle/Schicht, Bildorientierung, Schnittreihenfolge, unveränderte Weißflächen, Speichern/Laden, defekte Bilddaten, Komplexitäts-/Arbeitsraumgrenzen, gemeinsame Bilddaten bei unabhängigen Kopien, Undo und Kalibrierungsrücksetzung. UI-Test bedient Reliefnavigation, Umkehr und Gamma mit Dezimalkomma und prüft die Tiefenanzeige. Reale Reliefgravur und Abtragskalibrierung bleiben offen; während dieser Entwicklung wurden keine Hardwarebefehle ausgeführt.
 
-Nicht enthalten: automatische Foto-zu-Tiefenkarte-KI, 3D-Modellimport, 16-Bit-Tiefenverarbeitung, winkelvariable Kreuzschraffur, Reinigungsschichten, Oberflächenvermessung oder Z-Fokusnachführung.
+Zusätzlich verfügbar: 16-Bit-Tiefenkarten, STL-/OBJ-Oberseiten, optionale lokale Foto-Tiefenschätzung, Wechsel zwischen horizontalen und vertikalen Schichten und regelmäßige Reinigungsschichten mit eigener Leistung. Nicht enthalten: Oberflächenvermessung und Z-Fokusnachführung. [Bedienung und Modellinstallation](EXPANSION.md).
+
+Reinigungsschichten bearbeiten die aktuelle Schichtmaske zusätzlich. Sie beeinflussen den tatsächlichen Abtrag. Änderungen an Reinigung oder Schraffurrichtung setzen einen vorhandenen Kalibrierwert zurück. Eine erneute Messung muss mit genau diesem Ablauf erfolgen; die lineare Tiefenangabe bleibt eine Näherung.

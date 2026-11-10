@@ -1,8 +1,11 @@
+#include "depthservice.h"
 #include "document.h"
 #include "machine.h"
 #include "materiallibrary.h"
+#include "recovery.h"
 #include "reliefpreview.h"
 #include "workspace.h"
+#include <QDir>
 #include <QFile>
 #include <QGuiApplication>
 #include <QJsonDocument>
@@ -10,6 +13,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QTemporaryDir>
 #include <QTimer>
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
@@ -19,6 +23,16 @@ int main(int argc, char **argv) {
     qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
     qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
     Document document;
+    Registration registration;
+    QTemporaryDir transientRecovery;
+    bool transient =
+        app.arguments().contains("--screenshot") || app.arguments().contains("--export-gcode");
+    Recovery recovery(&document, transient ? transientRecovery.path() : QString());
+    auto script = QStringLiteral(BLAZER_TOOLS_DIR "/photo_depth.py");
+    if (!QFile::exists(script))
+        script = QDir(QCoreApplication::applicationDirPath())
+                     .absoluteFilePath("../share/blazer-studio/tools/photo_depth.py");
+    DepthService depthService(&document, script);
     MaterialLibrary materialLibrary;
     Machine simulator(&document);
     QFile f(":/profiles/blaze-x-m3.json");
@@ -31,6 +45,9 @@ int main(int argc, char **argv) {
     auto reference = QJsonDocument::fromJson(materials.readAll()).toVariant();
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("project", &document);
+    engine.rootContext()->setContextProperty("recovery", &recovery);
+    engine.rootContext()->setContextProperty("depthService", &depthService);
+    engine.rootContext()->setContextProperty("cameraRegistration", &registration);
     engine.rootContext()->setContextProperty("materialLibrary", &materialLibrary);
     engine.rootContext()->setContextProperty("machine", &simulator);
     engine.rootContext()->setContextProperty("deviceProfile", profile);
@@ -55,6 +72,14 @@ int main(int argc, char **argv) {
         root->setProperty("width", 1180);
         root->setProperty("height", 760);
     }
+    int toolsSection = args.indexOf("--tools-section");
+    if (toolsSection >= 0 && toolsSection + 1 < args.size())
+        if (auto *tools = root->findChild<QObject *>("toolsPanel"))
+            tools->setProperty("section", args[toolsSection + 1].toInt());
+    int generic = args.indexOf("--import-file");
+    if (generic >= 0 && generic + 1 < args.size() &&
+        !document.importFile(QUrl::fromLocalFile(args[generic + 1])))
+        return 2;
     int imported = args.indexOf("--import");
     if (imported >= 0 && imported + 1 < args.size())
         document.importSvg(QUrl::fromLocalFile(args[imported + 1]));

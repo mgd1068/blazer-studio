@@ -10,8 +10,9 @@ ScrollView {
     readonly property color ink: dark ? "#e2eaf0" : "#263b4a"
     readonly property color muted: dark ? "#a5b9c7" : "#708594"
     readonly property bool selected: project.selection.kind === "relief"
-    readonly property var settings: project.selection.relief || ({passes:16, interval:0.1, gamma:1, inverted:false, depthPerPass:0})
+    readonly property var settings: project.selection.relief || ({passes:16, interval:0.1, gamma:1, inverted:false, depthPerPass:0, crosshatch:false,cleanupEvery:0,cleanupPower:5})
     signal importRequested()
+    signal photoRequested()
     clip: true
     contentWidth: availableWidth
     ColumnLayout {
@@ -23,9 +24,15 @@ ScrollView {
             Text { text: "Relief · 2,5D"; color: relief.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
             ActionButton { objectName: "importRelief"; text: "Tiefenkarte laden"; dark: relief.dark; onClicked: relief.importRequested() }
         }
+        RowLayout {
+            Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
+            ActionButton { text: "Foto → KI-Tiefenkarte"; dark: relief.dark; enabled: typeof depthService!=="undefined" && !depthService.busy; onClicked: relief.photoRequested() }
+            ActionButton { text: "Abbrechen"; dark: relief.dark; visible: typeof depthService!=="undefined" && depthService.busy; onClicked: depthService.cancel() }
+        }
+        Text { visible: typeof depthService!=="undefined"; text: typeof depthService!=="undefined" ? depthService.message : ""; color: relief.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20 }
         Text {
             Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
-            text: "Schwarz = tief · Weiß = stehen lassen. Ein normales Foto liefert Helligkeit, keine rekonstruierte 3D-Form. Für räumliche Motive eine echte Tiefenkarte verwenden."
+            text: "Schwarz = tief · Weiß = stehen lassen. Beim direkten Bildimport wird Helligkeit verwendet. Die optionale lokale KI schätzt räumliche Tiefe aus einem Foto; ihr Ergebnis ist keine vermessene Form."
             wrapMode: Text.WordWrap; color: relief.muted; font.pixelSize: 11
         }
         ReliefPreview {
@@ -55,6 +62,12 @@ ScrollView {
             NumberField { objectName: "reliefGamma"; Layout.fillWidth: true; dark: relief.dark; decimals: 2; value: relief.settings.gamma; unit: "γ"; onEdited: n => project.setReliefSetting("gamma",n) }
             Text { text: "Helligkeit umkehren"; color: relief.ink; font.pixelSize: 11 }
             CheckBox { objectName: "reliefInvert"; text: "Weiß tief, Schwarz unberührt"; checked: relief.settings.inverted; onClicked: project.setReliefSetting("inverted",checked) }
+            Text { text: "Richtung je Schicht wechseln"; color: relief.ink; font.pixelSize: 11 }
+            CheckBox { text: "0° / 90°"; checked: relief.settings.crosshatch || false; onClicked: project.setReliefSetting("crosshatch",checked) }
+            Text { text: "Reinigung alle N Schichten (0 aus)"; color: relief.ink; font.pixelSize: 11 }
+            SpinBox { from: 0; to: 256; value: relief.settings.cleanupEvery || 0; onValueModified: project.setReliefSetting("cleanupEvery",value) }
+            Text { text: "Reinigungsleistung"; color: relief.ink; font.pixelSize: 11 }
+            NumberField { Layout.fillWidth: true; dark: relief.dark; value: relief.settings.cleanupPower || 0; unit: "%"; onEdited: n=>project.setReliefSetting("cleanupPower",n) }
             Text { text: "Gemessener Abtrag / Durchgang"; color: relief.ink; font.pixelSize: 11 }
             NumberField { objectName: "reliefDepthPerPass"; Layout.fillWidth: true; dark: relief.dark; decimals: 3; value: relief.settings.depthPerPass; unit: "mm"; onEdited: n => project.setReliefSetting("depthPerPass",n) }
         }

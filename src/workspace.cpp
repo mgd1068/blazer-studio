@@ -1,5 +1,6 @@
 #include "workspace.h"
 #include "geometry.h"
+#include "imageprocessing.h"
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSvgRenderer>
@@ -89,9 +90,20 @@ void Workspace::mousePressEvent(QMouseEvent *e) {
     if (!m_document || m_preview)
         return;
     auto pos = toWorld(e->position());
+    if (m_nodes) {
+        for (auto node : m_document->nodes()) {
+            auto n = node.toMap();
+            if (QLineF(pos, QPointF(n["x"].toDouble(), n["y"].toDouble())).length() < 7 / scale()) {
+                m_dragNode = n["index"].toInt();
+                m_document->beginMove();
+                return;
+            }
+        }
+    }
     for (int i = m_document->items().size() - 1; i >= 0; --i) {
         auto &a = m_document->items()[i];
-        if (a.visible && a.bounds.adjusted(-1, -1, 1, 1).contains(pos)) {
+        if (a.page == m_document->activePage() && a.visible &&
+            a.bounds.adjusted(-1, -1, 1, 1).contains(pos)) {
             const bool toggle = e->modifiers().testFlag(Qt::ControlModifier) ||
                                 e->modifiers().testFlag(Qt::ShiftModifier);
             if (toggle)
@@ -112,7 +124,10 @@ void Workspace::mousePressEvent(QMouseEvent *e) {
     m_document->select(-1);
 }
 void Workspace::mouseMoveEvent(QMouseEvent *e) {
-    if (m_panning) {
+    if (m_dragNode >= 0 && m_document) {
+        auto p = toWorld(e->position());
+        m_document->setNode(m_dragNode, p.x(), p.y());
+    } else if (m_panning) {
         m_pan += e->position() - m_last;
         m_last = e->position();
         update();
@@ -120,17 +135,45 @@ void Workspace::mouseMoveEvent(QMouseEvent *e) {
         auto pos = toWorld(e->position()) - m_offset;
         pos.setX(std::round(pos.x() * 2) / 2);
         pos.setY(std::round(pos.y() * 2) / 2);
+        if (!e->modifiers().testFlag(Qt::AltModifier)) {
+            QList<double> xs{0, 100, 200}, ys{0, 75, 150};
+            for (int i = 0; i < m_document->items().size(); ++i) {
+                const auto &a = m_document->items()[i];
+                if (a.visible && a.page == m_document->activePage() && !m_document->isSelected(i)) {
+                    xs << a.bounds.left() << a.bounds.center().x() << a.bounds.right();
+                    ys << a.bounds.top() << a.bounds.center().y() << a.bounds.bottom();
+                }
+            }
+            auto snap = [&](double value, double extent, const QList<double> &targets) {
+                double best = 5 / scale(), result = value;
+                for (double target : targets)
+                    for (double anchor : {0., extent / 2, extent}) {
+                        double delta = target - (value + anchor);
+                        if (std::abs(delta) < best) {
+                            best = std::abs(delta);
+                            result = value + delta;
+                        }
+                    }
+                return result;
+            };
+            auto size = m_document->selectionBounds().size();
+            pos.setX(snap(pos.x(), size.width(), xs));
+            pos.setY(snap(pos.y(), size.height(), ys));
+        }
+
         m_document->moveSelection(pos);
     }
 }
 void Workspace::mouseUngrabEvent() {
-    if (m_drag && m_document)
+    if ((m_drag || m_dragNode >= 0) && m_document)
         m_document->finishMove();
+    m_dragNode = -1;
     m_drag = m_panning = false;
 }
 void Workspace::mouseReleaseEvent(QMouseEvent *) {
-    if (m_drag && m_document)
+    if ((m_drag || m_dragNode >= 0) && m_document)
         m_document->finishMove();
+    m_dragNode = -1;
     m_drag = m_panning = false;
 }
 void Workspace::paint(QPainter *p) {
@@ -144,6 +187,17 @@ void Workspace::paint(QPainter *p) {
     p->drawRoundedRect(bed.translated(4, 6), 3, 3);
     p->setBrush(m_dark ? QColor("#29363e") : QColor("#fcfcf9"));
     p->drawRect(bed);
+    if (m_registration && m_registration->visible() && !m_preview) {
+        p->save();
+        p->setClipRect(bed);
+        p->setOpacity(.45);
+        QTransform world;
+        world.translate(o.x(), o.y() + 150 * s);
+        world.scale(s, -s);
+        p->setTransform(m_registration->transform() * world);
+        p->drawImage(QPointF(0, 0), m_registration->frame());
+        p->restore();
+    }
     p->save();
     p->setClipRect(bed);
     p->setPen(QPen(m_dark ? QColor("#35434a") : QColor("#eef0e9"), 1));
@@ -162,8 +216,10 @@ void Workspace::paint(QPainter *p) {
         p->scale(s, s);
         if (m_preview) {
             for (const auto &move : m_document->job().moves) {
-                QPen pen(move.rapid ? QColor("#9cafb9") : m_document->layerColor(move.layer),
-                         move.rapid ? .7 : 1., move.rapid ? Qt::DashLine : Qt::SolidLine);
+                QPen pen((move.rapid || move.power <= 0) ? QColor("#9cafb9")
+                                                         : m_document->layerColor(move.layer),
+                         (move.rapid || move.power <= 0) ? .7 : 1.,
+                         (move.rapid || move.power <= 0) ? Qt::DashLine : Qt::SolidLine);
                 pen.setCosmetic(true);
                 p->setPen(pen);
                 p->drawLine(Geometry::worldToCanvas(move.from), Geometry::worldToCanvas(move.to));
@@ -172,6 +228,10 @@ void Workspace::paint(QPainter *p) {
             int idx = 0;
             QPointF previous(0, 150);
             for (const auto &world : m_document->items()) {
+                if (world.page != m_document->activePage()) {
+                    ++idx;
+                    continue;
+                }
                 Artwork a = world;
                 a.bounds = Geometry::worldToCanvas(world.bounds);
                 const bool enabled = m_document->layers()[a.layer].toMap()["enabled"].toBool();
@@ -189,34 +249,36 @@ void Workspace::paint(QPainter *p) {
                 }
                 p->setPen(QPen(c, .45));
                 p->setBrush(Qt::NoBrush);
-                if (a.kind == "rect")
+                if (a.kind == "path") {
+                    QString error;
+                    auto path = JobPlanner::geometry(world, error, true);
+                    QTransform t;
+                    t.translate(0, 150);
+                    t.scale(1, -1);
+                    if (m_document->layers()[a.layer].toMap()["mode"] == "Schnitt")
+                        p->drawPath(t.map(path));
+                    else
+                        p->fillPath(t.map(path), c);
+                } else if (a.kind == "rect")
                     p->drawRect(a.bounds);
                 else if (a.kind == "ellipse")
                     p->drawEllipse(a.bounds);
-                else if (a.kind == "relief" && a.reliefAsset)
-                    p->drawImage(a.bounds, a.reliefAsset->image);
-                else if (a.kind == "svg") {
+                else if ((a.kind == "relief" || a.kind == "image") && a.reliefAsset) {
+                    QString error;
+                    auto image = a.kind == "image"
+                                     ? ImageProcessing::apply(a.reliefAsset->image, a.style, error)
+                                     : a.reliefAsset->image;
+                    p->drawImage(a.bounds, image);
+                } else if (a.kind == "svg") {
                     if (a.asset)
                         a.asset->renderer->render(p, a.bounds);
                 } else if (a.kind == "text") {
-                    QFont font("DejaVu Sans");
-                    font.setWeight(a.text == "MOIN" ? QFont::Black : QFont::DemiBold);
-                    font.setPixelSize(100);
-                    auto *cached = m_textPaths.object(a.text);
-                    if (!cached) {
-                        cached = new QPainterPath;
-                        cached->addText(0, 100, font, a.text);
-                        m_textPaths.insert(a.text, cached);
-                    }
-                    const auto &path = *cached;
-                    auto b = path.boundingRect();
-                    if (!b.isEmpty()) {
-                        QTransform t;
-                        t.translate(a.bounds.x(), a.bounds.y());
-                        t.scale(a.bounds.width() / b.width(), a.bounds.height() / b.height());
-                        t.translate(-b.x(), -b.y());
-                        p->fillPath(t.map(path), c);
-                    }
+                    QString error;
+                    auto path = JobPlanner::geometry(world, error, true);
+                    QTransform t;
+                    t.translate(0, 150);
+                    t.scale(1, -1);
+                    p->fillPath(t.map(path), c);
                 }
                 p->setOpacity(1);
                 if (m_preview) {
@@ -240,6 +302,16 @@ void Workspace::paint(QPainter *p) {
                         p->drawRect(QRectF(point - QPointF(.9, .9), QSizeF(1.8, 1.8)));
                 }
                 ++idx;
+            }
+            if (m_nodes) {
+                p->setPen(QPen(QColor("#158c71"), .25));
+                p->setBrush(QColor("#ffffff"));
+                for (auto node : m_document->nodes()) {
+                    auto n = node.toMap();
+                    auto point =
+                        Geometry::worldToCanvas(QPointF(n["x"].toDouble(), n["y"].toDouble()));
+                    p->drawEllipse(point, 2 / scale(), 2 / scale());
+                }
             }
             if (!m_preview && m_document->selectedRows().size() > 1) {
                 p->setPen(QPen(QColor("#1c956f"), .6, Qt::DashLine));

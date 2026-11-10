@@ -13,7 +13,9 @@ class Controller : public QObject {
     QByteArray buffer;
     QStringList commands;
     QString status = "Idle";
-    bool banner = false, wrongPower = false;
+    bool banner = false, wrongPower = false, autoAck = true, withOverrides = false;
+    QByteArray realtime;
+    int feed = 100, power = 100;
     Controller() {
         int slave;
         char name[256];
@@ -29,6 +31,43 @@ class Controller : public QObject {
             while ((n = read(master, data, sizeof(data))) > 0)
                 for (int i = 0; i < n; ++i) {
                     char c = data[i];
+                    unsigned char byte = static_cast<unsigned char>(c);
+                    if (byte >= 0x80) {
+                        realtime.append(c);
+                        switch (byte) {
+                        case 0x90:
+                            feed = 100;
+                            break;
+                        case 0x91:
+                            feed += 10;
+                            break;
+                        case 0x92:
+                            feed -= 10;
+                            break;
+                        case 0x93:
+                            ++feed;
+                            break;
+                        case 0x94:
+                            --feed;
+                            break;
+                        case 0x99:
+                            power = 100;
+                            break;
+                        case 0x9a:
+                            power += 10;
+                            break;
+                        case 0x9b:
+                            power -= 10;
+                            break;
+                        case 0x9c:
+                            ++power;
+                            break;
+                        case 0x9d:
+                            --power;
+                            break;
+                        }
+                        continue;
+                    }
                     if (c == '?') {
                         report();
                         continue;
@@ -68,7 +107,8 @@ class Controller : public QObject {
                                                "131=150\r\n"
                                              : "$30=1000\r\n$32=1\r\n$22=1\r\n$13=0\r\n$130="
                                                "200\r\n$131=150\r\n");
-                        reply("ok\r\n");
+                        if (autoAck)
+                            reply("ok\r\n");
                     } else
                         buffer += c;
                 }
@@ -82,11 +122,46 @@ class Controller : public QObject {
         if (master >= 0)
             QVERIFY(write(master, s.constData(), s.size()) == s.size());
     }
-    void report() { reply(("<" + status + "|MPos:0,0,0|WCO:0,0,0|FS:0,0>\r\n").toLatin1()); }
+    void report() {
+        reply(("<" + status + "|MPos:0,0,0|WCO:0,0,0|FS:0,0" +
+               (withOverrides ? "|Ov:" + QString::number(feed) + ",100," + QString::number(power)
+                              : QString()) +
+               ">\r\n")
+                  .toLatin1());
+    }
 };
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void bufferedCreditsAndOverrides() {
+        Controller c;
+        c.withOverrides = true;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY_WITH_TIMEOUT(s.ready(), 4000);
+        QTRY_VERIFY(s.overrideFeedback);
+        QVERIFY(s.overrides(125, 70));
+        QTRY_COMPARE(c.feed, 125);
+        QTRY_COMPARE(c.power, 70);
+        QTRY_COMPARE(s.feedOverride, 125);
+        QVERIFY(!s.overrides(125, 110));
+        c.autoAck = false;
+        int before = c.commands.size();
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        s.start(d.job());
+        QTRY_VERIFY(c.commands.size() > before + 1);
+        QTest::qWait(50);
+        int bytes = 0;
+        for (int i = before; i < c.commands.size(); ++i)
+            bytes += c.commands[i].toLatin1().size() + 1;
+        QVERIFY(bytes <= 100);
+        QVERIFY(s.busy());
+        c.autoAck = true;
+        s.stop();
+        QTRY_VERIFY_WITH_TIMEOUT(s.ready(), 4000);
+    }
     void streamAndCompletion() {
         Controller c;
         GrblSession s;

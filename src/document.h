@@ -19,12 +19,19 @@ struct Artwork {
     QVariantMap settings{};
     std::shared_ptr<const ReliefAsset> reliefAsset{};
     ReliefSettings relief{};
+    QPainterPath path{}; // normalized coordinates, lower-left convention
+    QVariantMap style{};
+    QList<int> extraOperations{};
+    int page = 0;
     bool operator==(const Artwork &) const = default;
 };
 
 class Document : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QVariantMap jobSummary READ jobSummary NOTIFY changed)
+    Q_PROPERTY(QStringList pages READ pages NOTIFY changed)
+    Q_PROPERTY(int activePage READ activePage NOTIFY changed)
+    Q_PROPERTY(QVariantList nodes READ nodes NOTIFY selectionChanged)
     Q_PROPERTY(int count READ count NOTIFY changed)
     Q_PROPERTY(int selected READ selected WRITE select NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selection READ selection NOTIFY selectionChanged)
@@ -49,9 +56,31 @@ class Document : public QAbstractListModel {
         LayerRole,
         GroupRole,
         GroupNameRole,
-        GroupFirstRole
+        GroupFirstRole,
+        OnPageRole
     };
     explicit Document(QObject *parent = nullptr);
+    QStringList pages() const { return m_pages; }
+    int activePage() const { return m_activePage; }
+    QVariantList nodes() const;
+    Q_INVOKABLE bool command(const QString &action, const QVariantMap &args = {});
+    Q_INVOKABLE bool manageOperation(int row, const QString &action);
+    Q_INVOKABLE int addOperation(const QString &name, const QString &mode);
+    Q_INVOKABLE void assignOperations(const QVariantList &rows);
+    Q_INVOKABLE bool addPage(const QString &name);
+    Q_INVOKABLE void activatePage(int page);
+    Q_INVOKABLE bool removePage(int page);
+    bool outputs(const Artwork &item) const;
+    Q_INVOKABLE bool renamePage(int page, const QString &name);
+    QByteArray projectBytes() const { return serialize(); }
+    bool restoreBytes(const QByteArray &bytes);
+    Q_INVOKABLE bool importFile(const QUrl &url);
+    Q_INVOKABLE bool importModel(const QUrl &url);
+    Q_INVOKABLE bool exportSvg(const QUrl &url) const;
+    Q_INVOKABLE bool importProject(const QUrl &url);
+    Q_INVOKABLE bool setNode(int element, double x, double y);
+    Q_INVOKABLE bool batch(const QUrl &csv, const QUrl &directory, const QString &pattern);
+
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
@@ -90,7 +119,7 @@ class Document : public QAbstractListModel {
     QVariantMap material() const { return m_material; }
     bool materialModified() const;
     const QList<Artwork> &items() const { return m_items; }
-    QColor layerColor(int layer) const;
+    Q_INVOKABLE QColor layerColor(int layer) const;
     static QPainterPath outline(const Artwork &item);
     Q_INVOKABLE void demo();
     Q_INVOKABLE void newProject();
@@ -124,6 +153,8 @@ class Document : public QAbstractListModel {
         int selected = -1;
         QVariantMap material;
         QList<int> selection;
+        QStringList pages;
+        int activePage = 0;
     };
     Snapshot snapshot() const;
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
@@ -136,12 +167,16 @@ class Document : public QAbstractListModel {
     bool transformSelection(const QRectF &bounds, bool history = true);
     void normalizeGroups();
     bool canAppend(const Artwork &item);
+    static bool validBudget(const QList<Artwork> &items);
+    static bool bakePath(Artwork &item, const QPainterPath &path);
     void appendArtwork(const Artwork &item);
     QList<Artwork> m_items;
     QVariantList m_layers;
     QVariantMap m_material;
     int m_selected = -1;
     QList<int> m_selection;
+    QStringList m_pages{"Blatt 01"};
+    int m_activePage = 0;
     QString m_title = "Werkstattschild", m_message;
     bool m_dirty = false;
     Snapshot m_saved;

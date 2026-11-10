@@ -25,7 +25,10 @@ class GrblSession : public QObject {
     QString state = "Getrennt";
     QStringList log;
     void start(const JobPlan &job);
-    bool commands(const QStringList &lines);
+    bool overrides(int feed, int power);
+    int feedOverride = 100, powerOverride = 100;
+    bool overrideFeedback = false;
+    bool commands(const QStringList &lines, bool buffered = false);
     void pause();
     void stop();
     void jog(double dx, double dy);
@@ -54,5 +57,8 @@ class GrblSession : public QObject {
     QString controllerState;
     QPointF offset;
     bool knownOffset = false;
+    QList<int> inFlight;
+    int sent = 0, rxBytes = 0;
+    bool buffering = false;
     int total = 0, acked = 0, pendingAcks = 0;
 };

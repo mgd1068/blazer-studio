@@ -9,11 +9,15 @@ QVariantMap ReliefSettings::toMap() const {
             {"interval", interval},
             {"gamma", gamma},
             {"inverted", inverted},
-            {"depthPerPass", depthPerPass}};
+            {"depthPerPass", depthPerPass},
+            {"crosshatch", crosshatch},
+            {"cleanupEvery", cleanupEvery},
+            {"cleanupPower", cleanupPower}};
 }
 bool ReliefSettings::fromMap(const QVariantMap &map, ReliefSettings &result) {
     ReliefSettings p;
-    if (map.size() != 5 || map.value("inverted").metaType().id() != QMetaType::Bool)
+    if ((map.size() != 5 && map.size() != 8) ||
+        map.value("inverted").metaType().id() != QMetaType::Bool)
         return false;
     const auto bounded = [&](const QString &key, double lo, double hi, double &out) {
         auto v = map.value(key);
@@ -28,15 +32,28 @@ bool ReliefSettings::fromMap(const QVariantMap &map, ReliefSettings &result) {
         !bounded("interval", .02, 2, p.interval) || !bounded("gamma", .1, 5, p.gamma) ||
         !bounded("depthPerPass", 0, 1, p.depthPerPass))
         return false;
+    if (map.size() == 8) {
+        double every = 0;
+        if (map.value("crosshatch").metaType().id() != QMetaType::Bool ||
+            !bounded("cleanupEvery", 0, 256, every) || std::floor(every) != every ||
+            !bounded("cleanupPower", 0, 100, p.cleanupPower))
+            return false;
+        p.crosshatch = map["crosshatch"].toBool();
+        p.cleanupEvery = int(every);
+    }
     p.passes = int(passes);
     p.inverted = map["inverted"].toBool();
     result = p;
     return true;
 }
 int ReliefSettings::count(QRgb pixel) const {
-    if (qAlpha(pixel) == 0)
+    return count(QRgba64::fromArgb32(pixel));
+}
+int ReliefSettings::count(QRgba64 pixel) const {
+    if (pixel.alpha() == 0)
         return 0;
-    double gray = (qGray(pixel) * qAlpha(pixel) + 255. * (255 - qAlpha(pixel))) / 65025.;
+    double gray = (pixel.red() * 11. + pixel.green() * 16. + pixel.blue() * 5.) / (32. * 65535.);
+    gray = gray * pixel.alpha() / 65535. + (1 - pixel.alpha() / 65535.);
     double darkness = inverted ? gray : 1 - gray;
     return std::clamp(int(std::ceil(std::pow(darkness, gamma) * passes - 1e-9)), 0, passes);
 }
@@ -44,14 +61,17 @@ std::shared_ptr<const ReliefAsset> ReliefAsset::fromImage(const QImage &source) 
     if (source.isNull() || source.width() > 512 || source.height() > 512)
         return {};
     auto asset = std::make_shared<ReliefAsset>();
-    asset->image = source.convertToFormat(QImage::Format_ARGB32);
-    for (int y = 0; y < asset->image.height(); ++y) {
-        auto *line = reinterpret_cast<QRgb *>(asset->image.scanLine(y));
+    asset->image =
+        source.convertToFormat(source.depth() > 32 || source.format() == QImage::Format_Grayscale16
+                                   ? QImage::Format_RGBA64
+                                   : QImage::Format_ARGB32);
+    for (int y = 0; y < asset->image.height(); ++y)
         for (int x = 0; x < asset->image.width(); ++x) {
-            const auto gray = qGray(line[x]);
-            line[x] = qRgba(gray, gray, gray, qAlpha(line[x]));
+            auto c = asset->image.pixelColor(x, y).rgba64();
+            quint16 gray =
+                (quint32(c.red()) * 11 + quint32(c.green()) * 16 + quint32(c.blue()) * 5) / 32;
+            asset->image.setPixelColor(x, y, QColor::fromRgba64(gray, gray, gray, c.alpha()));
         }
-    }
     QBuffer buffer(&asset->png);
     buffer.open(QIODevice::WriteOnly);
     if (!asset->image.save(&buffer, "PNG"))
@@ -97,7 +117,7 @@ ReliefRaster ReliefRaster::build(const ReliefAsset &asset, const ReliefSettings 
             const int px = std::clamp(int(x / size.width() * image.width()), 0, image.width() - 1);
             const int py = std::clamp(image.height() - 1 - int(y / size.height() * image.height()),
                                       0, image.height() - 1);
-            raster.counts[row * raster.columns + col] = p.count(image.pixel(px, py));
+            raster.counts[row * raster.columns + col] = p.count(image.pixelColor(px, py).rgba64());
         }
     return raster;
 }

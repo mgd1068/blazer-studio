@@ -1,4 +1,4 @@
-# Entwurf 0.5 ausprobieren
+# Entwurf 0.6 ausprobieren
 
 ## Start
 
@@ -29,22 +29,22 @@ Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** 
 - Simulierte Positionierung, Referenzfahrt, Rahmenfahrt, zeitbasierter Demoablauf, Pause, Stop und Verbindungsfehler.
 - 2-%-Fokusfunktion im Simulator per Gedrückthalten; Aus beim Loslassen, Seitenwechsel, Fokusverlust, Fehler oder spätestens nach drei Sekunden.
 
-Strg+S: Speichern, Strg+O: Öffnen, Strg+I: SVG importieren, Strg+Z: Undo, Strg+Umschalt+Z: Redo, Escape: Simulation stoppen und Auswahl aufheben.
+Strg+S: Speichern, Strg+O: Öffnen, Strg+I: Grafik oder Modell importieren, Strg+Z: Undo, Strg+Umschalt+Z: Redo, Escape: Simulation stoppen und Auswahl aufheben.
 
 ## Noch offen
 
-Die Vorschau zeigt berechnete Schnitt- und Füllbewegungen sowie Leerfahrten. Der Simulator spielt sie im 16-Sekunden-Zeitraffer ab. Die geometrische Zeitangabe berücksichtigt keine Beschleunigungen oder Kommunikationspausen. Vektoren werden linearisiert; SVGs bleiben im Editor zusammenhängend. Bilder sind zunächst schwarzweiß gedithert, keine Graustufen-Leistungsmodulation.
+Die Vorschau zeigt berechnete Schnitt- und Füllbewegungen sowie Leerfahrten. Der Simulator spielt sie im 16-Sekunden-Zeitraffer ab. Die Zeitangabe ergänzt eine konservative Beschleunigungsschätzung; Kommunikationspausen und reale Controllerplanung sind noch nicht gemessen. Vektoren werden linearisiert; SVGs bleiben im Editor zusammenhängend. Rasterbilder unterstützen Dithering, Schwellenwert oder variable Graustufenleistung.
 
-Noch offen sind vollständige SVG-Kompatibilität, DXF-/PDF-/LightBurn-Projektimport, weitere Gestaltungswerkzeuge, mehrere Arbeitsblätter, Autosave, Absturzwiederherstellung sowie die tatsächliche Laser-/Materialabnahme. Undo bleibt auf 50 Schritte begrenzt. Projektformat 5 speichert eigene Zell-/Objektparameter und Tiefenkarten; Formate 1–4 bleiben lesbar. Einzelheiten und konkrete Grenzen stehen im [Geräteworkflow](GRBL_WORKFLOW.md).
+Noch offen sind vollständige SVG-/DXF-/PDF-/LightBurn-Kompatibilität und die tatsächliche Laser-/Materialabnahme. Unterstützte Importvarianten, neue Editor-/Produktionsfunktionen und Grenzen stehen im [Ausbaupaket](EXPANSION.md). Undo bleibt auf 50 Schritte begrenzt. Projektformat 6 speichert eigene Zell-/Objektparameter und Tiefenkarten; Formate 1–5 bleiben lesbar. Einzelheiten und konkrete Grenzen stehen im [Geräteworkflow](GRBL_WORKFLOW.md).
 
-SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version abgelehnt. Die zwei Bearbeitungen Gravur und Schnitt sind vorerst fest vorgegeben; ihre Parameter und Ausgabe lassen sich über Profile oder einzeln ändern. Details: [Materialbibliothek](MATERIAL_LIBRARY.md).
+SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version abgelehnt. Zwei Basisoperationen Gravur und Schnitt erhalten die Materialprofil-Zuordnung. Weitere benannte Operationen und Mehrfachbearbeitungen können frei ergänzt werden. Details: [Materialbibliothek](MATERIAL_LIBRARY.md).
 
 ## Bauen und prüfen
 
 Getestete Umgebung: Ubuntu 26.04, GCC 15, Qt 6.10.2.
 
 ```bash
-sudo apt-get install qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-serialport-dev \
+sudo apt-get install qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-serialport-dev libqrcodegencpp-dev \
   qml6-module-qtquick qml6-module-qtquick-window \
   qml6-module-qtquick-controls qml6-module-qtquick-layouts \
   qml6-module-qtquick-dialogs qml6-module-qtqml-workerscript
@@ -65,3 +65,5 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 Der aktuelle Prüfumfang steht im [Prüfbericht](QA_REPORT.md). Reale serielle Verbindung und Bewegung wurden mit Laser-Aus bestätigt; echte Laseremission ist bisher kein Bestandteil der Geräteprüfung.
 
 Der zusätzliche Bereich **04 Relief** erzeugt geschichtete Gravurjobs aus Graustufen-Tiefenkarten. Bedienung, Kalibrierung und Hardwaregrenzen: [Relief](RELIEF.md). CLI: `--new --import-relief /pfad/depth.png --view 3`; kein automatischer Laserstart.
+
+**05 Werkzeuge** bietet Pfade/Transformation, Operationen, Bildbearbeitung und Produktion. [Bedienung, optionale KI und konkrete Grenzen](EXPANSION.md).

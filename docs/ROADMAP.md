@@ -63,3 +63,7 @@ Ergänzt in 0.4: Controllerabfrage und Bewegung mit Laser-Aus am M3 bestätigt; 
 ## Stand 0.5: geschichtete Reliefgravur
 
 Eigener Reliefbereich mit Graustufen-Tiefenkarten, 1–256 Schichten, Umkehr/Gamma, Schichtmasken, relativer 3D-Vorschau und optionaler Abtragskalibrierung umgesetzt. Gleiche Pfade für GCode, Simulator und GRBL. Reale Eignung des M3 für fühlbare Kieselreliefs ist offen; keine automatische Foto-Tiefenrekonstruktion oder Z-Nachführung. Siehe [Relief](RELIEF.md).
+
+## Stand 0.6: Editor, Produktion und Wiederherstellung
+
+Großes Ausbaupaket nach dem Programmvergleich: Datensicherung, weitere Operationen und Mehrfachbearbeitung, Pfad-/Text-/Bildwerkzeuge, zusätzliche Importvarianten, Schnitt-/Scanoptionen, Nesting/Arbeitsblätter/CSV/QR, gepuffertes GRBL/Overrides sowie 16-Bit-/Modell-/Foto-Tiefenworkflow. Die genaue Tabelle [EXPANSION.md](EXPANSION.md) benennt verbleibende Format-, Qualitäts- und Hardwaregrenzen. Sie ersetzt keine vollständige Abnahme der F01–F53-Zielmatrix. Tatsächliche Emissions-/Materialprüfung und geeignete zusätzliche Hardware bleiben offen.

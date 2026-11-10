@@ -16,7 +16,7 @@ struct JobMove {
 struct JobPlan {
     QVector<JobMove> moves;
     QStringList errors;
-    double workLength = 0, travelLength = 0, seconds = 0;
+    double workLength = 0, travelLength = 0, seconds = 0, minimumSeconds = 0;
     bool valid() const { return errors.isEmpty() && !moves.isEmpty(); }
     QStringList gcode() const;
     QVariantMap summary() const;

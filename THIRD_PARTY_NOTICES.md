@@ -28,3 +28,19 @@ original documentation. It does not relicense third-party components.
 For a source distribution preserve this file and `LICENSE`. A binary distributor
 must additionally satisfy the license obligations of whatever dependencies it
 actually includes. User-created designs retain their own rights.
+
+- **QR-Code-generator (C++), Project Nayuki:** dynamically linked system library
+  `libqrcodegencpp`, MIT/Expat license. Complete copyright/license notice in
+  `LICENSES/QR-Code-generator.txt`. Its own permissions are not restricted by the
+  application license. Source: <https://github.com/nayuki/QR-Code-generator>.
+- **Depth Anything V2 Small:** optional local depth estimation, Apache-2.0;
+  independently exported ONNX weights from
+  <https://huggingface.co/onnx-community/depth-anything-v2-small>, based on
+  <https://github.com/DepthAnything/Depth-Anything-V2>. Model revision and SHA-256
+  digests are pinned in `tools/setup_depth.py`. Weights are downloaded separately
+  into the user's cache, not bundled in this repository. Apache-2.0 text is in
+  `LICENSES/Apache-2.0.txt`. The optional Python environment supplies ONNX Runtime,
+  NumPy and Pillow under their respective licenses, not our application license.
+- **Inkscape:** optional separately installed conversion program for PDF/AI/EPS,
+  invoked as a process. No Inkscape source/binary is bundled. Its own GPL rights
+  remain unchanged. Source: <https://inkscape.org/>.

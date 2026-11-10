@@ -6,12 +6,15 @@
 struct ReliefSettings {
     int passes = 16;
     double interval = .1, gamma = 1, depthPerPass = 0;
-    bool inverted = false;
+    bool inverted = false, crosshatch = false;
+    int cleanupEvery = 0;
+    double cleanupPower = 5;
     bool operator==(const ReliefSettings &) const = default;
     QVariantMap toMap() const;
     static bool fromMap(const QVariantMap &map, ReliefSettings &result);
     // White is untouched, black receives all passes. Transparency is never engraved.
     int count(QRgb pixel) const;
+    int count(QRgba64 pixel) const;
 };
 struct ReliefAsset {
     QImage image;

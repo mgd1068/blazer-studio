@@ -1,18 +1,32 @@
 #pragma once
 #include "document.h"
+#include "registration.h"
 #include "simulator.h"
 #include <QCache>
 #include <QPointer>
 #include <QQuickPaintedItem>
 class Workspace : public QQuickPaintedItem {
     Q_OBJECT
+    Q_PROPERTY(Registration *registration READ registration WRITE setRegistration NOTIFY
+                   registrationChanged)
     Q_PROPERTY(Document *document READ document WRITE setDocument NOTIFY documentChanged)
     Q_PROPERTY(Simulator *simulator READ simulator WRITE setSimulator NOTIFY simulatorChanged)
     Q_PROPERTY(bool preview READ preview WRITE setPreview NOTIFY previewChanged)
     Q_PROPERTY(bool dark READ dark WRITE setDark NOTIFY darkChanged)
+    Q_PROPERTY(bool nodes READ nodeMode WRITE setNodeMode NOTIFY nodeModeChanged)
     Q_PROPERTY(double zoom READ zoom NOTIFY zoomChanged)
   public:
     explicit Workspace(QQuickItem *p = nullptr);
+    Registration *registration() const { return m_registration; }
+    void setRegistration(Registration *r) {
+        if (m_registration)
+            disconnect(m_registration, nullptr, this, nullptr);
+        m_registration = r;
+        if (r)
+            connect(r, &Registration::changed, this, [this] { update(); });
+        emit registrationChanged();
+        update();
+    }
     Document *document() const { return m_document; }
     void setDocument(Document *d);
     Simulator *simulator() const { return m_simulator; }
@@ -29,6 +43,12 @@ class Workspace : public QQuickPaintedItem {
         update();
         emit darkChanged();
     }
+    bool nodeMode() const { return m_nodes; }
+    void setNodeMode(bool v) {
+        m_nodes = v;
+        update();
+        emit nodeModeChanged();
+    }
     double zoom() const { return m_zoom; }
     Q_INVOKABLE void fit() {
         m_zoom = 1;
@@ -42,10 +62,12 @@ class Workspace : public QQuickPaintedItem {
     void paint(QPainter *p) override;
   signals:
     void documentChanged();
+    void registrationChanged();
     void simulatorChanged();
     void previewChanged();
     void darkChanged();
     void zoomChanged();
+    void nodeModeChanged();
 
   protected:
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
@@ -59,9 +81,12 @@ class Workspace : public QQuickPaintedItem {
     double scale() const;
     QPointF origin() const;
     QPointF toWorld(QPointF p) const;
+    QPointer<Registration> m_registration;
     QPointer<Document> m_document;
     QPointer<Simulator> m_simulator;
     bool m_preview = false, m_dark = false, m_drag = false, m_panning = false;
+    bool m_nodes = false;
+    int m_dragNode = -1;
     double m_zoom = 1;
     QPointF m_pan, m_last, m_offset;
     QCache<QString, QPainterPath> m_textPaths{128};

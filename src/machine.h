@@ -5,11 +5,17 @@ class Document;
 class Machine : public Simulator {
     Q_OBJECT
     Q_PROPERTY(bool simulation READ simulation NOTIFY changed)
+    Q_PROPERTY(QVariantList capabilities READ capabilities CONSTANT)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
   public:
     explicit Machine(Document *document, QObject *parent = nullptr);
     bool simulation() const { return !live; }
     QStringList ports() const;
+    QVariantList capabilities() const;
+    Q_INVOKABLE bool setOverrides(int feed, int power) {
+        return live && grbl.overrides(feed, power);
+    }
+
     Q_INVOKABLE bool connectHardware(const QString &port);
     Q_INVOKABLE void useSimulator();
     Q_INVOKABLE void refreshPorts() { emit changed(); }
