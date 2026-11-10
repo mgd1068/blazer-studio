@@ -42,10 +42,10 @@ ScrollView {
         TabBar {
             Layout.fillWidth: true
             currentIndex: tools.section; onCurrentIndexChanged: tools.section=currentIndex
-            TabButton { id: toolsEditorTab; objectName: "toolsEditor"; text: "Editor"; background: Rectangle { radius: 4; color: toolsEditorTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsEditorTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
-            TabButton { id: toolsOperationsTab; objectName: "toolsOperations"; text: "Operationen"; background: Rectangle { radius: 4; color: toolsOperationsTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsOperationsTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
-            TabButton { id: toolsImageTab; objectName: "toolsImage"; text: "Bild"; background: Rectangle { radius: 4; color: toolsImageTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsImageTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
-            TabButton { id: toolsProductionTab; objectName: "toolsProduction"; text: "Produktion"; background: Rectangle { radius: 4; color: toolsProductionTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsProductionTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
+            TabButton { HelpBubble { target: parent } id: toolsEditorTab; objectName: "toolsEditor"; text: "Editor"; background: Rectangle { radius: 4; color: toolsEditorTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsEditorTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
+            TabButton { HelpBubble { target: parent } id: toolsOperationsTab; objectName: "toolsOperations"; text: "Operationen"; background: Rectangle { radius: 4; color: toolsOperationsTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsOperationsTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
+            TabButton { HelpBubble { target: parent } id: toolsImageTab; objectName: "toolsImage"; text: "Bild"; background: Rectangle { radius: 4; color: toolsImageTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsImageTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
+            TabButton { HelpBubble { target: parent } id: toolsProductionTab; objectName: "toolsProduction"; text: "Produktion"; background: Rectangle { radius: 4; color: toolsProductionTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsProductionTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
         }
         ColumnLayout {
             visible: tools.section===0
@@ -81,7 +81,7 @@ ScrollView {
                 ActionButton { text: "Konturversatz"; dark: tools.dark; onClicked: tools.apply("offset",{value:offset.value}) }
             }
             SectionLabel { text: "KNOTEN NUMERISCH"; dark: tools.dark }
-            SpinBox { id: node; from: 0; to: Math.max(0,project.nodes.length-1); editable: true; Layout.fillWidth: true }
+            SpinBox { HelpBubble { target: parent } id: node; from: 0; to: Math.max(0,project.nodes.length-1); editable: true; Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
                 NumberField { id: nx; label: "X"; value: project.nodes[node.value] ? project.nodes[node.value].x : 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setNode(node.value,n,ny.value) }
@@ -100,7 +100,7 @@ ScrollView {
             Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20; spacing: 10
             Text { text: "Freie Operationen"; color: tools.ink; font.pixelSize: 16 }
             ToolCombo { dark: tools.dark; id: opChoice; objectName: "operationChoice"; model: project.layers.map(op=>op.name); currentIndex: Math.min(tools.operation,count-1); Layout.fillWidth: true; onActivated: index=>tools.operationSelected(index) }
-            TextField { id: opName; objectName: "newOperationName"; placeholderText: "Name der neuen Operation"; text: "Feingravur"; Layout.fillWidth: true }
+            TextField { HelpBubble { target: parent } id: opName; objectName: "newOperationName"; placeholderText: "Name der neuen Operation"; text: "Feingravur"; Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
                 ToolCombo { dark: tools.dark; id: newMode; model: ["Gravur","Schnitt"]; Layout.fillWidth: true }
@@ -116,7 +116,7 @@ ScrollView {
             Text { text: "Operationen für die Auswahl: Reihenfolge der Häkchen bestimmt Haupt- und zusätzliche Bearbeitung. Eigene Objektwerte gelten für die Hauptoperation."; color: tools.muted; wrapMode: Text.WordWrap; font.pixelSize: 10; Layout.fillWidth: true }
             Repeater {
                 model: project.layers
-                CheckBox {
+                CheckBox { HelpBubble { target: parent }
                     required property var modelData; required property int index
                     objectName: "operationAssign"+index
                     text: modelData.name; checked: (project.selection.operations || []).indexOf(index)>=0
@@ -126,30 +126,30 @@ ScrollView {
             GridLayout {
                 columns: 2; Layout.fillWidth: true
                 Text { text: "Scanwinkel"; color: tools.ink }
-                NumberField { value: tools.op.angle || 0; unit: "°"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"angle",n) }
+                NumberField { hint: "Richtung der Gravurlinien in Grad: 0 waagerecht, 90 senkrecht."; value: tools.op.angle || 0; unit: "°"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"angle",n) }
                 Text { text: "Winkel je Durchgang"; color: tools.ink }
-                NumberField { value: tools.op.angleIncrement || 0; unit: "°"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"angleIncrement",n) }
+                NumberField { hint: "Zusätzliche Drehung der Gravurlinien je Wiederholung in Grad."; value: tools.op.angleIncrement || 0; unit: "°"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"angleIncrement",n) }
                 Text { text: "Kreuzschraffur"; color: tools.ink }
-                CheckBox { checked: tools.op.crosshatch || false; onClicked: project.setLayerSetting(tools.operation,"crosshatch",checked) }
+                CheckBox { HelpBubble { target: parent } checked: tools.op.crosshatch || false; onClicked: project.setLayerSetting(tools.operation,"crosshatch",checked) }
                 Text { text: "Überlauf / Randweg"; color: tools.ink }
-                NumberField { value: tools.op.overscan || 0; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"overscan",n) }
+                NumberField { hint: "Zusätzlicher Fahrweg ohne Laser vor und nach einer Gravurlinie in Millimetern. Benötigt freien Platz."; value: tools.op.overscan || 0; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"overscan",n) }
                 Text { text: "Versatz Rückrichtung"; color: tools.ink }
-                NumberField { value: tools.op.scanOffset || 0; unit: "mm"; decimals: 3; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"scanOffset",n) }
+                NumberField { hint: "Gemessene Korrektur zwischen hin- und rücklaufenden Gravurlinien in Millimetern."; value: tools.op.scanOffset || 0; unit: "mm"; decimals: 3; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"scanOffset",n) }
                 Text { text: "Schnittfuge (±)"; color: tools.ink }
-                NumberField { value: tools.op.kerf || 0; unit: "mm"; decimals: 3; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"kerf",n) }
+                NumberField { hint: "Korrigiert die Schnittkontur um die gemessene Schnittfugenbreite. Positiv nach außen, negativ nach innen."; value: tools.op.kerf || 0; unit: "mm"; decimals: 3; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"kerf",n) }
                 Text { text: "Haltestege / Anzahl"; color: tools.ink }
-                SpinBox { from: 0; to: 100; value: tools.op.tabs || 0; onValueModified: project.setLayerSetting(tools.operation,"tabs",value) }
+                SpinBox { HelpBubble { target: parent } from: 0; to: 100; value: tools.op.tabs || 0; onValueModified: project.setLayerSetting(tools.operation,"tabs",value) }
                 Text { text: "Breite der Haltestege"; color: tools.ink }
-                NumberField { value: tools.op.tabWidth || 1; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"tabWidth",n) }
+                NumberField { hint: "Breite der ungeschnittenen Haltestege in Millimetern."; value: tools.op.tabWidth || 1; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"tabWidth",n) }
                 Text { text: "Einlauf / Auslauf"; color: tools.ink }
                 RowLayout { Layout.fillWidth: true
-                    NumberField { value: tools.op.leadIn || 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"leadIn",n) }
-                    NumberField { value: tools.op.leadOut || 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"leadOut",n) }
+                    NumberField { hint: "Fahrweg zum Start einer Schnittkontur in Millimetern."; value: tools.op.leadIn || 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"leadIn",n) }
+                    NumberField { hint: "Fahrweg nach dem Ende einer Schnittkontur in Millimetern."; value: tools.op.leadOut || 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"leadOut",n) }
                 }
                 Text { text: "Konturstart / Anteil"; color: tools.ink }
-                NumberField { value: tools.op.startPoint || 0; unit: "%"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"startPoint",n) }
+                NumberField { hint: "Startposition entlang einer geschlossenen Kontur in Prozent."; value: tools.op.startPoint || 0; unit: "%"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>project.setLayerSetting(tools.operation,"startPoint",n) }
                 Text { text: "Nächsten Start wählen"; color: tools.ink }
-                CheckBox { checked: tools.op.optimize || false; onClicked: project.setLayerSetting(tools.operation,"optimize",checked) }
+                CheckBox { HelpBubble { target: parent } checked: tools.op.optimize || false; onClicked: project.setLayerSetting(tools.operation,"optimize",checked) }
             }
             Text { text: "Überlauf, Ein-/Auslauf und Schnittfuge können den Platzbedarf vergrößern. Ausgabe außerhalb des Arbeitsraums wird vollständig abgelehnt."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 10 }
         }
@@ -159,12 +159,12 @@ ScrollView {
             Text { text: "Rasterbild bearbeiten"; color: tools.ink; font.pixelSize: 16 }
             ToolCombo { dark: tools.dark; id: imageMode; objectName: "imageModeChoice"; model: ["Floyd-Steinberg","Atkinson","Schwellenwert","Graustufen / variable Leistung"]; Layout.fillWidth: true }
             Text { text: "B: Helligkeit −1…1 · K: Kontrast 0…3 · γ: Gamma 0,1…5 · S: Schärfung 0…3"; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 10 }
-            NumberField { id: brightness; label: "B"; value: 0; unit: "±1"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
-            NumberField { id: contrast; label: "K"; value: 1; unit: "×"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+            NumberField { id: brightness; hint: "Bildhelligkeit: 0 unverändert, negative Werte dunkler, positive heller."; label: "B"; value: 0; unit: "±1"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+            NumberField { id: contrast; hint: "Bildkontrast: 1 unverändert; größere Werte trennen hell und dunkel stärker."; label: "K"; value: 1; unit: "×"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
             NumberField { id: imageGamma; label: "γ"; value: 1; unit: "×"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
-            NumberField { id: sharpness; label: "S"; value: 0; unit: "×"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
-            CheckBox { id: invert; text: "Bild invertieren" }
-            CheckBox { id: ellipseMask; text: "Elliptische Maske" }
+            NumberField { id: sharpness; hint: "Bildschärfung: 0 unverändert. Prüfe feine Kanten in der Vorschau."; label: "S"; value: 0; unit: "×"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+            CheckBox { HelpBubble { target: parent } id: invert; text: "Bild invertieren" }
+            CheckBox { HelpBubble { target: parent } id: ellipseMask; text: "Elliptische Maske" }
             ActionButton { objectName: "imageApply"; enabled: project.selection.kind==="image"; text: "Bildwerte übernehmen"; dark: tools.dark; onClicked: tools.apply("imageSettings",{imageMode:["dither","atkinson","threshold","grayscale"][imageMode.currentIndex],brightness:brightness.value,contrast:contrast.value,gamma:imageGamma.value,sharpness:sharpness.value,invert:invert.checked,ellipseMask:ellipseMask.checked}) }
             GridLayout { columns: 2; Layout.fillWidth: true
                 NumberField { id: cropX; label: "X"; value: 0; unit: "px"; decimals: 0; dark: tools.dark; onEdited: n=>value=n; Layout.fillWidth: true }
@@ -194,22 +194,22 @@ ScrollView {
                 ActionButton { text: "Blatt anzeigen"; dark: tools.dark; onClicked: project.activatePage(page.currentIndex) }
                 ActionButton { text: "Blatt mit Inhalt löschen"; dark: tools.dark; enabled: project.pages.length>1; onClicked: project.removePage(page.currentIndex) }
             }
-            TextField { id: pageName; text: "Neues Blatt"; Layout.fillWidth: true }
+            TextField { HelpBubble { target: parent } id: pageName; text: "Neues Blatt"; Layout.fillWidth: true }
             RowLayout { Layout.fillWidth: true
                 ActionButton { text: "+ Blatt"; dark: tools.dark; onClicked: project.addPage(pageName.text) }
                 ActionButton { text: "Umbenennen"; dark: tools.dark; onClicked: project.renamePage(project.activePage,pageName.text) }
                 ActionButton { text: "Auswahl hier kopieren"; dark: tools.dark; onClicked: tools.apply("copyToPage",{page:page.currentIndex}) }
             }
-            NumberField { id: copies; label: "×"; value: 4; unit: "Stk"; decimals: 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
-            NumberField { id: columns; label: "↔"; value: 2; unit: "Sp."; decimals: 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
-            NumberField { id: gap; label: "Δ"; value: 2; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
-            CheckBox { id: allowRotation; text: "Beim Nesting 90°-Drehung erlauben" }
-            CheckBox { id: moreSheets; text: "Bei Bedarf weitere Arbeitsblätter erzeugen"; checked: true }
+            NumberField { id: copies; hint: "Gesamtzahl der gewünschten Kopien."; label: "×"; value: 4; unit: "Stk"; decimals: 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+            NumberField { id: columns; hint: "Anzahl der Spalten im Kopienraster."; label: "↔"; value: 2; unit: "Sp."; decimals: 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+            NumberField { id: gap; hint: "Freier Abstand zwischen den kopierten Objekten in Millimetern."; label: "Δ"; value: 2; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+            CheckBox { HelpBubble { target: parent } id: allowRotation; text: "Beim Nesting 90°-Drehung erlauben" }
+            CheckBox { HelpBubble { target: parent } id: moreSheets; text: "Bei Bedarf weitere Arbeitsblätter erzeugen"; checked: true }
             RowLayout { Layout.fillWidth: true
                 ActionButton { text: "Kopien als Raster"; dark: tools.dark; onClicked: tools.apply("duplicateGrid",{copies:copies.value,columns:columns.value,gap:gap.value}) }
                 ActionButton { text: "Auswahl verschachteln"; dark: tools.dark; onClicked: tools.apply("nest",{gap:gap.value,rotate:allowRotation.checked,multipage:moreSheets.checked}) }
             }
-            TextField { id: qrText; placeholderText: "QR-Inhalt"; Layout.fillWidth: true }
+            TextField { HelpBubble { target: parent } id: qrText; placeholderText: "QR-Inhalt"; Layout.fillWidth: true }
             ActionButton { text: "QR-Code erzeugen"; dark: tools.dark; onClicked: tools.apply("qr",{text:qrText.text}) }
             Text { text: "Variable Textfelder: {Spaltenname} aus CSV sowie {number}. Stapelexport erzeugt einzelne GCode-Dateien; keine unbeaufsichtigte Jobfolge."; wrapMode: Text.WordWrap; Layout.fillWidth: true; color: tools.muted; font.pixelSize: 10 }
             ActionButton { text: "CSV-Stapel exportieren"; dark: tools.dark; onClicked: tools.csvRequested() }
@@ -230,21 +230,21 @@ ScrollView {
                 id: referencePreview; objectName: "referencePreview"; Layout.fillWidth: true; Layout.preferredHeight: 190
                 fillMode: Image.PreserveAspectFit
                 source: typeof cameraRegistration!=="undefined" ? cameraRegistration.source : ""
-                MouseArea { anchors.fill: parent; onClicked: mouse=>{let x=(mouse.x-(referencePreview.width-referencePreview.paintedWidth)/2)/referencePreview.paintedWidth*cameraRegistration.imageWidth;let y=(mouse.y-(referencePreview.height-referencePreview.paintedHeight)/2)/referencePreview.paintedHeight*cameraRegistration.imageHeight;if(isFinite(x)&&isFinite(y)&&x>=0&&y>=0&&x<=cameraRegistration.imageWidth&&y<=cameraRegistration.imageHeight){corners.itemAt(tools.nextCorner%4).setCoordinates(x,y);tools.nextCorner++}} }
+                MouseArea { anchors.fill: parent; hoverEnabled: true; ToolTip.visible: containsMouse; ToolTip.text: "Nacheinander die vier Ecken der Arbeitsfläche anklicken: unten links, unten rechts, oben rechts, oben links. Danach Kalibrieren wählen."; ToolTip.delay: 650; onClicked: mouse=>{let x=(mouse.x-(referencePreview.width-referencePreview.paintedWidth)/2)/referencePreview.paintedWidth*cameraRegistration.imageWidth;let y=(mouse.y-(referencePreview.height-referencePreview.paintedHeight)/2)/referencePreview.paintedHeight*cameraRegistration.imageHeight;if(isFinite(x)&&isFinite(y)&&x>=0&&y>=0&&x<=cameraRegistration.imageWidth&&y<=cameraRegistration.imageHeight){corners.itemAt(tools.nextCorner%4).setCoordinates(x,y);tools.nextCorner++}} }
             }
             Text { text: "Im Foto die vier Ecken der Reihe nach anklicken; nächster Punkt: P"+(tools.nextCorner%4+1); color: tools.muted; font.pixelSize: 10 }
             Repeater { id: corners; model: 4
                 RowLayout { required property int index; Layout.fillWidth: true
                     Text { text: "P"+(index+1); color: tools.ink }
-                    NumberField { id: px; property string role: "x"; value: typeof cameraRegistration!=="undefined" && (index===1||index===2) ? cameraRegistration.imageWidth : 0; unit: "px"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
-                    NumberField { id: py; property string role: "y"; value: typeof cameraRegistration!=="undefined" && index>=2 ? cameraRegistration.imageHeight : 0; unit: "px"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+                    NumberField { id: px; hint: "Waagerechte Lage der Foto-Ecke in Bildpixeln."; property string role: "x"; value: typeof cameraRegistration!=="undefined" && (index===1||index===2) ? cameraRegistration.imageWidth : 0; unit: "px"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+                    NumberField { id: py; hint: "Senkrechte Lage der Foto-Ecke in Bildpixeln."; property string role: "y"; value: typeof cameraRegistration!=="undefined" && index>=2 ? cameraRegistration.imageHeight : 0; unit: "px"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
                     function coordinates() { return [px.value,py.value] }
                     function setCoordinates(x,y) {px.value=x;py.value=y}
                 }
             }
             RowLayout { Layout.fillWidth: true
                 ActionButton { objectName: "registerCamera"; text: "Kalibrieren"; dark: tools.dark; enabled: typeof cameraRegistration!=="undefined"; onClicked: {let points=[];for(let i=0;i<4;i++)points=points.concat(corners.itemAt(i).coordinates());if(!cameraRegistration.calibrate(points,[0,150,200,150,200,0,0,0]))project.notify("Vier nicht kollineare Eckpunkte im Foto erforderlich.")} }
-                CheckBox { text: "Foto einblenden"; enabled: typeof cameraRegistration!=="undefined" && cameraRegistration.calibrated; checked: typeof cameraRegistration!=="undefined" && cameraRegistration.visible; onClicked: cameraRegistration.visible=checked }
+                CheckBox { HelpBubble { target: parent } text: "Foto einblenden"; enabled: typeof cameraRegistration!=="undefined" && cameraRegistration.calibrated; checked: typeof cameraRegistration!=="undefined" && cameraRegistration.visible; onClicked: cameraRegistration.visible=checked }
             }
             ActionButton { text: "Letzte Sicherung wiederherstellen"; dark: tools.dark; enabled: typeof recovery!=="undefined" && recovery.available; onClicked: recovery.restore() }
         }

@@ -20,10 +20,12 @@ Die Bibliothek liegt im Qt-Anwendungsdatenverzeichnis, auf diesem Rechner normal
 
 Ein Projekt speichert eine eigene Kopie des angewendeten Profils. Spätere Bibliotheksänderungen oder Löschen verändern diesen Stand nicht automatisch; erneutes Auswählen übernimmt den aktuellen Bibliotheksstand. Individuelle Bearbeitungsänderungen werden als Abweichung angezeigt. Die Profilübernahme ist im Projekt rückgängig zu machen; Bibliotheksänderungen selbst haben keinen Undo-Verlauf.
 
-Projektformat 6 speichert zusätzlich Relief-Tiefenkarten und eigene Objektwerte und weiterhin Objektgruppen und Mehrfachauswahl; Maße bleiben Millimeter mit Ursprung unten links. Projektdateien der Versionen 1, 2, 3, 4 und 5 bleiben lesbar; Version 1 wird beim Öffnen umgerechnet. Profilrevisionen werden mitgeführt; eine vollständige Versionsverwaltung, Fotos, Suchfilter, Import/Export fremder Bibliotheken bleiben weitere Ausbauschritte; eine bearbeitbare Materialtestmatrix ist vorhanden.
+Projektformat 7 speichert zusätzlich Relief-Tiefenkarten und eigene Objektwerte und weiterhin Objektgruppen und Mehrfachauswahl; Maße bleiben Millimeter mit Ursprung unten links. Projektdateien der Versionen 1, 2, 3, 4, 5 und 6 bleiben lesbar; Version 1 wird beim Öffnen umgerechnet. Profilrevisionen werden mitgeführt; eine vollständige Versionsverwaltung, Fotos, Suchfilter, Import/Export fremder Bibliotheken bleiben weitere Ausbauschritte; eine bearbeitbare Materialtestmatrix ist vorhanden.
 
 ![Materialprofil bearbeiten](../assets/material-editor.png)
 
 Der **Materialtest**-Knopf erzeugt ein bearbeitbares Leistungs-/Geschwindigkeitsraster. Die Zellen zeigen rechts ihre eigenen Werte; Erzeugung allein startet keinen Job. Siehe [Workflow](GRBL_WORKFLOW.md).
 
 Reliefbilder verwenden eigene Objektleistung/-geschwindigkeit sowie eigene Schichten und Raster. Ein Materialwechsel setzt ihren optionalen Abtrags-Kalibrierwert zurück. Siehe [Relief](RELIEF.md).
+
+Seit 0.7 übernimmt Basic auch die passende Objektzuordnung und entfernt Parameterabweichungen auf dem aktiven Blatt. Advanced behält individuelle Objektwerte beim Materialwechsel. Details zu Quellen und Anfangswerten: [Basic](BEGINNER.md).

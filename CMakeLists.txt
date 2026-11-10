@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(BlazerStudio VERSION 0.6.0 LANGUAGES CXX)
+project(BlazerStudio VERSION 0.7.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Svg SerialPort Xml)
@@ -12,7 +12,7 @@ option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
-    src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
+    src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imagelimits.h src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
     src/document.cpp src/document.h src/geometry.h src/job.cpp src/job.h
     src/svgasset.cpp src/svgasset.h src/materiallibrary.cpp src/materiallibrary.h
     src/grbl.cpp src/grbl.h src/machine.cpp src/machine.h
@@ -31,7 +31,7 @@ if(BLAZER_COVERAGE)
 endif()
 
 set(blazer_qml
-    qml/Main.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
+    qml/Main.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml)
 qt_add_executable(blazer-studio src/main.cpp)
 qt_add_qml_module(blazer-studio URI BlazerStudio VERSION 1.0 QML_FILES ${blazer_qml})
@@ -42,6 +42,11 @@ target_link_libraries(blazer-studio PRIVATE blazer-core Qt6::QuickControls2)
 
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(blazer-raster-benchmark tools/raster_benchmark.cpp)
+    target_link_libraries(blazer-raster-benchmark PRIVATE blazer-core)
+    qt_add_executable(blazer-raster-tests tests/raster_test.cpp)
+    target_link_libraries(blazer-raster-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME raster COMMAND blazer-raster-tests -platform offscreen)
     qt_add_executable(blazer-tests tests/core_test.cpp)
     target_link_libraries(blazer-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME core COMMAND blazer-tests -platform offscreen)
@@ -64,7 +69,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-ui-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-ui-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME ui COMMAND blazer-ui-tests -platform offscreen)
-    set_tests_properties(core ui job grbl relief expansion PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software" TIMEOUT 90)
+    set_tests_properties(core ui job grbl relief expansion raster PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software" TIMEOUT 90)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)

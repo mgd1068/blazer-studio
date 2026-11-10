@@ -23,9 +23,16 @@ QImage ImageProcessing::apply(const QImage &source, const QVariantMap &s, QStrin
     }
     auto image = source.copy(crop).convertToFormat(QImage::Format_ARGB32);
     auto original = image;
+    const bool invert = s.value("invert", false).toBool(),
+               ellipseMask = s.value("ellipseMask", false).toBool(),
+               grayscale = mode == "grayscale", floyd = mode == "dither",
+               atkinson = mode == "atkinson";
     int w = image.width(), h = image.height();
-    QVector<double> errors((w + 4) * (h + 2));
-    for (int y = 0; y < h; ++y)
+    QVector<double> errors[3] = {QVector<double>(w + 4), QVector<double>(w + 4),
+                                 QVector<double>(w + 4)};
+    for (int y = 0; y < h; ++y) {
+        double *current = errors[y % 3].data(), *next = errors[(y + 1) % 3].data(),
+               *afterNext = errors[(y + 2) % 3].data();
         for (int x = 0; x < w; ++x) {
             auto c = original.pixelColor(x, y);
             if (c.alpha() == 0)
@@ -43,31 +50,32 @@ QImage ImageProcessing::apply(const QImage &source, const QVariantMap &s, QStrin
             }
             gray = std::clamp((gray / 255. - .5) * contrast + .5 + brightness, 0., 1.);
             gray = std::pow(gray, gamma);
-            if (s.value("invert", false).toBool())
+            if (invert)
                 gray = 1 - gray;
-            if (s.value("ellipseMask", false).toBool() &&
-                std::pow((x + .5 - w / 2.) / (w / 2.), 2) +
-                        std::pow((y + .5 - h / 2.) / (h / 2.), 2) >
-                    1) {
+            if (ellipseMask && std::pow((x + .5 - w / 2.) / (w / 2.), 2) +
+                                       std::pow((y + .5 - h / 2.) / (h / 2.), 2) >
+                                   1) {
                 image.setPixelColor(x, y, Qt::transparent);
                 continue;
             }
             int value = qRound(gray * 255);
-            if (mode != "grayscale") {
-                double adjusted = value + errors[y * (w + 4) + x + 2];
+            if (!grayscale) {
+                double adjusted = value + current[x + 2];
                 int binary = adjusted < threshold ? 0 : 255;
                 double e = adjusted - binary;
                 value = binary;
                 auto add = [&](int dx, int dy, double fraction) {
-                    if (x + dx >= 0 && x + dx < w && y + dy < h)
-                        errors[(y + dy) * (w + 4) + x + dx + 2] += e * fraction;
+                    if (x + dx >= 0 && x + dx < w && y + dy < h) {
+                        auto *destination = dy == 0 ? current : dy == 1 ? next : afterNext;
+                        destination[x + dx + 2] += e * fraction;
+                    }
                 };
-                if (mode == "dither") {
+                if (floyd) {
                     add(1, 0, 7. / 16);
                     add(-1, 1, 3. / 16);
                     add(0, 1, 5. / 16);
                     add(1, 1, 1. / 16);
-                } else if (mode == "atkinson") {
+                } else if (atkinson) {
                     for (auto p : {QPoint(1, 0), QPoint(2, 0), QPoint(-1, 1), QPoint(0, 1),
                                    QPoint(1, 1), QPoint(0, 2)})
                         add(p.x(), p.y(), 1. / 8);
@@ -75,5 +83,7 @@ QImage ImageProcessing::apply(const QImage &source, const QVariantMap &s, QStrin
             }
             image.setPixelColor(x, y, QColor(value, value, value));
         }
+        std::fill(current, current + w + 4, 0.);
+    }
     return image;
 }

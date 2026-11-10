@@ -12,6 +12,13 @@ ApplicationWindow {
     title: (project.dirty ? "● " : "") + project.title + " — Blazer Studio"
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
+    property bool basic: true
+    property bool proofConfirmed: false
+    property string probeKey: ""
+    readonly property string parameterKey: JSON.stringify(project.material)+JSON.stringify(project.layers)
+    readonly property bool isBasicProbe: probeKey===parameterKey && project.count===1 && project.selection.width===5 && project.selection.height===5
+    onParameterKeyChanged: proofConfirmed=false
+    onBasicChanged: if(basic && page>2)page=0
     property bool night: false
     property int page: 0
     property int operation: 1
@@ -31,7 +38,7 @@ ApplicationWindow {
     readonly property color panel: night ? "#202e39" : "#ffffff"
     readonly property color line: night ? "#34434f" : "#e3e9ee"
     readonly property color ink: night ? "#e2eaf0" : "#263b4a"
-    readonly property color muted: night ? "#92a7b7" : "#81929f"
+    readonly property color muted: night ? "#a7bbc9" : "#607583"
     readonly property var currentLayer: project.layers[operation]
     palette.window: panel
     palette.windowText: ink
@@ -43,6 +50,11 @@ ApplicationWindow {
     font.family: "DejaVu Sans"
     font.pixelSize: 12
 
+    Component { id: dialogHelpFactory; HelpBubble {} }
+    function helpDialogButton(dialog, buttonType, description) {
+        let button=dialog.standardButton(buttonType)
+        if(button)dialogHelpFactory.createObject(button,{target:button,description:description})
+    }
     function revealObjectSelection() {
         if (project.selected < 0) return
         let rows = project.selectedRows
@@ -60,9 +72,18 @@ ApplicationWindow {
         // Commit the focused editor before changing the selected object.
         objectList.forceActiveFocus(Qt.MouseFocusReason)
         project.select(index)
-        page = project.selection.kind === "relief" ? 3 : 0
+        page = !basic && project.selection.kind === "relief" ? 3 : 0
         canvas.ensureSelectionVisible()
         objectList.positionViewAtIndex(project.selected, ListView.Contain)
+    }
+    function importMotif(file) {
+        let useProfile = basic && !project.beginnerSummary.requiresAdvanced && !project.beginnerSummary.modified
+        if(project.importFile(file) && useProfile)project.applyBasicMaterial(project.material)
+    }
+    function addShape(kind) {
+        project.addShape(kind)
+        if(basic && project.layers[0].enabled!==project.layers[1].enabled)
+            project.setLayer(project.layers[0].enabled ? 0 : 1)
     }
     function requestAction(action) {
         if (project.dirty) { pendingAction = action; discardDialog.open() }
@@ -71,6 +92,14 @@ ApplicationWindow {
     function performAction(action) {
         if (action === "demo") project.demo()
         else if (action === "new") project.newProject()
+        else if(action==="basicprobe") {
+            let profile=JSON.parse(JSON.stringify(project.material))
+            project.newProject();project.applyBasicMaterial(profile);project.addShape("rect")
+            project.setProperty("width",5);project.setProperty("height",5);project.setProperty("x",10);project.setProperty("y",10)
+            project.setProperty("name","Materialprobe 5 mm")
+            project.setLayer(profile.engrave && profile.engrave.enabled ? 0 : 1)
+            win.probeKey=win.parameterKey;win.page=1
+        }
         else if (action === "materialtest") project.createMaterialTest(testMinSpeed.numericValue(),testMaxSpeed.numericValue(),testMinPower.numericValue(),testMaxPower.numericValue(),testSteps.value,win.selectedModuleW)
         else if (action === "open") openDialog.open()
         else if (action === "close") {
@@ -87,7 +116,7 @@ ApplicationWindow {
         let profile = materialLibrary.profileAt(index)
         if (profile.id) {
             selectedModuleW = profile.moduleW
-            project.applyMaterial(profile)
+            if(basic)project.applyBasicMaterial(profile);else project.applyMaterial(profile)
         }
     }
     function editMaterial(asNew) {
@@ -106,6 +135,10 @@ ApplicationWindow {
     }
     Dialog {
         id: deleteMaterialDialog
+        Component.onCompleted: {
+            win.helpDialogButton(deleteMaterialDialog,Dialog.Yes,"Löscht dieses Profil aus der Bibliothek. Die Projektwerte bleiben erhalten.")
+            win.helpDialogButton(deleteMaterialDialog,Dialog.No,"Behält das Profil und schließt diese Rückfrage.")
+        }
         title: "Materialprofil löschen?"
         width: 430; anchors.centerIn: parent; modal: true
         standardButtons: Dialog.Yes | Dialog.No
@@ -126,7 +159,7 @@ ApplicationWindow {
         else { machine.stop(); if(typeof recovery!=="undefined") recovery.clear() }
     }
     onActiveChanged: if (!active) machine.focus(false)
-    onPageChanged: machine.focus(false)
+    onPageChanged: { machine.focus(false); if(basic && page>2)basic=false }
     Connections {
         target: project
         function onChanged() { if(win.operation>=project.layers.length)win.operation=0 }
@@ -143,7 +176,7 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Redo]; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; onActivated: importDialog.open() }
     Shortcut { sequence: "Escape"; onActivated: { machine.stop(); project.select(-1) } }
-    FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: project.importFile(selectedFile) }
+    FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: win.importMotif(selectedFile) }
     FileDialog { id: saveDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.save(selectedFile) }
     FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     FileDialog { id: gcodeDialog; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
@@ -157,7 +190,12 @@ ApplicationWindow {
     FileDialog { id: csvImport; title: "CSV für variable Textfelder"; nameFilters: ["CSV (*.csv)"]; onAccepted: {win.csvPath=selectedFile;csvDirectory.open()} }
     FolderDialog { id: csvDirectory; title: "Ausgabeverzeichnis für neue GCode-Dateien"; onAccepted: project.batch(win.csvPath,selectedFolder,"") }
     Dialog {
-        id: recoveryDialog; width: 460; title: "Sicherung gefunden"; anchors.centerIn: parent; modal: true
+        id: recoveryDialog
+        Component.onCompleted: {
+            win.helpDialogButton(recoveryDialog,Dialog.Yes,"Lädt das automatisch gesicherte Projekt. Anschließend separat speichern.")
+            win.helpDialogButton(recoveryDialog,Dialog.No,"Verwirft die automatische Wiederherstellung und öffnet das normale Startprojekt.")
+        }
+        width: 460; title: "Sicherung gefunden"; anchors.centerIn: parent; modal: true
         standardButtons: Dialog.Yes | Dialog.No
         contentItem: Text { text: "Das letzte automatisch gesicherte Projekt wiederherstellen?"; color: win.ink; padding: 20 }
         onAccepted: recovery.restore()
@@ -176,7 +214,7 @@ ApplicationWindow {
             NumberField { id: testMaxSpeed; label: "v↑"; value: 3000; unit: "mm/min"; onEdited: n => value=n; Layout.fillWidth: true; dark: win.night }
             NumberField { id: testMinPower; label: "P↓"; value: 10; unit: "%"; onEdited: n => value=n; Layout.fillWidth: true; dark: win.night }
             NumberField { id: testMaxPower; label: "P↑"; value: 50; unit: "%"; onEdited: n => value=n; Layout.fillWidth: true; dark: win.night }
-            RowLayout { Text { text: "Stufen je Achse"; color: win.ink; Layout.fillWidth: true } SpinBox { id: testSteps; from: 2; to: 10; value: 4 } }
+            RowLayout { Text { text: "Stufen je Achse"; color: win.ink; Layout.fillWidth: true } SpinBox { HelpBubble { target: parent } id: testSteps; from: 2; to: 10; value: 4 } }
         }
         footer: DialogButtonBox {
             ActionButton { text: "Abbrechen"; onClicked: materialTestDialog.close(); dark: win.night }
@@ -189,6 +227,8 @@ ApplicationWindow {
         Component.onCompleted: {
             standardButton(Dialog.Discard).objectName = "discardChangesButton"
             standardButton(Dialog.Cancel).objectName = "cancelCloseButton"
+            win.helpDialogButton(discardDialog,Dialog.Discard,"Verwirft die ungespeicherten Änderungen und führt die angeforderte Aktion aus.")
+            win.helpDialogButton(discardDialog,Dialog.Cancel,"Bricht die angeforderte Aktion ab. Deine Änderungen bleiben geöffnet; du kannst sie zuerst speichern.")
         }
         width: 400
         anchors.centerIn: parent
@@ -220,16 +260,18 @@ ApplicationWindow {
                 Text { text: "LASER WORKSPACE"; color: "#89a0ad"; font.pixelSize: 8; font.letterSpacing: 1.8 }
             }
             Item { Layout.fillWidth: true }
+            ActionButton { objectName: "modeToggle"; text: win.basic ? "Basic → Advanced" : "Advanced → Basic"; hint: "Basic führt durch einen einfachen Auftrag mit Profilwerten. Advanced zeigt alle Bearbeitungswerkzeuge. Der Wechsel verändert das Projekt nicht."; dark: win.night; onClicked: win.basic=!win.basic }
             Rectangle {
-                Layout.preferredWidth: 610; height: 40; radius: 7; color: "#22313e"
+                Layout.preferredWidth: win.basic ? 368 : 610; height: 40; radius: 7; color: "#22313e"
                 Row {
                     anchors.fill: parent; anchors.margins: 4; spacing: 3
                     Repeater {
-                        model: ["01  Vorbereiten", "02  Vorschau", "03  Gerät", "04  Relief", "05  Werkzeuge"]
-                        delegate: Button {
+                        model: win.basic ? ["01  Vorbereiten", "02  Vorschau", "03  Gerät"] : ["01  Vorbereiten", "02  Vorschau", "03  Gerät", "04  Relief", "05  Werkzeuge"]
+                        delegate: Button { HelpBubble { target: parent }
                             required property string modelData
                             required property int index
                             objectName: "workflow" + index
+                            text: modelData
                             width: 118; height: 32
                             onClicked: win.page = index
                             background: Rectangle { radius: 5; color: win.page === index ? "#405462" : "transparent" }
@@ -241,7 +283,7 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Rectangle {
                 width: 92; height: 26; radius: 13; color: "#243b3c"
-                Text { anchors.centerIn: parent; text: win.simulationMode ? "●  SIMULATOR" : "●  GRBL"; color: "#81c9b3"; font.pixelSize: 9; font.weight: Font.DemiBold }
+                Text { anchors.centerIn: parent; text: win.simulationMode ? "●  SIMULATOR" : "●  GRBL"; color: "#81c9b3"; font.pixelSize: 11; font.weight: Font.DemiBold }
             }
             ActionButton { text: win.night ? "Hell" : "Dunkel"; dark: true; compact: true; onClicked: win.night = !win.night }
         }
@@ -256,20 +298,20 @@ ApplicationWindow {
             RowLayout {
                 anchors.fill: parent; anchors.leftMargin: 22; anchors.rightMargin: 20; spacing: 8
                 Text { text: project.title; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
-                Text { text: project.dirty ? "●" : ""; color: "#d79b54"; font.pixelSize: 10 }
+                Text { text: project.dirty ? "●" : ""; color: "#d79b54"; font.pixelSize: 12 }
                 Text { text: "/  Blatt 01"; color: win.muted; font.pixelSize: 11 }
                 Item { Layout.fillWidth: true }
                 ActionButton { text: "Neu"; dark: win.night; compact: true; onClicked: win.requestAction("new") }
                 ActionButton { text: "Beispiel"; dark: win.night; compact: true; onClicked: win.requestAction("demo") }
                 ActionButton { text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
-                ActionButton { text: "↓  Importieren"; dark: win.night; compact: true; onClicked: importDialog.open() }
-                ActionButton { objectName: "importImageButton"; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
-                ActionButton { objectName: "exportGcodeButton"; text: "GCode"; dark: win.night; compact: true; enabled: project.jobSummary.valid; onClicked: gcodeDialog.open() }
+                ActionButton { text: win.basic ? "Motiv laden" : "↓  Importieren"; hint: "Lädt ein Bild oder eine Vektorzeichnung als Motiv. Das allein startet noch keinen Laser."; dark: win.night; compact: true; onClicked: importDialog.open() }
+                ActionButton { objectName: "importImageButton"; visible: !win.basic; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
+                ActionButton { objectName: "exportGcodeButton"; text: "GCode"; visible: !win.basic; dark: win.night; compact: true; enabled: project.jobSummary.valid; onClicked: gcodeDialog.open() }
                 ActionButton { text: "Speichern"; dark: win.night; compact: true; onClicked: saveDialog.open() }
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
-                    text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? "▶  Simulation starten" : "▶  Laserjob starten"
-                    primary: true; compact: true; enabled: win.page === 0 || (machine.ready && project.jobSummary.valid)
+                    objectName: "startJobButton"; text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
+                    primary: true; compact: true; enabled: win.page === 0 || (machine.ready && project.jobSummary.valid && (!win.basic || win.simulationMode || (!project.beginnerSummary.requiresAdvanced && !project.beginnerSummary.modified && win.projectHeadMatches && (win.proofConfirmed || win.isBasicProbe))))
                     onClicked: { if (win.page === 0) win.page = 1; else { win.page = 2; machine.start() } }
                 }
             }
@@ -298,13 +340,13 @@ ApplicationWindow {
                             anchors.fill: parent; anchors.margins: 12; spacing: 5
                             Text { text: "◈  " + deviceProfile.name; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
                             Text { text: "200 × 150 mm  ·  GRBL"; color: win.muted; font.pixelSize: 11 }
-                            Text { text: "Profil aus LightBurn"; color: "#299679"; font.pixelSize: 10 }
+                            Text { text: "Profil aus LightBurn"; color: "#299679"; font.pixelSize: 12 }
                         }
                     }
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true
-                        Text { text: "Toolkopf"; color: win.muted; font.pixelSize: 11 }
-                        ComboBox {
+                        Text { text: "Laseraufsatz / Toolkopf"; color: win.muted; font.pixelSize: 11 }
+                        ComboBox { HelpBubble { target: parent }
                             id: toolHeadChoice
                             objectName: "toolHeadChoice"
                             Layout.fillWidth: true
@@ -321,7 +363,7 @@ ApplicationWindow {
                             background: Rectangle { color: win.night ? "#202d37" : "#f7f9fa"; radius: 5; border.color: toolHeadChoice.activeFocus ? "#209b76" : win.line }
                         }
                         Text { text: "Material"; color: win.muted; font.pixelSize: 11 }
-                        ComboBox {
+                        ComboBox { HelpBubble { target: parent }
                             id: materialChoice
                             objectName: "materialChoice"
                             Layout.fillWidth: true
@@ -341,7 +383,7 @@ ApplicationWindow {
                                 text: "▾"; color: win.ink; font.pixelSize: 14
                             }
                             background: Rectangle { color: win.night ? "#202d37" : "#f7f9fa"; radius: 5; border.color: materialChoice.activeFocus ? "#209b76" : win.line }
-                            delegate: ItemDelegate {
+                            delegate: ItemDelegate { HelpBubble { target: parent; description: "Wählt dieses Materialprofil. Geschwindigkeit, Leistung, Wiederholungen und Linienabstand werden daraus übernommen." }
                                 required property var modelData
                                 required property int index
                                 width: ListView.view.width
@@ -386,15 +428,15 @@ ApplicationWindow {
                             ActionButton { text: "⋯"; dark: win.night; compact: true; onClicked: materialMenu.popup() }
                             Menu {
                                 id: materialMenu
-                                MenuItem { text: "Profil duplizieren"; enabled: win.materialRow >= 0; onTriggered: { let id = materialLibrary.duplicateProfile(win.libraryIndex); if (id) win.applyLibraryProfile(materialLibrary.indexOf(id)) } }
-                                MenuItem { text: "Profil aus Bibliothek löschen"; enabled: win.materialRow >= 0; onTriggered: deleteMaterialDialog.open() }
+                                MenuItem { HelpBubble { target: parent } text: "Profil duplizieren"; enabled: win.materialRow >= 0; onTriggered: { let id = materialLibrary.duplicateProfile(win.libraryIndex); if (id) win.applyLibraryProfile(materialLibrary.indexOf(id)) } }
+                                MenuItem { HelpBubble { target: parent } text: "Profil aus Bibliothek löschen"; enabled: win.materialRow >= 0; onTriggered: deleteMaterialDialog.open() }
                             }
                         }
-                        Text { visible: win.materialRows.length === 0; text: "Noch kein Materialprofil für diesen Kopf · mit + anlegen"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Text { visible: !win.projectHeadMatches; text: "Projektprofil: " + win.appliedModuleW + " W · passendes Material wählen"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Text { text: project.materialModified ? "Projektwerte weichen vom Profil ab" : (project.material.model !== "M3" ? "M3 Pro · Zuordnung zum M3 offen" : "Eigene Werte · noch nicht am Material geprüft"); color: project.materialModified ? "#bd8b40" : win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Text { visible: !!project.material.sourceParameters && project.material.sourceParameters.passes === null; text: "Gravur-Durchgänge: keine Herstellerangabe · Projektwert " + project.layers[0].passes; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Text { visible: materialLibrary.message.length > 0; text: materialLibrary.message; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { visible: win.materialRows.length === 0; text: "Noch kein Materialprofil für diesen Kopf · mit + anlegen"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { visible: !win.projectHeadMatches; text: "Projektprofil: " + win.appliedModuleW + " W · passendes Material wählen"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { text: project.materialModified ? "Projektwerte weichen vom Profil ab" : (project.material.model !== "M3" ? "M3 Pro · Zuordnung zum M3 offen" : "Eigene Werte · noch nicht am Material geprüft"); color: project.materialModified ? "#bd8b40" : win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { visible: !!project.material.sourceParameters && project.material.sourceParameters.passes === null; text: "Gravur-Durchgänge: keine Herstellerangabe · Projektwert " + project.layers[0].passes; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { visible: materialLibrary.message.length > 0; text: materialLibrary.message; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                     ActionButton {
                         objectName: "manufacturerButton"
@@ -406,7 +448,7 @@ ApplicationWindow {
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     RowLayout {
                         SectionLabel { text: "OBJEKTE"; dark: win.night; Layout.fillWidth: true }
-                        Text { text: project.count + " Elemente"; color: win.muted; font.pixelSize: 10 }
+                        Text { text: project.count + " Elemente"; color: win.muted; font.pixelSize: 12 }
                     }
                     ListView {
                         id: objectList
@@ -445,34 +487,33 @@ ApplicationWindow {
                             }
                             contentItem: ColumnLayout {
                                 spacing: 4
-                                ActionButton { objectName: "objectGroup" + objectRow.index; visible: objectRow.artGroupFirst; text: "▣ " + objectRow.artGroupName; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: { objectList.forceActiveFocus(); project.selectGroup(objectRow.index); win.page = 0; canvas.ensureSelectionVisible() } }
+                                ActionButton { objectName: "objectGroup" + objectRow.index; visible: objectRow.artGroupFirst; hint: "Wählt alle Objekte dieser Gruppe gemeinsam aus."; text: "▣ " + objectRow.artGroupName; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: { objectList.forceActiveFocus(); project.selectGroup(objectRow.index); win.page = 0; canvas.ensureSelectionVisible() } }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 7
-                                    CheckBox { objectName: "objectCheck" + objectRow.index; implicitWidth: 20; implicitHeight: 20; checked: project.selectedRows.indexOf(objectRow.index) >= 0; onClicked: { objectList.forceActiveFocus(Qt.MouseFocusReason); project.toggleSelection(objectRow.index) } }
+                                    CheckBox { HelpBubble { target: parent } objectName: "objectCheck" + objectRow.index; implicitWidth: 20; implicitHeight: 20; checked: project.selectedRows.indexOf(objectRow.index) >= 0; onClicked: { objectList.forceActiveFocus(Qt.MouseFocusReason); project.toggleSelection(objectRow.index) } }
                                     Rectangle { width: 7; height: 7; radius: 2; color: objectRow.artColor }
                                     Text { text: objectRow.artName; elide: Text.ElideRight; Layout.fillWidth: true; color: objectRow.artVisible ? win.ink : win.muted; font.pixelSize: 11 }
                                     Text { text: objectRow.artKind === "text" ? "T" : objectRow.artKind === "svg" ? "SVG" : objectRow.artKind === "ellipse" ? "○" : "□"; color: win.muted; font.pixelSize: 11 }
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 6
-                                    Text { text: "Bearbeitung"; color: win.muted; font.pixelSize: 9; Layout.fillWidth: true }
-                                    ComboBox {
+                                    Text { text: "Bearbeitung"; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true }
+                                    ComboBox { HelpBubble { target: parent }
                                         id: objectOperation
                                         objectName: "objectOperation" + objectRow.index
+                                        enabled: !win.basic || (project.layers[0].enabled && project.layers[1].enabled)
                                         model: project.layers.map(op=>op.name)
                                         currentIndex: objectRow.artLayer
                                         implicitHeight: 28; implicitWidth: 112
                                         leftPadding: 7; rightPadding: 7
                                         onActivated: operation => { win.selectObject(objectRow.index); project.setLayer(operation) }
-                                        contentItem: Text { text: objectOperation.displayText; color: win.ink; font.pixelSize: 10; verticalAlignment: Text.AlignVCenter; rightPadding: objectOperation.indicator.width + 5 }
+                                        contentItem: Text { text: objectOperation.displayText; color: win.ink; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; rightPadding: objectOperation.indicator.width + 5 }
                                         indicator: Text { x: objectOperation.width - width - 7; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink; font.pixelSize: 12 }
                                         background: Rectangle { radius: 4; color: win.bg; border.color: win.line }
                                     }
                                 }
                             }
-                            ToolTip.visible: hovered
-                            ToolTip.text: artName
-                            ToolTip.delay: 700
+                            HelpBubble { target: objectRow; description: objectRow.artName+" auswählen. Position und Größe rechts bearbeiten. Mit dem Häkchen mehrere Objekte markieren." }
                         }
                         ScrollBar.vertical: ScrollBar { }
                     }
@@ -486,12 +527,12 @@ ApplicationWindow {
                         ActionButton { text: "+ Form"; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: shapeMenu.popup() }
                         Menu {
                             id: shapeMenu
-                            MenuItem { text: "Rechteck"; onTriggered: project.addShape("rect") }
-                            MenuItem { text: "Ellipse"; onTriggered: project.addShape("ellipse") }
-                            MenuItem { text: "Text"; onTriggered: project.addShape("text") }
+                            MenuItem { HelpBubble { target: parent } text: "Rechteck"; onTriggered: win.addShape("rect") }
+                            MenuItem { HelpBubble { target: parent } text: "Ellipse"; onTriggered: win.addShape("ellipse") }
+                            MenuItem { HelpBubble { target: parent } text: "Text"; onTriggered: win.addShape("text") }
                         }
                         ActionButton { objectName: "copyObjectsButton"; text: "Kopie"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.duplicateSelected() }
-                        ActionButton { objectName: "deleteObjectsButton"; text: "−"; hint: "Auswahl löschen"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.removeSelected() }
+                        ActionButton { objectName: "deleteObjectsButton"; text: win.basic ? "Löschen" : "−"; hint: "Auswahl löschen"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.removeSelected() }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     SectionLabel { text: "BEARBEITUNGEN"; dark: win.night }
@@ -508,15 +549,15 @@ ApplicationWindow {
                                 Column {
                                     Layout.fillWidth: true; spacing: 4
                                     Text { text: modelData.name; color: win.ink; font.pixelSize: 11; font.weight: Font.Medium }
-                                    Text { text: modelData.power + " %  ·  " + modelData.speed + " mm/min"; color: win.muted; font.pixelSize: 9 }
+                                    Text { text: modelData.power + " %  ·  " + modelData.speed + " mm/min"; color: win.muted; font.pixelSize: 11 }
                                 }
                                 Rectangle { width: 6; height: 6; radius: 3; color: modelData.enabled ? "#209b76" : win.muted }
                             }
-                            MouseArea { anchors.fill: parent; onClicked: win.operation = index }
+                            MouseArea { id: operationArea; anchors.fill: parent; hoverEnabled: true; onClicked: win.operation = index; ToolTip.visible: containsMouse; ToolTip.text: "Zeigt die Werte der Bearbeitung "+modelData.name+" rechts an. Eine Auswahl hier ändert noch keine Objektzuordnung."; ToolTip.delay: 650 }
                         }
                     }
                     Item { Layout.fillHeight: true }
-                    Text { text: "Blazer Studio · 0.6\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 9; lineHeight: 1.5 }
+                    Text { text: "Blazer Studio · 0.7\nLokal auf deinem Rechner"; color: win.muted; font.pixelSize: 11; lineHeight: 1.5 }
                     }
                 }
             }
@@ -528,22 +569,36 @@ ApplicationWindow {
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 6
                         ActionButton { text: "↖"; hint: "Auswählen und ziehen · 0,5-mm-Raster"; compact: true; selected: true; dark: win.night; enabled: win.page === 0; onClicked: project.notify("Objekte auf der Fläche auswählen und ziehen.") }
-                        ActionButton { objectName: "addRectangle"; text: "□"; hint: "Rechteck"; compact: true; dark: win.night; enabled: win.page === 0; onClicked: project.addShape("rect") }
-                        ActionButton { text: "○"; hint: "Ellipse"; compact: true; dark: win.night; enabled: win.page === 0; onClicked: project.addShape("ellipse") }
-                        ActionButton { text: "⋈"; hint: "Knoten ein/aus"; compact: true; dark: win.night; enabled: win.page===0; selected: canvas.nodes; onClicked: canvas.nodes=!canvas.nodes }
-                        ActionButton { text: "T"; hint: "Text"; compact: true; dark: win.night; enabled: win.page === 0; onClicked: project.addShape("text") }
+                        ActionButton { objectName: "addRectangle"; text: win.basic ? "Rechteck" : "□"; hint: "Fügt ein Rechteck ein. Größe und Position rechts in Millimetern einstellen."; compact: true; dark: win.night; enabled: win.page === 0; onClicked: win.addShape("rect") }
+                        ActionButton { text: win.basic ? "Kreis" : "○"; hint: "Fügt eine Ellipse ein. Gleiche Breite und Höhe ergeben einen Kreis."; compact: true; dark: win.night; enabled: win.page === 0; onClicked: win.addShape("ellipse") }
+                        ActionButton { visible: !win.basic; text: "⋈"; hint: "Knoten ein/aus"; compact: true; dark: win.night; enabled: win.page===0 && !win.basic; selected: canvas.nodes; onClicked: canvas.nodes=!canvas.nodes }
+                        ActionButton { text: "Text"; hint: "Fügt einen Text ein. Den Inhalt rechts ändern."; compact: true; dark: win.night; enabled: win.page === 0; onClicked: win.addShape("text") }
                         Rectangle { width: 1; height: 18; color: win.line; Layout.leftMargin: 3; Layout.rightMargin: 3 }
                         ActionButton { text: "↶"; hint: "Rückgängig · Strg+Z"; compact: true; dark: win.night; enabled: project.canUndo; onClicked: project.undo() }
                         ActionButton { text: "↷"; hint: "Wiederholen · Strg+Umschalt+Z"; compact: true; dark: win.night; enabled: project.canRedo; onClicked: project.redo() }
                         Item { Layout.fillWidth: true }
-                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : win.page === 3 ? "RELIEF / TIEFENKARTE" : win.page===4 ? "EDITOR / PRODUKTION" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 9; font.letterSpacing: 1 }
+                        Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : win.page === 3 ? "RELIEF / TIEFENKARTE" : win.page===4 ? "EDITOR / PRODUKTION" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 11; font.letterSpacing: 1 }
                     }
                 }
                 Rectangle {
                     visible: win.page === 1
                     Layout.fillWidth: true; Layout.preferredHeight: 64
                     color: win.panel; border.color: win.line; clip: true
-                            Text { anchors.fill: parent; anchors.margins: 9; maximumLineCount: 3; elide: Text.ElideRight; text: project.jobSummary.valid ? project.jobSummary.segments + " Segmente · " + (project.jobSummary.workLength / 1000).toFixed(2) + " m · ca. " + Math.ceil(project.jobSummary.seconds / 60) + " min\nFarbig: Bearbeitung · Grau: Leerfahrt\nSchätzung mit konservativer Beschleunigung; Kommunikation nicht gemessen" : project.jobSummary.errors.join("\n"); color: win.muted; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
+                            Text { anchors.fill: parent; anchors.margins: 9; maximumLineCount: 3; elide: Text.ElideRight; text: project.jobSummary.valid ? project.jobSummary.segments + " Segmente · " + (project.jobSummary.workLength / 1000).toFixed(2) + " m · ca. " + Math.ceil(project.jobSummary.seconds / 60) + " min\nFarbig: Bearbeitung · Grau: Leerfahrt\nSchätzung mit konservativer Beschleunigung; Kommunikation nicht gemessen" : project.jobSummary.errors.join("\n"); color: win.muted; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
+                }
+                Rectangle {
+                    visible: win.basic; color: win.panel; border.color: win.line
+                    Layout.fillWidth: true; Layout.preferredHeight: basicGuide.implicitHeight+20
+                    ColumnLayout { id: basicGuide; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 12; y: 10; spacing: 6
+                        Text { text: win.page===0 ? "1. Motiv laden → 2. Laseraufsatz und Material links wählen → 3. Größe und Platzierung rechts prüfen" : win.page===1 ? "4. Vorschau prüfen und zuerst eine kleine Materialprobe vorbereiten" : "5. Laser verbinden, Position prüfen und Auftrag bewusst starten"; color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
+                        Text { text: "Werte aus: "+project.beginnerSummary.material+" · "+project.beginnerSummary.source+". Übernommene Werte sind noch keine am eigenen Gerät bestätigte Empfehlung."; color: win.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
+                        Text { visible: project.beginnerSummary.reason.length>0 || !win.projectHeadMatches; text: !win.projectHeadMatches ? "Toolkopf und Projektprofil passen noch nicht zusammen. Links ein Material für den tatsächlichen Kopf auswählen." : project.beginnerSummary.reason; color: "#c07b2a"; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 11 }
+                        RowLayout { Layout.fillWidth: true
+                            ActionButton { objectName: "basicProfileApply"; text: "Profilwerte übernehmen"; dark: win.night; hint: "Übernimmt die Materialwerte für dieses Blatt und entfernt eigene Objekt-Abweichungen. Mit Rückgängig umkehrbar."; onClicked: project.applyBasicMaterial(project.material) }
+                            ActionButton { objectName: "basicProbe"; text: "5-mm-Probe vorbereiten"; dark: win.night; hint: "Erzeugt ein neues Projekt mit einer kleinen Probe und genau den gewählten Materialwerten. Ungespeicherte Änderungen werden vorher abgefragt."; onClicked: win.requestAction("basicprobe") }
+                        }
+                        CheckBox { objectName: "basicProof"; text: "Diese Werte habe ich am tatsächlichen Material geprüft"; checked: win.proofConfirmed; onClicked: win.proofConfirmed=checked; HelpBubble {target: parent; description: "Eine persönliche Bestätigung nach einer echten Materialprobe. Das Programm misst das Ergebnis nicht selbst. Bei geänderten Materialwerten wird die Bestätigung zurückgesetzt."} }
+                    }
                 }
                 StackLayout {
                     Layout.fillWidth: true; Layout.fillHeight: true
@@ -553,7 +608,7 @@ ApplicationWindow {
                         Rectangle {
                             anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 20
                             width: 168; height: 30; radius: 15; color: win.panel; border.color: win.line
-                            Text { anchors.centerIn: parent; text: win.page === 0 ? project.pages[project.activePage]+" · 200 × 150 mm" : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 10 }
+                            Text { anchors.centerIn: parent; text: win.page === 0 ? project.pages[project.activePage]+" · 200 × 150 mm" : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 12 }
                         }
                         Row {
                             id: zoomBar
@@ -580,7 +635,7 @@ ApplicationWindow {
                                 RowLayout {
                                     visible: typeof machine.simulation !== "undefined"
                                     Layout.fillWidth: true
-                                    ComboBox {
+                                    ComboBox { HelpBubble { target: parent }
                                         id: serialPortChoice; objectName: "serialPortChoice"; Layout.fillWidth: true
                                         model: typeof machine.ports !== "undefined" ? machine.ports : []; displayText: count ? currentText : "Kein serielles Gerät gefunden"
                                         contentItem: Text { text: serialPortChoice.displayText; color: win.ink; font: serialPortChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: 20 }
@@ -627,7 +682,7 @@ ApplicationWindow {
                                             Layout.fillWidth: true; spacing: 8
                                             SectionLabel { text: "POSITION & FOKUS"; dark: win.night }
                                             Text { text: machine.firing ? "2 % angefordert" : "Fokuspunkt mit 2 %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
-                                            Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei 2 % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 10 }
+                                            Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei 2 % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
                                         }
                                         ActionButton { objectName: "focusHold"; text: "◎  Halten für 2 %"; primary: true; implicitHeight: 44; enabled: machine.ready || machine.firing; onPressedChanged: machine.focus(pressed) }
                                     }
@@ -640,17 +695,17 @@ ApplicationWindow {
                                 }
                                 ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
                                 RowLayout {
-                                    visible: typeof machine.setOverrides!=="undefined"
+                                    visible: !win.basic && typeof machine.setOverrides!=="undefined"
                                     NumberField { id: feedOverride; label: "v"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; onEdited: n=>value=n }
                                     NumberField { id: powerOverride; label: "P"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; onEdited: n=>value=n }
                                     ActionButton { text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && machine.connected; onClicked: {if(!machine.setOverrides(feedOverride.value,powerOverride.value))project.notify("Override abgelehnt: Statusrückmeldung Ov erforderlich; v 10–200 %, P 10–100 %.")} }
                                 }
-                                Repeater { model: typeof machine.capabilities!=="undefined" ? machine.capabilities : []
-                                    Text { required property var modelData; text: modelData.name+": "+modelData.status+" · "+modelData.detail; color: win.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                Repeater { model: !win.basic && typeof machine.capabilities!=="undefined" ? machine.capabilities : []
+                                    Text { required property var modelData; text: modelData.name+": "+modelData.status+" · "+modelData.detail; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 }
                                 SectionLabel { text: "EREIGNISSE"; dark: win.night; Layout.topMargin: 6 }
-                                Repeater { model: machine.log.slice(0,6); delegate: Text { required property string modelData; text: modelData; color: win.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true } }
-                                ActionButton { text: "Verbindungsfehler testen"; visible: typeof machine.simulation === "undefined" || machine.simulation; dark: win.night; compact: true; enabled: machine.connected; onClicked: machine.disconnectFault() }
+                                Repeater { model: machine.log.slice(0,6); delegate: Text { required property string modelData; text: modelData; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true } }
+                                ActionButton { text: "Verbindungsfehler testen"; visible: !win.basic && (typeof machine.simulation === "undefined" || machine.simulation); dark: win.night; compact: true; enabled: machine.connected; onClicked: machine.disconnectFault() }
                             }
                             Item { height: 20 }
                         }
@@ -663,9 +718,9 @@ ApplicationWindow {
                     Rectangle { height: 1; width: parent.width; color: win.line }
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
-                        Text { text: "●  " + (win.page === 2 ? machine.state : project.pages[project.activePage]); color: "#209b76"; font.pixelSize: 10 }
+                        Text { text: "●  " + (win.page === 2 ? machine.state : project.pages[project.activePage]); color: "#209b76"; font.pixelSize: 12 }
                         Item { Layout.fillWidth: true }
-                        Text { text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: 0,5 mm   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 9 }
+                        Text { text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: 0,5 mm   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 11 }
                     }
                 }
             }
@@ -683,25 +738,26 @@ ApplicationWindow {
                             Layout.fillWidth: true; Layout.margins: 18; spacing: 15
                             RowLayout {
                                 SectionLabel { text: "EINSTELLUNGEN"; dark: win.night; Layout.fillWidth: true }
-                                Rectangle { width: 53; height: 21; radius: 4; color: win.bg; Text { anchors.centerIn: parent; text: "Einfach"; color: win.muted; font.pixelSize: 9 } }
+                                Rectangle { width: 53; height: 21; radius: 4; color: win.bg; Text { anchors.centerIn: parent; text: win.basic ? "Basic" : "Advanced"; color: win.muted; font.pixelSize: 11 } }
                             }
-                            Text { text: win.currentLayer.name; color: win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+                            Text { objectName: "basicValues"; visible: win.basic; text: "Übernommene Bearbeitung\n"+win.currentLayer.name+"\nGeschwindigkeit: "+win.currentLayer.speed+" mm/min\nLeistung: "+win.currentLayer.power+" %\nDurchgänge: "+win.currentLayer.passes+(win.currentLayer.mode==="Schnitt" ? "" : "\nLinienabstand: "+Number(win.currentLayer.interval).toFixed(3)+" mm"); color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
+                            Text { visible: !win.basic; text: win.currentLayer.name; color: win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
                             Rectangle {
-                                Layout.fillWidth: true; height: 31; radius: 5; color: win.bg
+                                visible: !win.basic; Layout.fillWidth: true; height: 31; radius: 5; color: win.bg
                                 RowLayout {
                                     anchors.fill: parent; anchors.leftMargin: 9; anchors.rightMargin: 9
                                     Text { text: "Operation ausgeben"; color: win.ink; font.pixelSize: 11; Layout.fillWidth: true }
-                                    Switch { checked: win.currentLayer.enabled; implicitHeight: 24; onToggled: project.setLayerSetting(win.operation,"enabled",checked) }
+                                    Switch { HelpBubble { target: parent } checked: win.currentLayer.enabled; implicitHeight: 24; onToggled: project.setLayerSetting(win.operation,"enabled",checked) }
                                 }
                             }
-                            NumberField { visible: project.selection.kind !== "relief"; label: "v"; value: win.currentLayer.speed; unit: "mm/min"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"speed",n) }
-                            NumberField { visible: project.selection.kind !== "relief"; label: "P"; value: win.currentLayer.power; unit: "%"; decimals: 1; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"power",n) }
-                            NumberField { visible: project.selection.kind !== "relief"; label: "×"; value: win.currentLayer.passes; unit: "Mal"; decimals: 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"passes",n) }
-                            NumberField { visible: win.operation === 0 && project.selection.kind !== "relief"; label: "↕"; value: win.currentLayer.interval; unit: "mm"; decimals: 3; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setLayerSetting(win.operation,"interval",n) }
-                            Text { text: project.selection.kind === "relief" ? "Relief: eigene Objektwerte unten; Schichten und Raster im Bereich Relief." : "Profilwerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            NumberField { visible: !win.basic && project.selection.kind !== "relief"; label: "v"; value: win.currentLayer.speed; unit: "mm/min"; decimals: 0; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"speed",n) }
+                            NumberField { visible: !win.basic && project.selection.kind !== "relief"; label: "P"; value: win.currentLayer.power; unit: "%"; decimals: 1; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"power",n) }
+                            NumberField { visible: !win.basic && project.selection.kind !== "relief"; label: "×"; value: win.currentLayer.passes; unit: "Mal"; decimals: 0; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"passes",n) }
+                            NumberField { visible: !win.basic && win.operation === 0 && project.selection.kind !== "relief"; label: "↕"; value: win.currentLayer.interval; unit: "mm"; decimals: 3; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"interval",n) }
+                            Text { text: project.selection.kind === "relief" ? "Relief: eigene Objektwerte unten; Schichten und Raster im Bereich Relief." : "Profilwerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                             SectionLabel { text: "AUSGEWÄHLTES OBJEKT"; dark: win.night }
-                            TextField {
+                            TextField { HelpBubble { target: parent }
                                 objectName: "objectNameInput"
                                 Layout.fillWidth: true; enabled: project.selected >= 0 && project.selection.kind !== "selection"
                                 text: project.selection.name || "Nichts ausgewählt"
@@ -710,25 +766,26 @@ ApplicationWindow {
                                 onEditingFinished: project.setProperty("name",text)
                             }
                             ColumnLayout {
-                                visible: !!project.selection.customSettings
+                                visible: !win.basic && !!project.selection.customSettings
                                 Layout.fillWidth: true
-                                Text { text: "Eigene Objektwerte"; color: win.muted; font.pixelSize: 10 }
+                                Text { text: "Eigene Objektwerte"; color: win.muted; font.pixelSize: 12 }
                                 NumberField { label: "v"; value: project.selection.speed || 0; unit: "mm/min"; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setObjectSetting("speed",n) }
                                 NumberField { label: "P"; value: project.selection.power || 0; unit: "%"; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setObjectSetting("power",n) }
                             }
                             GridLayout {
-                                Layout.fillWidth: true; columns: 2; columnSpacing: 8; rowSpacing: 9
+                                Layout.fillWidth: true; columns: win.basic ? 1 : 2; columnSpacing: 8; rowSpacing: 9
                                 enabled: project.selected >= 0
-                                NumberField { objectName: "objectXInput"; label: "X"; value: project.selection.x || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("x",n) }
-                                NumberField { objectName: "objectYInput"; label: "Y"; value: project.selection.y || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("y",n) }
-                                NumberField { objectName: "objectWidthInput"; label: "B"; value: project.selection.width || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("width",n) }
-                                NumberField { label: "H"; value: project.selection.height || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("height",n) }
+                                NumberField { objectName: "objectXInput"; label: win.basic ? "Links" : "X"; value: project.selection.x || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("x",n) }
+                                NumberField { objectName: "objectYInput"; label: win.basic ? "Unten" : "Y"; value: project.selection.y || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("y",n) }
+                                NumberField { objectName: "objectWidthInput"; label: win.basic ? "Breite" : "B"; value: project.selection.width || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("width",n) }
+                                NumberField { objectName: "objectHeightInput"; label: win.basic ? "Höhe" : "H"; value: project.selection.height || 0; dark: win.night; Layout.fillWidth: true; onEdited: n => project.setProperty("height",n) }
                             }
-                            Text { visible: project.issues.length > 0; text: project.issues.join("\n"); color: "#cf645b"; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            Text { text: "Skalieren · 100 % = aktuelle Größe"; color: win.muted; font.pixelSize: 9; Layout.fillWidth: true }
+                            Text { visible: project.selection.kind==="image" || project.selection.kind==="relief"; text: project.selection.imageWidth+" × "+project.selection.imageHeight+" px · Quelle ca. "+Math.round(project.selection.imageWidth/Math.max(.1,project.selection.width)*25.4)+" dpi\nAusgabe-Raster in den Operationswerten prüfen."; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { visible: project.issues.length > 0; text: project.issues.join("\n"); color: "#cf645b"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { text: "Skalieren · 100 % = aktuelle Größe"; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true }
                             NumberField { objectName: "objectScaleInput"; label: "S"; value: 100; unit: "%"; dark: win.night; Layout.fillWidth: true; enabled: project.selected >= 0; onEdited: n => project.scaleSelection(n) }
-                            Text { text: "Koordinaten: links unten · Y nach oben"; color: win.muted; font.pixelSize: 9; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            TextField {
+                            Text { text: "Koordinaten: links unten · Y nach oben"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            TextField { HelpBubble { target: parent }
                                 objectName: "objectTextInput"
                                 visible: project.selection.kind === "text"; Layout.fillWidth: true
                                 text: project.selection.text || ""; color: win.ink; font.pixelSize: 12; selectByMouse: true
@@ -737,22 +794,22 @@ ApplicationWindow {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
-                                ActionButton { objectName: "engraveObjectButton"; text: "Gravieren"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 0; enabled: project.selected >= 0; onClicked: project.setLayer(0) }
-                                ActionButton { objectName: "cutObjectButton"; text: "Schneiden"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 1; enabled: project.selected >= 0; onClicked: project.setLayer(1) }
+                                ActionButton { objectName: "engraveObjectButton"; text: "Gravieren"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 0; enabled: project.selected >= 0 && (!win.basic || project.layers[0].enabled); onClicked: project.setLayer(0) }
+                                ActionButton { objectName: "cutObjectButton"; text: "Schneiden"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 1; enabled: project.selected >= 0 && (!win.basic || project.layers[1].enabled); onClicked: project.setLayer(1) }
                             }
                             ActionButton { text: project.selection.visible ? "Objekt ausblenden" : "Objekt einblenden"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: project.selected >= 0; onClicked: project.toggleVisible(project.selected) }
-                            Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
-                            SectionLabel { text: "GERÄTEPROFIL"; dark: win.night }
+                            Rectangle { visible: !win.basic; Layout.fillWidth: true; height: 1; color: win.line }
+                            SectionLabel { visible: !win.basic; text: "GERÄTEPROFIL"; dark: win.night }
                             Repeater {
-                                model: [{k:"Verbindung",v:"GRBL · seriell"},{k:"Baudrate",v:"115200"},{k:"S-Max",v:"1000"},{k:"Fokuspunkt",v:"2 % / S20"},{k:"Z-Achse",v:"Deaktiviert"}]
+                                model: win.basic ? [] : [{k:"Verbindung",v:"GRBL · seriell"},{k:"Baudrate",v:"115200"},{k:"S-Max",v:"1000"},{k:"Fokuspunkt",v:"2 % / S20"},{k:"Z-Achse",v:"Deaktiviert"}]
                                 delegate: RowLayout {
                                     required property var modelData
                                     Layout.fillWidth: true
-                                    Text { text: modelData.k; color: win.muted; font.pixelSize: 10; Layout.fillWidth: true }
-                                    Text { text: modelData.v; color: win.ink; font.pixelSize: 10 }
+                                    Text { text: modelData.k; color: win.muted; font.pixelSize: 12; Layout.fillWidth: true }
+                                    Text { text: modelData.v; color: win.ink; font.pixelSize: 12 }
                                 }
                             }
-                            Text { text: "Konfiguration aus LightBurn übernommen.\nNoch nicht live am Gerät verifiziert."; color: win.muted; font.pixelSize: 9; lineHeight: 1.4; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { visible: !win.basic; text: "Konfiguration aus LightBurn übernommen.\nNoch nicht live am Gerät verifiziert."; color: win.muted; font.pixelSize: 11; lineHeight: 1.4; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         }
                     }
                 }
@@ -762,7 +819,7 @@ ApplicationWindow {
             Layout.fillWidth: true; Layout.preferredHeight: 29; color: "#17232e"
             RowLayout {
                 anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
-                Text { text: project.message; color: "#a6bac8"; font.pixelSize: 9; elide: Text.ElideRight; Layout.fillWidth: true }
+                Text { text: project.message; color: "#a6bac8"; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
                 Text { text: win.simulationMode ? "SIMULATION · KEINE LASEREMISSION" : "HARDWARE · " + machine.state; color: "#81c9b3"; font.pixelSize: 8; font.letterSpacing: .8 }
             }
         }

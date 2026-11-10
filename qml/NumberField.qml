@@ -1,10 +1,12 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "Help.js" as Help
 RowLayout {
     id: field
     property string label: ""
     property real value: 0
+    property string hint: Help.numeric(label,unit,field)
     property string unit: "mm"
     property bool dark: false
     property int decimals: 1
@@ -17,9 +19,10 @@ RowLayout {
         return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text) ? Number(text) : NaN
     }
     spacing: 6
-    Text { text: field.label; color: field.dark ? "#a8b7c2" : "#708290"; font.pixelSize: 12; Layout.preferredWidth: 14 }
+    Text { id: labelText; text: field.label; color: field.dark ? "#a8b7c2" : "#708290"; font.pixelSize: 12; Layout.preferredWidth: Math.max(14,labelText.implicitWidth) }
     TextField {
         id: input
+        HelpBubble { target: input; description: field.hint }
         Layout.fillWidth: true
         implicitHeight: 34
         text: field.value.toFixed(field.decimals)

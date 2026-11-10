@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import "Help.js" as Help
 
 Button {
     id: control
@@ -8,7 +9,7 @@ Button {
     property bool selected: false
     property bool compact: false
     property bool dark: false
-    property string hint: ""
+    property string hint: Help.describe(control)
     implicitHeight: compact ? 30 : 36
     implicitWidth: Math.max(compact ? 32 : 40, contentItem.implicitWidth + 24)
     hoverEnabled: true
@@ -27,7 +28,5 @@ Button {
         color: !control.enabled ? (control.dark ? "#25303a" : "#f0f2f4") : control.primary ? (control.pressed ? "#147454" : control.hovered ? "#198766" : "#209b76") : control.selected ? (control.dark ? "#24493f" : "#e5f3ee") : control.pressed ? (control.dark ? "#394a57" : "#dfe6ea") : control.hovered ? (control.dark ? "#303e4a" : "#edf2f5") : (control.dark ? "#25323d" : "#ffffff")
         border.color: control.primary || control.selected ? "transparent" : control.dark ? "#3b4955" : "#dce3e8"
     }
-    ToolTip.visible: hovered && hint.length > 0
-    ToolTip.text: hint
-    ToolTip.delay: 700
+    HelpBubble { target: control; description: control.hint }
 }

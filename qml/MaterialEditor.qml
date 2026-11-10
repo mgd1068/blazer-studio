@@ -74,7 +74,7 @@ Dialog {
         spacing: 9
         RowLayout {
             Text { text: fields.label; color: editor.ink; font.pixelSize: 13; font.bold: true; Layout.fillWidth: true }
-            Switch { id: outputSwitch; checked: fields.enabledValue; onToggled: fields.enabledValue = checked }
+            Switch { HelpBubble { target: parent } id: outputSwitch; checked: fields.enabledValue; onToggled: fields.enabledValue = checked }
         }
         NumberField { resetOnFinish: false; id: speedInput; objectName: fields.engravingMode ? "materialEngraveSpeed" : "materialCutSpeed"; label: "v"; value: fields.speedValue; onEdited: n => fields.speedValue = n; unit: "mm/min"; decimals: 0; dark: editor.dark; Layout.fillWidth: true }
         NumberField { resetOnFinish: false; id: powerInput; objectName: fields.engravingMode ? "materialEngravePower" : "materialCutPower"; label: "P"; value: fields.powerValue; onEdited: n => fields.powerValue = n; unit: "%"; dark: editor.dark; Layout.fillWidth: true }
@@ -88,12 +88,12 @@ Dialog {
             width: scroller.availableWidth
             spacing: 14
             Text { text: "Eigene Bibliothek · Speichern übernimmt den Profilstand ins aktuelle Projekt. Die Herstellerreferenz bleibt unverändert."; wrapMode: Text.WordWrap; color: editor.muted; font.pixelSize: 11; Layout.fillWidth: true }
-            TextField { id: nameField; objectName: "materialNameInput"; placeholderText: "Materialname"; Layout.fillWidth: true; selectByMouse: true }
+            TextField { HelpBubble { target: parent } id: nameField; objectName: "materialNameInput"; placeholderText: "Materialname"; Layout.fillWidth: true; selectByMouse: true }
             RowLayout {
                 Layout.fillWidth: true; spacing: 12
-                TextField { id: modelField; placeholderText: "Maschinenmodell"; Layout.fillWidth: true; selectByMouse: true }
-                NumberField { resetOnFinish: false; id: powerField; onEdited: n => value = n; label: ""; unit: "W"; value: 5; dark: editor.dark; Layout.preferredWidth: 130 }
-                NumberField { resetOnFinish: false; id: thicknessField; onEdited: n => value = n; label: ""; unit: "mm"; value: 3; dark: editor.dark; Layout.preferredWidth: 130 }
+                TextField { HelpBubble { target: parent } id: modelField; placeholderText: "Maschinenmodell"; Layout.fillWidth: true; selectByMouse: true }
+                NumberField { resetOnFinish: false; id: powerField; hint: "Nennleistung des eingebauten Lasermoduls in Watt. Keine prozentuale Job-Leistung."; onEdited: n => value = n; label: ""; unit: "W"; value: 5; dark: editor.dark; Layout.preferredWidth: 130 }
+                NumberField { resetOnFinish: false; id: thicknessField; hint: "Gemessene Dicke des Werkstücks in Millimetern. Die Dicke allein bestimmt keine passenden Laserwerte."; onEdited: n => value = n; label: ""; unit: "mm"; value: 3; dark: editor.dark; Layout.preferredWidth: 130 }
             }
             Text { text: "Modell / Modul / Materialstärke"; color: editor.muted; font.pixelSize: 10 }
             RowLayout {
@@ -101,7 +101,7 @@ Dialog {
                 OperationFields { id: engraving; label: "Gravieren"; engravingMode: true; Layout.fillWidth: true; Layout.alignment: Qt.AlignTop }
                 OperationFields { id: cutting; label: "Schneiden"; Layout.fillWidth: true; Layout.alignment: Qt.AlignTop }
             }
-            TextArea { id: notesField; placeholderText: "Notizen, Fokus, Materialtest und Besonderheiten"; Layout.fillWidth: true; Layout.preferredHeight: 92; wrapMode: TextEdit.Wrap }
+            TextArea { HelpBubble {target: parent} id: notesField; placeholderText: "Notizen, Fokus, Materialtest und Besonderheiten"; Layout.fillWidth: true; Layout.preferredHeight: 92; wrapMode: TextEdit.Wrap }
             Text { text: "Quelle: " + (editor.draft.source || ""); color: editor.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Text { id: errorText; objectName: "materialEditorError"; color: "#cf645b"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         }

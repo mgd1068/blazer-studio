@@ -16,6 +16,7 @@ Dialog {
     height: Math.min(parent.height - 48, 590)
     modal: true
     standardButtons: Dialog.Close
+    HelpBubble { target: null; description: "Schließt die Herstellerreferenz. Die gewählten Projektwerte werden nicht verändert."; Component.onCompleted: { target=dialog.standardButton(Dialog.Close); if(target)target.hoverEnabled=true } }
     onOpened: standardButton(Dialog.Close).text = "Schließen"
     background: Rectangle { radius: 9; color: dialog.dark ? "#202e39" : "white"; border.color: dialog.dark ? "#44545f" : "#dce4e9" }
     contentItem: ColumnLayout {
@@ -25,7 +26,7 @@ Dialog {
             text: "M3 Pro ist die Modellangabe der Quelle. Die Zuordnung zum vorhandenen M3 ist noch offen. Diese Ansicht übernimmt keine Einstellungen."
             wrapMode: Text.WordWrap; color: dialog.muted; font.pixelSize: 11
         }
-        ComboBox {
+        ComboBox { HelpBubble { target: parent }
             id: selector
             objectName: "manufacturerTableSelector"
             Layout.fillWidth: true

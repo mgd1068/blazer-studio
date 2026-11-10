@@ -1,5 +1,6 @@
 #include "document.h"
 #include "geometry.h"
+#include "imagelimits.h"
 #include "imageprocessing.h"
 #include "vectorutil.h"
 #include <QFile>
@@ -296,7 +297,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
                     if (!ok || !std::isfinite(n) || it.value().metaType().id() == QMetaType::Bool)
                         return false;
                     if (it.key().startsWith("crop")) {
-                        if (n < 0 || n > 512 || std::floor(n) != n)
+                        if (n < 0 || n > ImageLimits::side || std::floor(n) != n)
                             return false;
                         style[it.key()] = int(n);
                     } else

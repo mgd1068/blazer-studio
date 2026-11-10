@@ -41,13 +41,13 @@ ScrollView {
         }
         RowLayout {
             Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
-            CheckBox { id: threeD; objectName: "reliefThreeD"; text: "3D-Vorschau"; checked: true }
+            CheckBox { HelpBubble { target: parent } id: threeD; objectName: "reliefThreeD"; text: "3D-Vorschau"; checked: true }
             Text { text: "Tiefe überhöht · Modell, keine Materialmessung"; color: relief.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         }
         RowLayout {
             Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
             Text { text: sliceSlider.value === 0 ? "Gesamtrelief" : "Schicht " + sliceSlider.value + "/" + relief.settings.passes; color: relief.ink; Layout.preferredWidth: 105 }
-            Slider { id: sliceSlider; objectName: "reliefSlice"; Layout.fillWidth: true; from: 0; to: relief.settings.passes; stepSize: 1; snapMode: Slider.SnapAlways; enabled: relief.selected }
+            Slider { HelpBubble { target: parent } id: sliceSlider; objectName: "reliefSlice"; Layout.fillWidth: true; from: 0; to: relief.settings.passes; stepSize: 1; snapMode: Slider.SnapAlways; enabled: relief.selected }
             ActionButton { text: "Alle"; compact: true; dark: relief.dark; onClicked: sliceSlider.value=0 }
         }
         GridLayout {
@@ -55,17 +55,17 @@ ScrollView {
             columns: 2; columnSpacing: 12; rowSpacing: 9
             Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
             Text { text: "Schichten / max. Durchgänge"; color: relief.ink; font.pixelSize: 11 }
-            SpinBox { id: passesInput; objectName: "reliefPasses"; Layout.fillWidth: true; from: 1; to: 256; value: relief.settings.passes; editable: true; onValueModified: project.setReliefSetting("passes",value) }
+            SpinBox { HelpBubble { target: parent } id: passesInput; objectName: "reliefPasses"; Layout.fillWidth: true; from: 1; to: 256; value: relief.settings.passes; editable: true; onValueModified: project.setReliefSetting("passes",value) }
             Text { text: "Rasterabstand"; color: relief.ink; font.pixelSize: 11 }
             NumberField { objectName: "reliefInterval"; Layout.fillWidth: true; dark: relief.dark; decimals: 2; value: relief.settings.interval; unit: "mm"; onEdited: n => project.setReliefSetting("interval",n) }
             Text { text: "Tiefenkurve / Gamma"; color: relief.ink; font.pixelSize: 11 }
             NumberField { objectName: "reliefGamma"; Layout.fillWidth: true; dark: relief.dark; decimals: 2; value: relief.settings.gamma; unit: "γ"; onEdited: n => project.setReliefSetting("gamma",n) }
             Text { text: "Helligkeit umkehren"; color: relief.ink; font.pixelSize: 11 }
-            CheckBox { objectName: "reliefInvert"; text: "Weiß tief, Schwarz unberührt"; checked: relief.settings.inverted; onClicked: project.setReliefSetting("inverted",checked) }
+            CheckBox { HelpBubble { target: parent } objectName: "reliefInvert"; text: "Weiß tief, Schwarz unberührt"; checked: relief.settings.inverted; onClicked: project.setReliefSetting("inverted",checked) }
             Text { text: "Richtung je Schicht wechseln"; color: relief.ink; font.pixelSize: 11 }
-            CheckBox { text: "0° / 90°"; checked: relief.settings.crosshatch || false; onClicked: project.setReliefSetting("crosshatch",checked) }
+            CheckBox { HelpBubble { target: parent } text: "0° / 90°"; checked: relief.settings.crosshatch || false; onClicked: project.setReliefSetting("crosshatch",checked) }
             Text { text: "Reinigung alle N Schichten (0 aus)"; color: relief.ink; font.pixelSize: 11 }
-            SpinBox { from: 0; to: 256; value: relief.settings.cleanupEvery || 0; onValueModified: project.setReliefSetting("cleanupEvery",value) }
+            SpinBox { HelpBubble { target: parent } from: 0; to: 256; value: relief.settings.cleanupEvery || 0; onValueModified: project.setReliefSetting("cleanupEvery",value) }
             Text { text: "Reinigungsleistung"; color: relief.ink; font.pixelSize: 11 }
             NumberField { Layout.fillWidth: true; dark: relief.dark; value: relief.settings.cleanupPower || 0; unit: "%"; onEdited: n=>project.setReliefSetting("cleanupPower",n) }
             Text { text: "Gemessener Abtrag / Durchgang"; color: relief.ink; font.pixelSize: 11 }

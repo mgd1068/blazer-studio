@@ -14,6 +14,19 @@
 #include <algorithm>
 #include <functional>
 
+class UiMachine : public Simulator {
+    Q_OBJECT
+    Q_PROPERTY(bool simulation READ simulation WRITE setSimulation NOTIFY changed)
+  public:
+    bool simulation() const { return m_simulation; }
+    void setSimulation(bool value) {
+        m_simulation = value;
+        emit changed();
+    }
+
+  private:
+    bool m_simulation = true;
+};
 class UiTest : public QObject {
     Q_OBJECT
   private slots:
@@ -24,7 +37,7 @@ class UiTest : public QObject {
         Document project;
         QTemporaryDir storage;
         MaterialLibrary library(storage.filePath("materials.json"));
-        Simulator machine;
+        UiMachine machine;
         Registration cameraRegistration;
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("project", &project);
@@ -43,6 +56,21 @@ class UiTest : public QObject {
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(w);
+        QCOMPARE(w->property("basic").toBool(), true);
+        auto originalBytes = project.projectBytes();
+        QTest::qWait(100);
+        if (qEnvironmentVariableIsSet("BLAZER_BASIC_SCREENSHOT"))
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_BASIC_SCREENSHOT")));
+        w->resize(1180, 760);
+        w->setProperty("night", true);
+        QTest::qWait(100);
+        if (qEnvironmentVariableIsSet("BLAZER_BASIC_SCREENSHOT"))
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_BASIC_SCREENSHOT") +
+                                         ".compact.png"));
+        w->resize(1480, 920);
+        w->setProperty("night", false);
+        w->setProperty("basic", false);
+        QCOMPARE(project.projectBytes(), originalBytes);
         QVERIFY(QTest::qWaitForWindowExposed(w));
         auto item = [w](const char *name) {
             std::function<QQuickItem *(QQuickItem *)> visit =
@@ -76,6 +104,111 @@ class UiTest : public QObject {
             QTest::mouseClick(w, Qt::LeftButton, {},
                               i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint());
         };
+        // Basic is a view mode: switching itself must never rewrite a project.
+        w->setProperty("basic", true);
+        QTRY_VERIFY(!item("exportGcodeButton")->isVisible());
+        QVERIFY(!item("workflow3"));
+        project.newProject();
+        project.addShape("rect");
+        project.setObjectSetting("power", 91.);
+        click(item("basicProfileApply"));
+        QVERIFY(project.items()[0].settings.isEmpty());
+        auto *values = item("basicValues");
+        QVERIFY(values && values->isVisible());
+        QVERIFY(values->property("text").toString().contains("Geschwindigkeit: "));
+        QVERIFY(values->property("text").toString().contains("Leistung: "));
+        // Material-first and import-first workflows must yield the same active operation.
+        QVariantMap engravingProfile;
+        for (int i = 0; i < library.count(); ++i) {
+            auto profile = library.profileAt(i);
+            if (profile["moduleW"].toInt() == 5 && profile["engrave"].toMap()["enabled"].toBool() &&
+                !profile["cut"].toMap()["enabled"].toBool()) {
+                engravingProfile = profile;
+                break;
+            }
+        }
+        QVERIFY(!engravingProfile.isEmpty());
+        QVERIFY(project.applyBasicMaterial(engravingProfile));
+        QFile vector(storage.filePath("basic-motif.svg"));
+        QVERIFY(vector.open(QIODevice::WriteOnly));
+        vector.write("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2mm\" height=\"2mm\" "
+                     "viewBox=\"0 0 2 2\"><rect width=\"2\" height=\"2\"/></svg>");
+        vector.close();
+        QVERIFY(QMetaObject::invokeMethod(
+            w, "importMotif", Q_ARG(QVariant, QVariant(QUrl::fromLocalFile(vector.fileName())))));
+        QCOMPARE(project.count(), 2);
+        for (const auto &art : project.items())
+            QCOMPARE(art.layer, 0);
+        QVERIFY(project.job().valid());
+        machine.setSimulation(false); // UI state only; this fixture has no serial transport.
+        w->setProperty("page", 1);
+        QTRY_VERIFY(!item("startJobButton")->isEnabled());
+        click(item("startJobButton"));
+        QVERIFY(!machine.busy());
+        click(item("basicProof"));
+        QTRY_VERIFY(item("startJobButton")->isEnabled());
+        project.setLayerSetting(0, "power", 21.);
+        QTRY_VERIFY(!w->property("proofConfirmed").toBool());
+        QTRY_VERIFY(!item("startJobButton")->isEnabled());
+        click(item("basicProfileApply"));
+        machine.setSimulation(true);
+        w->setProperty("page", 0);
+        auto *xField = item("objectXInput");
+        QVERIFY(xField);
+        auto *help = xField->findChild<QObject *>("helpBubble");
+        QVERIFY(help);
+        QVERIFY(help->property("description").toString().contains("Abstand"));
+        auto *target = qobject_cast<QQuickItem *>(help->property("target").value<QObject *>());
+        QVERIFY(target);
+        target->forceActiveFocus(Qt::TabFocusReason);
+        auto *tip = help->findChild<QObject *>("helpTooltip");
+        QVERIFY(tip);
+        QTRY_VERIFY_WITH_TIMEOUT(tip->property("visible").toBool(), 2000);
+        QVERIFY(!tip->property("text").toString().isEmpty());
+        if (qEnvironmentVariableIsSet("BLAZER_TOOLTIP_SCREENSHOT")) {
+            QTest::qWait(100);
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_TOOLTIP_SCREENSHOT")));
+        }
+        auto beforeProbe = project.projectBytes();
+        click(item("basicProbe"));
+        auto *probeDialog = w->findChild<QObject *>("discardDialog");
+        QVERIFY(probeDialog);
+        auto *discardHelp = item("discardChangesButton")->findChild<QObject *>("helpBubble");
+        QVERIFY(discardHelp);
+        QVERIFY(discardHelp->property("description").toString().contains("ungespeicherten"));
+        QTRY_VERIFY(probeDialog->property("visible").toBool());
+        click(item("cancelCloseButton"));
+        QCOMPARE(project.projectBytes(), beforeProbe);
+        auto profileBeforeProbe = project.material();
+        click(item("basicProbe"));
+        click(item("discardChangesButton"));
+        QTRY_COMPARE(project.count(), 1);
+        QCOMPARE(project.material(), profileBeforeProbe);
+        QCOMPARE(project.selection()["width"].toDouble(), 5.);
+        QCOMPARE(project.selection()["height"].toDouble(), 5.);
+        QCOMPARE(project.items()[0].layer, 0);
+        QVERIFY(w->property("isBasicProbe").toBool());
+        QVERIFY(!machine.busy());
+        QCOMPARE(w->property("page").toInt(), 1);
+        QVERIFY(item("startJobButton")->property("text").toString().contains("Bildschirm"));
+        QVERIFY(item("startJobButton")->isEnabled());
+        machine.toggleConnection();
+        QTRY_VERIFY(!item("startJobButton")->isEnabled());
+        machine.toggleConnection();
+        click(item("basicProof"));
+        QVERIFY(w->property("proofConfirmed").toBool());
+        project.setLayerSetting(0, "power", 21.);
+        QTRY_VERIFY(!w->property("proofConfirmed").toBool());
+        QVERIFY(!w->property("isBasicProbe").toBool());
+        project.demo();
+        w->setProperty("page", 0);
+        const auto beforeModeSwitch = project.projectBytes();
+        click(item("modeToggle"));
+        QTRY_VERIFY(!w->property("basic").toBool());
+        QCOMPARE(project.projectBytes(), beforeModeSwitch);
+        QTRY_VERIFY(item("workflow3"));
+        if (qEnvironmentVariableIsSet("BLAZER_ADVANCED_SCREENSHOT"))
+            QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_ADVANCED_SCREENSHOT")));
         auto *manufacturer = item("manufacturerButton");
         QVERIFY(manufacturer);
         click(manufacturer);

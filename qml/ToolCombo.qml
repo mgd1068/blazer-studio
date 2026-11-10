@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-ComboBox {
+ComboBox { HelpBubble { target: parent }
     id: control
     property bool dark: false
     implicitHeight: 36

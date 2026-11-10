@@ -1,5 +1,6 @@
 #include "document.h"
 #include "geometry.h"
+#include "imagelimits.h"
 #include "materiallibrary.h"
 #include "vectorutil.h"
 #include <QFile>
@@ -16,9 +17,9 @@
 #include <algorithm>
 
 namespace {
-constexpr qint64 maxProjectBytes = 16 * 1024 * 1024;
-constexpr qint64 maxEmbeddedBytes = 8 * 1024 * 1024;
-constexpr qint64 maxReliefPixels = 4 * 1024 * 1024;
+constexpr qint64 maxProjectBytes = ImageLimits::projectBytes;
+constexpr qint64 maxEmbeddedBytes = ImageLimits::embeddedBytes;
+constexpr qint64 maxReliefPixels = ImageLimits::documentPixels;
 QString id() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
@@ -33,6 +34,18 @@ bool text(const QJsonObject &o, const QString &key, int max = 1000) {
 QVariantMap layer(QString name, QString mode, double speed, double power) {
     return {{"name", name}, {"mode", mode},    {"speed", speed}, {"power", power},
             {"passes", 1},  {"enabled", true}, {"interval", .1}};
+}
+QVariantList materialLayers(const QVariantList &current, const QVariantMap &profile) {
+    auto updated = current;
+    for (int i = 0; i < 2; ++i) {
+        const auto values = profile[i == 0 ? "engrave" : "cut"].toMap();
+        auto map = updated[i].toMap();
+        for (const QString key : {"speed", "power", "passes", "enabled", "interval"})
+            if (values.contains(key))
+                map[key] = values[key];
+        updated[i] = map;
+    }
+    return updated;
 }
 } // namespace
 Document::Document(QObject *p) : QAbstractListModel(p) {
@@ -395,11 +408,11 @@ bool Document::canAppend(const Artwork &a) {
             size += i.reliefAsset->png.size();
     }
     if (pixels > maxReliefPixels) {
-        notify("Tiefenkarten dürfen zusammen maximal 4 Megapixel enthalten.");
+        notify("Tiefenkarten dürfen zusammen maximal 32 MiPixel enthalten.");
         return false;
     }
     if (size > maxEmbeddedBytes) {
-        notify("Eingebettete Grafiken dürfen zusammen maximal 8 MB groß sein.");
+        notify("Eingebettete Grafiken dürfen zusammen maximal 40 MiB groß sein.");
         return false;
     }
     return true;
@@ -629,15 +642,7 @@ bool Document::applyMaterial(const QVariantMap &profile) {
         notify(error);
         return false;
     }
-    auto updated = m_layers;
-    for (int i = 0; i < 2; ++i) {
-        auto values = profile[i == 0 ? "engrave" : "cut"].toMap();
-        auto map = updated[i].toMap();
-        for (const QString key : {"speed", "power", "passes", "enabled", "interval"})
-            if (values.contains(key))
-                map[key] = values[key];
-        updated[i] = map;
-    }
+    auto updated = materialLayers(m_layers, profile);
     if (m_material == profile && m_layers == updated)
         return true;
     checkpoint();
@@ -753,7 +758,7 @@ QByteArray Document::serialize() const {
              a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
     return QJsonDocument(QJsonObject{{"format", "blazer-studio"},
-                                     {"version", 6},
+                                     {"version", 7},
                                      {"units", "mm"},
                                      {"origin", "bottom-left"},
                                      {"pages", QJsonArray::fromStringList(m_pages)},
@@ -773,7 +778,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 6) ||
+        !number(root, "version", 1, 7) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -987,7 +992,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
                         if (n < 0 || n > 255)
                             return {};
                     } else if (QStringList{"cropX", "cropY", "cropW", "cropH"}.contains(it.key())) {
-                        if (n < 0 || n > 512 || std::floor(n) != n)
+                        if (n < 0 || n > ImageLimits::side || std::floor(n) != n)
                             return {};
                     } else
                         return {};
@@ -1074,7 +1079,7 @@ bool Document::save(const QUrl &url) {
     }
     auto bytes = serialize();
     if (bytes.size() > maxProjectBytes) {
-        notify("Projekt ist größer als 16 MB; Speichern abgebrochen.");
+        notify("Projekt ist größer als 64 MiB; Speichern abgebrochen.");
         return false;
     }
     if (QFile::exists(url.toLocalFile())) {
@@ -1179,21 +1184,25 @@ bool Document::importImage(const QUrl &url) {
     QImageReader reader(url.toLocalFile());
     reader.setAutoTransform(true);
     auto size = reader.size();
-    if (!url.isLocalFile() || !size.isValid() || qint64(size.width()) * size.height() > 16000000) {
-        notify("Bild ungültig oder größer als 16 Megapixel.");
+    if (!url.isLocalFile() || !size.isValid() || size.width() > ImageLimits::side ||
+        size.height() > ImageLimits::side ||
+        qint64(size.width()) * size.height() > ImageLimits::pixels) {
+        notify("Bild ungültig oder größer als 4096 Pixel je Seite oder 16 MiPixel.");
         return false;
     }
     auto image = reader.read();
-    if (image.width() > 512 || image.height() > 512)
-        image = image.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
     auto asset = ReliefAsset::fromImage(image);
-    if (!asset)
+    if (!asset) {
+        notify("Bild konnte nicht gelesen werden oder benötigt als PNG mehr als 40 MiB.");
         return false;
+    }
     Artwork a;
     a.id = id();
     a.name = QFileInfo(url.toLocalFile()).completeBaseName();
     a.kind = "image";
-    a.bounds = QRectF(10, 10, image.width() * .1, image.height() * .1);
+    double mmPerPixel = std::min(.1, 100. / std::max(image.width(), image.height()));
+    a.bounds = QRectF(10, 10, image.width() * mmPerPixel, image.height() * mmPerPixel);
     a.layer = 0;
     a.reliefAsset = asset;
     a.settings = {{"speed", m_layers[0].toMap()["speed"]}, {"power", m_layers[0].toMap()["power"]}};
@@ -1278,13 +1287,14 @@ bool Document::importRelief(const QUrl &url) {
     QImageReader reader(url.toLocalFile());
     reader.setAutoTransform(true);
     auto size = reader.size();
-    if (!url.isLocalFile() || !size.isValid() || qint64(size.width()) * size.height() > 16000000) {
-        notify("Tiefenkarte ungültig oder größer als 16 Megapixel.");
+    if (!url.isLocalFile() || !size.isValid() || size.width() > ImageLimits::side ||
+        size.height() > ImageLimits::side ||
+        qint64(size.width()) * size.height() > ImageLimits::pixels) {
+        notify("Tiefenkarte ungültig oder größer als 4096 Pixel je Seite oder 16 MiPixel.");
         return false;
     }
     auto image = reader.read();
-    if (image.width() > 512 || image.height() > 512)
-        image = image.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
     auto asset = ReliefAsset::fromImage(image);
     if (!asset) {
         notify("Tiefenkarte konnte nicht gelesen werden.");
@@ -1294,7 +1304,9 @@ bool Document::importRelief(const QUrl &url) {
               QFileInfo(url.toLocalFile()).completeBaseName(),
               "relief",
               "",
-              QRectF(10, 10, image.width() * .1, image.height() * .1),
+              QRectF(10, 10,
+                     image.width() * std::min(.1, 100. / std::max(image.width(), image.height())),
+                     image.height() * std::min(.1, 100. / std::max(image.width(), image.height()))),
               0,
               true,
               {}};
@@ -1374,4 +1386,67 @@ bool Document::validBudget(const QList<Artwork> &items) {
             return false;
     }
     return bytes <= maxEmbeddedBytes && pixels <= maxReliefPixels;
+}
+
+QVariantMap Document::beginnerSummary() const {
+    bool advanced = false;
+    for (const auto &a : m_items)
+        if (a.page == m_activePage)
+            advanced |= a.layer >= 2 || !a.extraOperations.isEmpty() || a.kind == "relief";
+    for (int i = 0; i < 2; ++i) {
+        const auto values = m_layers[i].toMap();
+        for (const QString key : {"angle", "angleIncrement", "kerf", "scanOffset", "tabs",
+                                  "startPoint", "leadIn", "leadOut", "overscan"})
+            advanced |= std::abs(values.value(key, 0).toDouble()) > .000001;
+        advanced |= values.value("crosshatch", false).toBool();
+    }
+    bool modified = materialModified();
+    QString reason = advanced
+                         ? "Dieses Projekt verwendet erweiterte Bearbeitungswerte, zusätzliche "
+                           "Operationen oder Reliefs. Bitte im Advanced-Modus prüfen."
+                     : modified ? "Die Bearbeitungswerte weichen vom Materialprofil ab. Profil neu "
+                                  "übernehmen oder Advanced verwenden."
+                                : QString();
+    return {{"requiresAdvanced", advanced},
+            {"modified", modified},
+            {"reason", reason},
+            {"source", m_material.value("source", QString("Eigene Werte"))},
+            {"material", m_material.value("name", QString("Kein Material"))}};
+}
+bool Document::applyBasicMaterial(const QVariantMap &profile) {
+    if (beginnerSummary()["requiresAdvanced"].toBool()) {
+        notify("Erweiterte Bearbeitungswerte, zusätzliche Operationen oder Reliefs bitte in "
+               "Advanced bearbeiten.");
+        return false;
+    }
+    bool engrave = profile["engrave"].toMap()["enabled"].toBool(),
+         cut = profile["cut"].toMap()["enabled"].toBool();
+    if (cut && !engrave)
+        for (const auto &a : m_items)
+            if (a.page == m_activePage && a.kind == "image") {
+                notify("Ein Foto benötigt ein Gravurprofil, kein Schnittprofil.");
+                return false;
+            }
+    const bool profileChanges =
+        m_material != profile || m_layers != materialLayers(m_layers, profile);
+    if (!applyMaterial(profile))
+        return false;
+    bool change = false;
+    for (const auto &a : m_items)
+        if (a.page == m_activePage)
+            change |= !a.settings.isEmpty() || (engrave != cut && a.layer != (engrave ? 0 : 1));
+    if (change) {
+        if (!profileChanges)
+            checkpoint();
+        for (auto &a : m_items)
+            if (a.page == m_activePage) {
+                a.settings.clear();
+                a.relief.depthPerPass = 0;
+                if (engrave != cut)
+                    a.layer = engrave ? 0 : 1;
+            }
+        emit dataChanged(index(0), index(m_items.size() - 1));
+        refresh();
+    }
+    return true;
 }

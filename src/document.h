@@ -28,6 +28,7 @@ struct Artwork {
 
 class Document : public QAbstractListModel {
     Q_OBJECT
+    Q_PROPERTY(QVariantMap beginnerSummary READ beginnerSummary NOTIFY changed)
     Q_PROPERTY(QVariantMap jobSummary READ jobSummary NOTIFY changed)
     Q_PROPERTY(QStringList pages READ pages NOTIFY changed)
     Q_PROPERTY(int activePage READ activePage NOTIFY changed)
@@ -130,6 +131,8 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void setProperty(const QString &name, const QVariant &value);
     Q_INVOKABLE void setLayer(int layer);
     Q_INVOKABLE void setLayerSetting(int layer, const QString &key, const QVariant &value);
+    QVariantMap beginnerSummary() const;
+    Q_INVOKABLE bool applyBasicMaterial(const QVariantMap &profile);
     Q_INVOKABLE bool applyMaterial(const QVariantMap &profile);
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();

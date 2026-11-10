@@ -1,4 +1,5 @@
 #include "relief.h"
+#include "imagelimits.h"
 #include <QBuffer>
 #include <QImageReader>
 #include <algorithm>
@@ -58,7 +59,9 @@ int ReliefSettings::count(QRgba64 pixel) const {
     return std::clamp(int(std::ceil(std::pow(darkness, gamma) * passes - 1e-9)), 0, passes);
 }
 std::shared_ptr<const ReliefAsset> ReliefAsset::fromImage(const QImage &source) {
-    if (source.isNull() || source.width() > 512 || source.height() > 512)
+    if (source.isNull() || source.width() > ImageLimits::side ||
+        source.height() > ImageLimits::side ||
+        qint64(source.width()) * source.height() > ImageLimits::pixels)
         return {};
     auto asset = std::make_shared<ReliefAsset>();
     asset->image =
@@ -76,17 +79,20 @@ std::shared_ptr<const ReliefAsset> ReliefAsset::fromImage(const QImage &source) 
     buffer.open(QIODevice::WriteOnly);
     if (!asset->image.save(&buffer, "PNG"))
         return {};
+    if (asset->png.size() > ImageLimits::embeddedBytes)
+        return {};
     return asset;
 }
 std::shared_ptr<const ReliefAsset> ReliefAsset::parse(const QByteArray &png) {
-    if (png.isEmpty() || png.size() > 2 * 1024 * 1024)
+    if (png.isEmpty() || png.size() > ImageLimits::embeddedBytes)
         return {};
     QBuffer buffer;
     buffer.setData(png);
     buffer.open(QIODevice::ReadOnly);
     QImageReader reader(&buffer, "PNG");
     const auto size = reader.size();
-    if (!size.isValid() || size.width() > 512 || size.height() > 512)
+    if (!size.isValid() || size.width() > ImageLimits::side || size.height() > ImageLimits::side ||
+        qint64(size.width()) * size.height() > ImageLimits::pixels)
         return {};
     return fromImage(reader.read());
 }

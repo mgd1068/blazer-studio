@@ -16,7 +16,7 @@ Aktive Objekte außerhalb von 200 × 150 mm, nicht auswertbare Inhalte oder zu k
 
 ## Bilder und Materialtests
 
-**Bild** importiert unterstützte Rasterformate als eingebettetes Rasterobjekt bis 512 × 512 Pixel. Unter **Werkzeuge → Bild** stehen Korrekturen, Zuschnitt, Masken, zwei Ditherverfahren, Schwellenwert und Graustufen-Leistungsmodulation zur Verfügung. Anfangsmaßstab: 0,1 mm je Pixel; Maße und Ausgabe-Raster sind anschließend einstellbar.
+**Motiv laden** (Basic) beziehungsweise **Bild** (Advanced) importiert unterstützte Rasterformate mit Originalauflösung bis 4096 × 4096 Pixel innerhalb der [Speichergrenzen](RASTER_QUALITY.md). Unter **Werkzeuge → Bild** stehen Korrekturen, Zuschnitt, Masken, zwei Ditherverfahren, Schwellenwert und Graustufen-Leistungsmodulation zur Verfügung. Anfangsmaßstab: höchstens 100 mm lange Seite, bei kleinen Bildern 0,1 mm je Pixel; Maße und Ausgabe-Raster sind anschließend einstellbar.
 
 **Materialtest** erzeugt ein neues bearbeitbares Projekt: 2–10 Stufen je Achse, 5-mm-Gravurfelder mit 8 mm Abstand ab X10/Y10. Zeilen von unten nach oben ändern die Geschwindigkeit; Spalten von links nach rechts die Leistung. Die einzelnen Zellen besitzen eigene Leistungs-/Geschwindigkeitswerte, die rechts sichtbar und editierbar sind. Erzeugung allein startet keinen Laser. Vorschau, Projektdatei und GCode-Export funktionieren wie bei anderen Projekten.
 

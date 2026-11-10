@@ -1,4 +1,4 @@
-# Entwurf 0.6 ausprobieren
+# Entwurf 0.7 ausprobieren
 
 ## Start
 
@@ -7,6 +7,8 @@
 ```
 
 Auf Mathias’ Rechner wird zusätzlich ein Startmenüeintrag **Blazer Studio** eingerichtet. Start mit `--dark` öffnet das dunkle Design, `--compact` ein Fenster mit 1180 × 760 Pixeln. Die Anwendung startet im verbundenen Simulator. Eine echte Geräteverbindung wird im Bereich Gerät ausdrücklich ausgewählt. Siehe [GRBL-Workflow](GRBL_WORKFLOW.md).
+
+Die Oberfläche startet in Basic. Oben wechselt **Basic → Advanced** zur vollständigen Ansicht. [Geführter Einstieg, automatische Profilwerte und Tooltips](BEGINNER.md).
 
 ## Bedienbarer Umfang
 

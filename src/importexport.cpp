@@ -1,5 +1,6 @@
 #include "document.h"
 #include "geometry.h"
+#include "imagelimits.h"
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
@@ -372,7 +373,7 @@ bool Document::importProject(const QUrl &url) {
     QFile f(url.toLocalFile());
     if (!f.open(QIODevice::ReadOnly))
         return false;
-    auto state = parse(f.read(16 * 1024 * 1024 + 1));
+    auto state = parse(f.read(ImageLimits::projectBytes + 1));
     if (!state || m_items.size() + state->items.size() > Geometry::objectLimit ||
         m_layers.size() + state->layers.size() > 64)
         return false;

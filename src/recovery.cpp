@@ -1,4 +1,5 @@
 #include "recovery.h"
+#include "imagelimits.h"
 #include <QDir>
 #include <QFile>
 #include <QSaveFile>
@@ -27,7 +28,7 @@ bool Recovery::save() {
     if (!document->dirty())
         return true;
     auto bytes = document->projectBytes();
-    if (bytes.size() > 16 * 1024 * 1024)
+    if (bytes.size() > ImageLimits::projectBytes)
         return false;
     if (QFile::exists(path)) {
         QFile::remove(path + ".previous");
@@ -44,7 +45,8 @@ bool Recovery::save() {
 }
 bool Recovery::restore() {
     QFile f(path);
-    return f.open(QIODevice::ReadOnly) && document->restoreBytes(f.read(16 * 1024 * 1024 + 1));
+    return f.open(QIODevice::ReadOnly) &&
+           document->restoreBytes(f.read(ImageLimits::projectBytes + 1));
 }
 void Recovery::clear() {
     timer.stop();

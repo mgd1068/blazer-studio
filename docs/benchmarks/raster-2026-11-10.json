@@ -1,0 +1,193 @@
+{
+  "date": "2026-11-10",
+  "baseline": "6c2f079 src/imageprocessing.cpp",
+  "updated": "0.7 rolling three-row error buffer, cached row pointers and mode/mask flags",
+  "compiler": "15.2.0",
+  "flags": "-std=c++20 -O2 -fPIC",
+  "qt": "6.10.2",
+  "system": "Linux-7.0.0-43-generic-x86_64-with-glibc2.43",
+  "memory": "/proc/self/status VmHWM in KiB; process peak including input/output and libraries",
+  "scope": "isolated ImageProcessing::apply; no job planning, GUI or hardware; alternating variants in fresh child processes",
+  "runs": [
+    {
+      "error": "",
+      "milliseconds": 95.73087,
+      "mode": "dither",
+      "peakRssKiB": 21664,
+      "sha256": "56f87a569f7ddfa8b1cd30daf0830038cfdd764b94354ffa8731418f0618dc34",
+      "size": 512,
+      "variant": "before",
+      "repeat": 1
+    },
+    {
+      "error": "",
+      "milliseconds": 37.780198,
+      "mode": "dither",
+      "peakRssKiB": 19584,
+      "sha256": "56f87a569f7ddfa8b1cd30daf0830038cfdd764b94354ffa8731418f0618dc34",
+      "size": 512,
+      "variant": "after",
+      "repeat": 1
+    },
+    {
+      "error": "",
+      "milliseconds": 87.766553,
+      "mode": "dither",
+      "peakRssKiB": 21592,
+      "sha256": "56f87a569f7ddfa8b1cd30daf0830038cfdd764b94354ffa8731418f0618dc34",
+      "size": 512,
+      "variant": "before",
+      "repeat": 2
+    },
+    {
+      "error": "",
+      "milliseconds": 37.855953,
+      "mode": "dither",
+      "peakRssKiB": 19620,
+      "sha256": "56f87a569f7ddfa8b1cd30daf0830038cfdd764b94354ffa8731418f0618dc34",
+      "size": 512,
+      "variant": "after",
+      "repeat": 2
+    },
+    {
+      "error": "",
+      "milliseconds": 78.368667,
+      "mode": "dither",
+      "peakRssKiB": 21656,
+      "sha256": "56f87a569f7ddfa8b1cd30daf0830038cfdd764b94354ffa8731418f0618dc34",
+      "size": 512,
+      "variant": "before",
+      "repeat": 3
+    },
+    {
+      "error": "",
+      "milliseconds": 38.878595,
+      "mode": "dither",
+      "peakRssKiB": 19512,
+      "sha256": "56f87a569f7ddfa8b1cd30daf0830038cfdd764b94354ffa8731418f0618dc34",
+      "size": 512,
+      "variant": "after",
+      "repeat": 3
+    },
+    {
+      "error": "",
+      "milliseconds": 1556.070619,
+      "mode": "dither",
+      "peakRssKiB": 98676,
+      "sha256": "333973f60bbd846b55fcc20cb299a7b28f09f162520ff6bf704c0b3ca64c6a3c",
+      "size": 2048,
+      "variant": "before",
+      "repeat": 1
+    },
+    {
+      "error": "",
+      "milliseconds": 654.297578,
+      "mode": "dither",
+      "peakRssKiB": 65736,
+      "sha256": "333973f60bbd846b55fcc20cb299a7b28f09f162520ff6bf704c0b3ca64c6a3c",
+      "size": 2048,
+      "variant": "after",
+      "repeat": 1
+    },
+    {
+      "error": "",
+      "milliseconds": 1590.559729,
+      "mode": "dither",
+      "peakRssKiB": 98596,
+      "sha256": "333973f60bbd846b55fcc20cb299a7b28f09f162520ff6bf704c0b3ca64c6a3c",
+      "size": 2048,
+      "variant": "before",
+      "repeat": 2
+    },
+    {
+      "error": "",
+      "milliseconds": 879.266325,
+      "mode": "dither",
+      "peakRssKiB": 65716,
+      "sha256": "333973f60bbd846b55fcc20cb299a7b28f09f162520ff6bf704c0b3ca64c6a3c",
+      "size": 2048,
+      "variant": "after",
+      "repeat": 2
+    },
+    {
+      "error": "",
+      "milliseconds": 1559.764128,
+      "mode": "dither",
+      "peakRssKiB": 98416,
+      "sha256": "333973f60bbd846b55fcc20cb299a7b28f09f162520ff6bf704c0b3ca64c6a3c",
+      "size": 2048,
+      "variant": "before",
+      "repeat": 3
+    },
+    {
+      "error": "",
+      "milliseconds": 590.860185,
+      "mode": "dither",
+      "peakRssKiB": 65716,
+      "sha256": "333973f60bbd846b55fcc20cb299a7b28f09f162520ff6bf704c0b3ca64c6a3c",
+      "size": 2048,
+      "variant": "after",
+      "repeat": 3
+    },
+    {
+      "error": "",
+      "milliseconds": 5916.199951,
+      "mode": "dither",
+      "peakRssKiB": 344576,
+      "sha256": "de1127659946ac9771e3ba188348049a02e4c9b5094384515ffbfcaf30a0907f",
+      "size": 4096,
+      "variant": "before",
+      "repeat": 1
+    },
+    {
+      "error": "",
+      "milliseconds": 2773.433357,
+      "mode": "dither",
+      "peakRssKiB": 213156,
+      "sha256": "de1127659946ac9771e3ba188348049a02e4c9b5094384515ffbfcaf30a0907f",
+      "size": 4096,
+      "variant": "after",
+      "repeat": 1
+    },
+    {
+      "error": "",
+      "milliseconds": 6449.680037,
+      "mode": "dither",
+      "peakRssKiB": 344408,
+      "sha256": "de1127659946ac9771e3ba188348049a02e4c9b5094384515ffbfcaf30a0907f",
+      "size": 4096,
+      "variant": "before",
+      "repeat": 2
+    },
+    {
+      "error": "",
+      "milliseconds": 2908.554387,
+      "mode": "dither",
+      "peakRssKiB": 213348,
+      "sha256": "de1127659946ac9771e3ba188348049a02e4c9b5094384515ffbfcaf30a0907f",
+      "size": 4096,
+      "variant": "after",
+      "repeat": 2
+    },
+    {
+      "error": "",
+      "milliseconds": 7127.881237,
+      "mode": "dither",
+      "peakRssKiB": 344460,
+      "sha256": "de1127659946ac9771e3ba188348049a02e4c9b5094384515ffbfcaf30a0907f",
+      "size": 4096,
+      "variant": "before",
+      "repeat": 3
+    },
+    {
+      "error": "",
+      "milliseconds": 2827.158274,
+      "mode": "dither",
+      "peakRssKiB": 213320,
+      "sha256": "de1127659946ac9771e3ba188348049a02e4c9b5094384515ffbfcaf30a0907f",
+      "size": 4096,
+      "variant": "after",
+      "repeat": 3
+    }
+  ]
+}

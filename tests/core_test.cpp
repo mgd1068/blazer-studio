@@ -15,6 +15,77 @@
 class CoreTest : public QObject {
     Q_OBJECT
   private slots:
+    void beginnerProfileContract() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        d.setObjectSetting("power", 91);
+        auto before = d.projectBytes();
+        auto profile = MaterialLibrary::example();
+        auto cut = profile["cut"].toMap();
+        cut["enabled"] = false;
+        profile["cut"] = cut;
+        QVERIFY(d.applyBasicMaterial(profile));
+        QCOMPARE(d.items()[0].layer, 0);
+        QVERIFY(d.items()[0].settings.isEmpty());
+        for (int i = 0; i < 2; ++i)
+            for (const QString key : {"speed", "power", "passes", "interval", "enabled"})
+                QCOMPARE(d.layers()[i].toMap()[key], profile[i ? "cut" : "engrave"].toMap()[key]);
+        QVERIFY(!d.beginnerSummary()["modified"].toBool());
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        d.redo();
+        d.setLayerSetting(0, "overscan", 2.);
+        QVERIFY(d.beginnerSummary()["requiresAdvanced"].toBool());
+        before = d.projectBytes();
+        QVERIFY(!d.applyBasicMaterial(profile));
+        QCOMPARE(d.projectBytes(), before);
+        d.undo();
+        auto bad = profile;
+        auto engraving = bad["engrave"].toMap();
+        engraving["power"] = 101.;
+        bad["engrave"] = engraving;
+        before = d.projectBytes();
+        QVERIFY(!d.applyBasicMaterial(bad));
+        QCOMPARE(d.projectBytes(), before);
+        d.assignOperations({0, d.addOperation("Extra", "Gravur")});
+        QVERIFY(d.beginnerSummary()["requiresAdvanced"].toBool());
+        before = d.projectBytes();
+        QVERIFY(!d.applyBasicMaterial(profile));
+        QCOMPARE(d.projectBytes(), before);
+    }
+    void beginnerUndoAtHistoryLimit() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        for (int i = 0; i < 65; ++i)
+            d.setProperty("x", 10. + i);
+        d.setObjectSetting("power", 91.);
+        const auto before = d.projectBytes();
+        auto profile = MaterialLibrary::example();
+        profile["name"] = "Neue Profilwerte";
+        QVERIFY(d.applyBasicMaterial(profile));
+        QVERIFY(d.items()[0].settings.isEmpty());
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+    }
+    void beginnerPhotoNeedsEngraving() {
+        QTemporaryDir temp;
+        QImage image(32, 32, QImage::Format_ARGB32);
+        image.fill(Qt::black);
+        auto path = temp.filePath("photo.png");
+        QVERIFY(image.save(path));
+        Document d;
+        d.newProject();
+        QVERIFY(d.importImage(QUrl::fromLocalFile(path)));
+        auto profile = MaterialLibrary::example();
+        auto engraving = profile["engrave"].toMap();
+        engraving["enabled"] = false;
+        profile["engrave"] = engraving;
+        auto before = d.projectBytes();
+        QVERIFY(!d.applyBasicMaterial(profile));
+        QCOMPARE(d.projectBytes(), before);
+    }
     void materialLibraryPersistence() {
         QTemporaryDir dir;
         const auto path = dir.filePath("materials.json");

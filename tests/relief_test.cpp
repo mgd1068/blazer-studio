@@ -168,7 +168,7 @@ class ReliefTest : public QObject {
         d.setProperty("x", 20.);
         QVERIFY(!d.job().valid());
         QVERIFY(d.job().moves.isEmpty());
-        QImage huge(513, 1, QImage::Format_ARGB32);
+        QImage huge(4097, 1, QImage::Format_ARGB32);
         QVERIFY(!ReliefAsset::fromImage(huge));
     }
     void decodedImageBudget() {
@@ -177,11 +177,11 @@ class ReliefTest : public QObject {
         Document d;
         d.newProject();
         QVERIFY(d.importRelief(image(map)));
-        for (int i = 1; i < 16; ++i)
+        for (int i = 1; i < 128; ++i)
             d.duplicateSelected();
-        QCOMPARE(d.count(), 16);
+        QCOMPARE(d.count(), 128);
         d.duplicateSelected();
-        QCOMPARE(d.count(), 16);
+        QCOMPARE(d.count(), 128);
     }
     void whiteMapDoesNotEmit() {
         QImage map(2, 2, QImage::Format_ARGB32);

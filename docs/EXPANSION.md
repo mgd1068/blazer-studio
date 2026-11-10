@@ -1,5 +1,7 @@
 # Ausbaupaket 0.6 – Umsetzung und Grenzen
 
+Nachfolgeversion: [Basic/Advanced 0.7](BEGINNER.md) und [höhere Rasterauflösung](RASTER_QUALITY.md). Die folgenden Angaben dokumentieren den Umfang von 0.6.
+
 Auftrag vom 10.11.2026: die Lücken des Vergleichs gemeinsam bearbeiten und anschließend testen. Diese Tabelle beschreibt den tatsächlich gelieferten Umfang; sie behauptet keine vollständige LightBurn-Gleichwertigkeit.
 
 | Bereich | Umsetzung | Grenzen |
