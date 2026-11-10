@@ -19,7 +19,7 @@ Auftrag vom 10.11.2026: die Lücken des Vergleichs gemeinsam bearbeiten und ansc
 | Kalibrierung | Maß-/Rasterproben und markierte manuelle Fokusproben | Keine ungeprüften Firmwareänderungen; Fokus muss am vorhandenen Gerät manuell eingestellt werden |
 | GRBL | Antwortquittierter RX-Puffer mit höchstens 100 unquittierten Bytes, neue Idle-Bestätigung, Live-Overrides mit `Ov`-Rückmeldung, verständlichere Fehler/Alarme | Erweiterte Anbindung im Emulator geprüft; Hardwareabnahme mit Emission bleibt offen |
 | Relief | 16-Bit-Import, STL/OBJ-Oberseite als Tiefenbild, lokale KI-Fototiefenschätzung, abwechselnd 0°/90°, optionale Reinigungsschichten | KI schätzt relative Szenentiefe, keine gemessene Reliefgeometrie; Modell extern ausrichten; keine Z-Nachführung |
-| Referenzfoto | Lokales Bild, vier Referenzpunkte, projektive Registrierung, abschaltbares Overlay | Keine Kamera angeschlossen, kein Livebild, keine automatische Linsenentzerrung; Registrierung derzeit sitzungsbezogen |
+| Referenzfoto | Lokales Bild, vier Referenzpunkte, projektive Registrierung, abschaltbares Overlay | Keine Live-Kamera angebunden, kein Livebild, keine automatische Linsenentzerrung; Registrierung derzeit sitzungsbezogen |
 | Zusätzliche Hardware | Sichtbare Fähigkeitenmatrix für Kamera/Rotary/Z/Oberfläche/Absaugung | Beim M3 nicht vorhandene oder ungeklärte Funktionen bleiben gesperrt; keine geratenen Befehle |
 
 ## Bedienung
