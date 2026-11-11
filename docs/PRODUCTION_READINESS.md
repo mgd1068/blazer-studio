@@ -43,3 +43,5 @@ Für den ausdrücklich zugesagten Produktumfang müssen die zugehörigen Funktio
 - 12.11.2026: Plan angelegt; isolierter Arbeitszweig `codex/production-readiness`. Nutzer schläft, Laser ausgeschaltet. Start mit T01, keine Hardwarezugriffe.
 
 - 12.11.2026, T01: Inline-S-Ausgabe einschließlich Nullleistung und Rasterneustart nach M5 geprüft. Alle zehn CTest-Programme normal und mit ASan/UBSan bestanden (`detect_leaks=0`; keine Leckfreiheitszusage). Keine Geräteverbindung. Nächstes Thema: Kommunikation und Zustände.
+
+- 12.11.2026, T02: Empfangs-/Freigabe-/Abbruchfälle und USB-Fehlerrekursion behoben; 25 GRBL-Fälle sowie alle zehn Programme normal/ASan bestanden. Anschließend Arbeitsnullpunkt gegen physische Bewegungsgrenzen prüfen, bevor das Kommunikationsthema geschlossen wird. Reale Wiederabnahme bleibt T06.

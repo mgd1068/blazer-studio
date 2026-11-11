@@ -14,6 +14,11 @@ class Controller : public QObject {
     QStringList commands;
     QString status = "Idle";
     bool banner = false, wrongPower = false, autoAck = true, withOverrides = false;
+    bool respondToStatus = true, interleaveSettingsOnce = false;
+    bool interleaveSettingsAlways = false;
+    QByteArray minimumPower = "0";
+    int settingsRequests = 0;
+    QSocketNotifier *notifier = nullptr;
     QByteArray realtime;
     int feed = 100, power = 100;
     Controller() {
@@ -24,7 +29,7 @@ class Controller : public QObject {
         port = name;
         close(slave);
         fcntl(master, F_SETFL, O_NONBLOCK);
-        auto *notifier = new QSocketNotifier(master, QSocketNotifier::Read, this);
+        notifier = new QSocketNotifier(master, QSocketNotifier::Read, this);
         connect(notifier, &QSocketNotifier::activated, this, [this] {
             char data[4096];
             ssize_t n;
@@ -69,20 +74,24 @@ class Controller : public QObject {
                         continue;
                     }
                     if (c == '?') {
-                        report();
+                        if (respondToStatus)
+                            report();
                         continue;
                     }
                     if (c == 0x18) {
+                        realtime.append(c);
                         buffer.clear();
                         status = "Idle";
                         reply("Grbl 1.3a ['$' for help]\r\n");
                         continue;
                     }
                     if (c == '!') {
+                        realtime.append(c);
                         status = "Hold";
                         continue;
                     }
                     if (c == '~') {
+                        realtime.append(c);
                         status = "Run";
                         continue;
                     }
@@ -102,11 +111,15 @@ class Controller : public QObject {
                             reply("[VER:1.3a.20211103:]\r\n");
                         if (line == "$G")
                             reply("[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]\r\n");
-                        if (line == "$$")
-                            reply(wrongPower ? "$30=255\r\n$32=1\r\n$22=1\r\n$13=0\r\n$130=200\r\n$"
-                                               "131=150\r\n"
-                                             : "$30=1000\r\n$32=1\r\n$22=1\r\n$13=0\r\n$130="
-                                               "200\r\n$131=150\r\n");
+                        if (line == "$$") {
+                            ++settingsRequests;
+                            QByteArray settings = wrongPower ? "$30=255\r\n" : "$30=1000\r\n";
+                            if (interleaveSettingsAlways ||
+                                (interleaveSettingsOnce && settingsRequests == 1))
+                                settings = "$30=1000<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0>\r\n";
+                            reply(settings + "$31=" + minimumPower + "\r\n$32=1\r\n$22=1\r\n$13=0\r\n"
+                                             "$130=200\r\n$131=150\r\n");
+                        }
                         if (autoAck)
                             reply("ok\r\n");
                     } else
@@ -117,6 +130,11 @@ class Controller : public QObject {
     ~Controller() {
         if (master >= 0)
             close(master);
+    }
+    void disconnectPort() {
+        notifier->setEnabled(false);
+        close(master);
+        master = -1;
     }
     void reply(const QByteArray &s) {
         if (master >= 0)
@@ -133,6 +151,188 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void idleRequiresFreshValidStatus_data() {
+        QTest::addColumn<QByteArray>("status");
+        QTest::newRow("invalid-position") << QByteArray("<Idle|MPos:nan,0,0|FS:0,0>");
+        QTest::newRow("missing-position") << QByteArray("<Idle|FS:0,0>");
+        QTest::newRow("nonzero-output") << QByteArray("<Idle|MPos:0,0,0|FS:0,20>");
+        QTest::newRow("missing-output") << QByteArray("<Idle|MPos:0,0,0>");
+        QTest::newRow("invalid-output") << QByteArray("<Idle|MPos:0,0,0|FS:0,nan>");
+        QTest::newRow("active-input") << QByteArray("<Idle|MPos:0,0,0|FS:0,0|Pn:X>");
+    }
+    void idleRequiresFreshValidStatus() {
+        QFETCH(QByteArray, status);
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.respondToStatus = false;
+        c.reply(status + "\r\n");
+        QTRY_VERIFY(!s.ready());
+        Document d;
+        d.addShape("rect");
+        s.start(d.job());
+        QTest::qWait(30);
+        for (const auto &line : c.commands)
+            QVERIFY(!line.startsWith("M4"));
+        if (s.connected()) {
+            c.report();
+            QTRY_VERIFY(s.ready());
+        } else
+            QCOMPARE(status, QByteArray("<Idle|MPos:0,0,0|FS:0,20>"));
+    }
+    void interleavedSettingsAreReadAgain() {
+        Controller c;
+        c.interleaveSettingsOnce = true;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY_WITH_TIMEOUT(s.ready(), 4000);
+        QCOMPARE(c.settingsRequests, 2);
+    }
+    void corruptedSettingsNeverAuthorizeOutput() {
+        Controller c;
+        c.interleaveSettingsOnce = c.wrongPower = true;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_COMPARE_WITH_TIMEOUT(c.settingsRequests, 2, 4000);
+        QTest::qWait(50);
+        QVERIFY(!s.ready());
+        QVERIFY(!s.configurationValid());
+    }
+    void repeatedInterleavingClosesConnection() {
+        Controller c;
+        c.interleaveSettingsAlways = true;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_COMPARE(c.settingsRequests, 2);
+        QTRY_VERIFY(!s.connected());
+        QVERIFY(!s.ready());
+    }
+    void nonzeroMinimumPowerIsRejected() {
+        Controller c;
+        c.minimumPower = "10";
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(c.commands.contains("$G"));
+        QTest::qWait(30);
+        QVERIFY(!s.configurationValid());
+        QVERIFY(!s.ready());
+    }
+    void interleavedStatusPreservesAcknowledgment() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.autoAck = false;
+        QVERIFY(s.commands({"M5 S0", "G90"}));
+        c.reply("ok<Idle|MPos:0,0,0|FS:0,0>\r\n");
+        QTRY_VERIFY(c.commands.contains("G90"));
+        c.reply("<Idle|MPos:0,0,0|FS:0,0>ok\r\n");
+        QTRY_VERIFY(s.ready());
+    }
+    void delayedRunStatusDoesNotCancelRequestedPause() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.autoAck = false;
+        Document d;
+        d.addShape("rect");
+        s.start(d.job());
+        s.pause();
+        c.reply("<Run|MPos:0,0,0|FS:0,0>\r\n");
+        QTest::qWait(30);
+        QVERIFY(s.paused);
+        s.pause();
+        QVERIFY(!s.paused);
+        QTRY_VERIFY(c.realtime.contains('~'));
+        s.stop();
+    }
+    void excessivePowerOverrideAbortsActiveJob() {
+        Controller c;
+        c.withOverrides = true;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.autoAck = false;
+        Document d;
+        d.addShape("rect");
+        s.start(d.job());
+        c.power = 150;
+        c.status = "Run";
+        c.report();
+        QTRY_VERIFY(!s.connected());
+        QVERIFY(!s.busy());
+    }
+    void transportLossDiscardsJobBeforeReconnect() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.autoAck = false;
+        Document d;
+        d.addShape("rect");
+        s.start(d.job());
+        QTRY_VERIFY(s.busy());
+        c.disconnectPort();
+        QTRY_VERIFY(!s.connected());
+        QVERIFY(!s.ready());
+        QVERIFY(!s.busy());
+        Controller next;
+        QVERIFY(s.open(next.port));
+        QTRY_VERIFY(s.ready());
+        for (const auto &line : next.commands)
+            QVERIFY(!line.startsWith("G1") && !line.startsWith("M4"));
+    }
+    void failureDoesNotConsumeTrailingStartupBanner() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.reply("<Idle|MPos:0,0,0|FS:0,20>\r\nGrbl 1.3a ['$' for help]\r\n");
+        QTRY_VERIFY(!s.connected());
+        QVERIFY(!s.busy());
+        QVERIFY(!s.ready());
+        QCOMPARE(s.state, QString("Verbindungsfehler"));
+    }
+    void completionWaitsForValidPositionAndZeroOutput() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.status = "Run";
+        Document d;
+        d.addShape("rect");
+        s.start(d.job());
+        QTRY_COMPARE(s.progress, .99);
+        c.respondToStatus = false;
+        c.reply("<Idle|MPos:invalid,0,0|FS:0,0>\r\n");
+        QTest::qWait(30);
+        QVERIFY(s.busy());
+        QVERIFY(s.progress < 1);
+        c.status = "Idle";
+        c.respondToStatus = true;
+        c.report();
+        QTRY_VERIFY(s.ready());
+        QCOMPARE(s.progress, 1.);
+    }
+    void doorDuringJobDiscardsControllerQueue() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.autoAck = false;
+        Document d;
+        d.addShape("rect");
+        s.start(d.job());
+        QTRY_VERIFY(s.busy());
+        c.status = "Door";
+        c.report();
+        QTRY_VERIFY(!s.connected());
+        QVERIFY(!s.busy());
+        QVERIFY(!s.ready());
+        QTRY_VERIFY(c.realtime.contains(char(0x18)));
+    }
     void bufferedCreditsAndOverrides() {
         Controller c;
         c.withOverrides = true;

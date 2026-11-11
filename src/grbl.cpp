@@ -2,6 +2,7 @@
 #include "geometry.h"
 #include <QMap>
 #include <QRegularExpression>
+#include <QScopedValueRollback>
 #include <cmath>
 namespace {
 QString n(double v) {
@@ -46,7 +47,9 @@ void GrblSession::append(const QString &s) {
 }
 bool GrblSession::ready() const {
     return connected() && !handshaking && configurationValid() && knownPosition &&
-           controllerState == "Idle" && !busy() && !firing;
+           knownOutput && reportedOutput == 0 && !activeInputs &&
+           (!overrideFeedback || powerOverride <= 100) && controllerState == "Idle" && !busy() &&
+           !firing;
 }
 bool GrblSession::open(const QString &port) {
     if (port.isEmpty() || connected())
@@ -63,6 +66,10 @@ bool GrblSession::open(const QString &port) {
     }
     input.clear();
     version = laserMode = powerScale = knownPosition = knownOffset = false;
+    minimumPower = knownOutput = activeInputs = pauseRequested = false;
+    contaminatedConfiguration = false;
+    configurationRetries = 0;
+    overrideFeedback = false;
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
     controllerState.clear();
     firing = paused = false;
@@ -80,6 +87,9 @@ bool GrblSession::open(const QString &port) {
     return true;
 }
 void GrblSession::handshake() {
+    // Settings printouts must not be interrupted by our status polling. Some
+    // ESP32 forks can otherwise interleave two replies on the serial stream.
+    poll.stop();
     paused = false;
     firing = false;
     homing = false;
@@ -87,6 +97,8 @@ void GrblSession::handshake() {
     focusTimer.stop();
     timeout.stop();
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
+    laserMode = powerScale = minimumPower = knownPosition = knownOffset = knownOutput = false;
+    activeInputs = pauseRequested = contaminatedConfiguration = false;
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
@@ -110,6 +122,9 @@ void GrblSession::close() {
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
+    pauseRequested = false;
+    knownPosition = knownOffset = knownOutput = false;
+    overrideFeedback = false;
     if (serial.isOpen()) {
         if (active)
             serial.write("!\x18", 2);
@@ -123,6 +138,11 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message) {
+    // A write/flush on a lost USB port can synchronously emit another serial
+    // error. Do not recurse while attempting the best-effort shutdown.
+    if (handlingFailure)
+        return;
+    QScopedValueRollback<bool> failureGuard(handlingFailure, true);
     poll.stop();
     timeout.stop();
     focusTimer.stop();
@@ -132,6 +152,9 @@ void GrblSession::fail(const QString &message) {
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
+    pauseRequested = false;
+    knownOutput = knownOffset = false;
+    overrideFeedback = false;
     version = laserMode = powerScale = knownPosition = false;
     if (serial.isOpen()) {
         serial.write("!\x18", 2);
@@ -153,9 +176,41 @@ void GrblSession::receive() {
         input.remove(0, end + 1);
         if (!s.isEmpty())
             line(s);
+        if (!connected()) {
+            input.clear();
+            return;
+        }
     }
 }
 void GrblSession::line(const QByteArray &s) {
+    if (s.contains('<') &&
+        (!s.startsWith('<') || !s.endsWith('>') || s.count('<') > 1)) {
+        QByteArray remainder = s;
+        QList<QByteArray> reports;
+        int begin;
+        while ((begin = remainder.indexOf('<')) >= 0) {
+            const int end = remainder.indexOf('>', begin);
+            if (end < 0)
+                break;
+            reports.append(remainder.mid(begin, end - begin + 1));
+            remainder.remove(begin, end - begin + 1);
+        }
+        if (!reports.isEmpty()) {
+            const bool taintedSetting = handshaking && remainder.trimmed().startsWith('$');
+            if (taintedSetting)
+                contaminatedConfiguration = true;
+            for (const auto &report : reports) {
+                line(report);
+                if (!connected())
+                    return;
+            }
+            // A numeric setting may have been interrupted in the middle of its
+            // value. Never authorize a configuration from that partial number.
+            if (!taintedSetting && !remainder.trimmed().isEmpty())
+                line(remainder.trimmed());
+            return;
+        }
+    }
     if (s.startsWith("Grbl ")) {
         version = s.startsWith("Grbl 1.1") || s.startsWith("Grbl 1.3a");
         if (!version) {
@@ -163,6 +218,7 @@ void GrblSession::line(const QByteArray &s) {
             return;
         }
         laserMode = powerScale = knownPosition = knownOffset = false;
+        configurationRetries = 0;
         handshake();
         return;
     }
@@ -180,6 +236,11 @@ void GrblSession::line(const QByteArray &s) {
                                .hasMatch();
     if (s.startsWith("$30="))
         powerScale = std::abs(s.mid(4).toDouble() - 1000) < .0001;
+    if (s.startsWith("$31=")) {
+        bool valid;
+        const double value = s.mid(4).toDouble(&valid);
+        minimumPower = valid && std::isfinite(value) && value == 0;
+    }
     if (s.startsWith("$32="))
         laserMode = s.mid(4).trimmed() == "1";
     if (s.startsWith("$22="))
@@ -212,7 +273,20 @@ void GrblSession::line(const QByteArray &s) {
         controllerState = QString::fromLatin1(fields.first()).section(':', 0, 0);
         QPointF machine, work;
         bool hasMachine = false, hasWork = false;
+        knownPosition = knownOutput = activeInputs = false;
         for (const auto &field : fields) {
+            if (field.startsWith("FS:")) {
+                const auto values = field.mid(3).split(',');
+                if (values.size() == 2) {
+                    bool validFeed, validOutput;
+                    const double feed = values[0].toDouble(&validFeed);
+                    reportedOutput = values[1].toDouble(&validOutput);
+                    knownOutput = validFeed && validOutput && std::isfinite(feed) && feed >= 0 &&
+                                  std::isfinite(reportedOutput) && reportedOutput >= 0;
+                }
+            }
+            if (field.startsWith("Pn:"))
+                activeInputs = field.size() > 3;
             if (field.startsWith("Ov:")) {
                 auto values = field.mid(3).split(',');
                 if (values.size() == 3) {
@@ -237,6 +311,11 @@ void GrblSession::line(const QByteArray &s) {
             knownPosition = true;
         }
         if (controllerState == "Alarm" || controllerState == "Door") {
+            if (executing() || firing) {
+                fail("Controller gesperrt während Auftrag: " + controllerState +
+                     ". Auftrag verworfen; Ausgangszustand prüfen.");
+                return;
+            }
             queue.clear();
             inFlight.clear();
             sent = rxBytes = 0;
@@ -244,27 +323,46 @@ void GrblSession::line(const QByteArray &s) {
             waitingAck = waitingIdle = false;
             timeout.stop();
             firing = false;
+            paused = pauseRequested = false;
             state = controllerState;
             append("Controller gesperrt: " + controllerState);
             return;
         }
-        if (waitingIdle && controllerState == "Idle") {
+        if (controllerState == "Idle" && knownOutput && reportedOutput != 0 && !firing) {
+            fail("Controller meldet Leistung im Leerlauf; Auftrag verworfen, Ausgang prüfen.");
+            return;
+        }
+        if (executing() && overrideFeedback && powerOverride > 100) {
+            fail("Leistungs-Override über 100 %; Auftrag verworfen, Ausgang prüfen.");
+            return;
+        }
+        if (waitingIdle && controllerState == "Idle" && knownPosition && knownOutput &&
+            reportedOutput == 0 && !activeInputs) {
             waitingIdle = false;
             timeout.stop();
             progress = 1;
             firing = false;
+            paused = pauseRequested = false;
             state = "Bereit";
             append("Controller meldet Idle: Auftrag abgeschlossen.");
         }
-        if (!busy() && !handshaking)
-            state = configurationValid() && knownPosition
-                        ? controllerState == "Idle" ? "Bereit" : controllerState
-                        : "GRBL-Konfiguration nicht freigegeben";
+        if (!busy() && !handshaking) {
+            if (!configurationValid())
+                state = "GRBL-Konfiguration nicht freigegeben";
+            else if (!knownPosition || !knownOutput)
+                state = "Positions-/Leistungsrückmeldung fehlt";
+            else if (activeInputs)
+                state = "Controller-Eingang aktiv";
+            else if (overrideFeedback && powerOverride > 100)
+                state = "Leistungs-Override über 100 %";
+            else
+                state = controllerState == "Idle" ? "Bereit" : controllerState;
+        }
         if (executing() && !firing && controllerState == "Hold") {
             paused = true;
             state = "Pausiert";
             timeout.stop();
-        } else if (executing() && paused && controllerState == "Run") {
+        } else if (executing() && paused && !pauseRequested && controllerState == "Run") {
             paused = false;
             state = "Läuft";
             pump();
@@ -294,10 +392,19 @@ void GrblSession::line(const QByteArray &s) {
         progress = total ? std::min(.99, double(acked) / total) : 0;
         if (queue.isEmpty()) {
             if (handshaking) {
+                if (contaminatedConfiguration) {
+                    if (configurationRetries++ == 0) {
+                        append("Verschachtelte Konfigurationsantwort; lese Einstellungen erneut.");
+                        handshake();
+                    } else
+                        fail("Konfiguration nicht eindeutig lesbar; Verbindung geschlossen.");
+                    return;
+                }
                 handshaking = false;
                 state = configurationValid() ? "Warte auf Position"
                                              : "GRBL-Konfiguration nicht freigegeben";
                 serial.write("?");
+                poll.start();
             } else {
                 waitingIdle = true;
                 serial.write("?");
@@ -374,6 +481,7 @@ void GrblSession::pause() {
     if (!connected() || !busy() || firing || handshaking)
         return;
     paused = !paused;
+    pauseRequested = paused;
     if (paused) {
         serial.write("!");
         timeout.stop();
@@ -393,6 +501,8 @@ void GrblSession::stop() {
     focusTimer.stop();
     firing = false;
     paused = false;
+    pauseRequested = false;
+    knownOutput = false;
     queue.clear();
     inFlight.clear();
     sent = rxBytes = 0;
@@ -402,6 +512,8 @@ void GrblSession::stop() {
     version = laserMode = powerScale = knownPosition = false;
     state = "Abbruch · warte auf GRBL-Neustart";
     serial.write("!\x18", 2);
+    if (!connected())
+        return;
     timeout.start();
     append("Feed Hold und Soft-Reset gesendet; keine automatische Fortsetzung.");
 }

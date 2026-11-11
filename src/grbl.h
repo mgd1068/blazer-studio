@@ -14,8 +14,8 @@ class GrblSession : public QObject {
     bool connected() const { return serial.isOpen(); }
     bool ready() const;
     bool configurationValid() const {
-        return version && laserMode && powerScale && reportMm && coordinateSystem && bedWidth &&
-               bedHeight;
+        return version && laserMode && powerScale && minimumPower && reportMm && coordinateSystem &&
+               bedWidth && bedHeight;
     }
     bool busy() const { return !queue.isEmpty() || waitingIdle || waitingAck; }
     bool executing() const { return busy() && !handshaking; }
@@ -54,6 +54,11 @@ class GrblSession : public QObject {
     bool reportMm = false, coordinateSystem = false, bedWidth = false, bedHeight = false;
     bool version = false, laserMode = false, powerScale = false, knownPosition = false,
          homing = false;
+    bool minimumPower = false, knownOutput = false, activeInputs = false;
+    double reportedOutput = 0;
+    bool contaminatedConfiguration = false, pauseRequested = false;
+    bool handlingFailure = false;
+    int configurationRetries = 0;
     QString controllerState;
     QPointF offset;
     bool knownOffset = false;

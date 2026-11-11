@@ -26,7 +26,7 @@ Projektformat **6** speichert eigene Objektwerte und [Relief-Tiefenkarten](RELIE
 
 ## Echte Verbindung
 
-Die Anbindung prüft GRBL 1.1 beziehungsweise den am Blaze X gefundenen Grbl-ESP32-Fork 1.3a, `$30=1000`, `$32=1`, Statusausgabe in mm (`$13=0`), G54 und die hinterlegten 200 × 150 mm (`$130/$131`). Sie schreibt diese Firmwareeinstellungen nicht automatisch um. Erst ein passender Leerlauf mit bekannter Arbeitsposition erlaubt einen Job.
+Die Anbindung prüft GRBL 1.1 beziehungsweise den am Blaze X gefundenen Grbl-ESP32-Fork 1.3a, `$30=1000`, `$31=0`, `$32=1`, Statusausgabe in mm (`$13=0`), G54 und die hinterlegten 200 × 150 mm (`$130/$131`). Sie schreibt diese Firmwareeinstellungen nicht automatisch um. Erst ein passender Leerlauf mit gültiger Arbeitsposition, bestätigter Nullleistung und ohne aktive gemeldete Eingänge erlaubt einen Job. Ein Status mit fehlender oder ungültiger Position/Leistung übernimmt keine frühere Freigabe.
 
 Jobübertragung verwendet Zeichenkredite: höchstens 100 Bytes stehen gleichzeitig ohne `ok` im RX-Puffer. Jede Zeile bleibt ihrer Bestätigung zugeordnet; einzelne manuelle Aktionen und die Konfigurationsabfrage bleiben sequenziell. Zusätzliche Status- und Meldungszeilen gelten nicht als Bestätigung. Nach der letzten Bestätigung wartet der Auftrag noch auf eine neue **Idle**-Meldung. Pause benutzt Feed Hold, Fortsetzen Cycle Start; Stop benutzt Feed Hold und Soft-Reset und setzt keinen Auftrag automatisch fort. Fehler, Alarm oder Kommunikationsausfall brechen die Host-Übertragung ab.
 
@@ -53,3 +53,10 @@ Das Prüfwerkzeug ist für diesen eingerichteten M3 bestimmt. Es setzt Homing un
 Protokollquellen: [GRBL Interface](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md), [GRBL Laser Mode](https://github.com/gnea/grbl/blob/master/doc/markdown/laser_mode.md), [Grbl-ESP32](https://github.com/bdring/Grbl_Esp32). Die Implementierung ist eigenständig; keine Firmwarequellen werden mitgeliefert.
 
 Zusätzlich in 0.6: freie weitere Operationen, Schnittfuge/Haltestege, Scanwinkel/Kreuzschraffur/Überlauf, Live-Overrides mit `Ov`-Status und deutsche Fehlerzusätze. [Details und Grenzen](EXPANSION.md). Erweiterte GRBL-Funktionen wurden mit Pseudoterminal-Controller geprüft; keine neue Geräteabnahme mit Emission.
+
+
+## Kommunikationsprüfung vom 12.11.2026
+
+Während der Einstellungsabfrage pausiert das Statuspolling. Werden Status und Einstellungszahl dennoch verschachtelt empfangen, wird die betroffene Konfiguration einmal vollständig neu abgefragt. Der möglicherweise abgeschnittene Wert wird nicht benutzt; ein wiederholter Konflikt trennt die Verbindung. Alarm/Door während eines aktiven Auftrags und USB-Verlust verwerfen den alten Auftrag. Nach einer neuen Verbindung erfolgt keine automatische Fortsetzung. Die Software kann bei einem unterbrochenen Kommunikationsweg keine physische Abschaltung bestätigen.
+
+Die erweiterten PTY-Prüfungen und ihre Grenzen stehen im [Prüfbericht](QA_REPORT.md); reale Ergebnisse im [Geräteprotokoll](HARDWARE_ACCEPTANCE.md). Der Laser blieb während dieser Entwicklungsrunde ausgeschaltet.

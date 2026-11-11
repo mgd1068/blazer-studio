@@ -156,3 +156,14 @@ Lokale Regression: alle zehn CTest-Programme normal sowie mit AddressSanitizer/U
 GCode setzt Leistungsänderungen während eines bereits aktiven M4-Abschnitts auf denselben G1-Block wie die zugehörige Bewegung. Dadurch unterbrechen alleinstehende S-Änderungen den GRBL-Planer zwischen Vorlauf, Arbeitsstrecke und Nachlauf nicht mehr. Initiales M4 und M5 vor Leerfahrten bleiben bestehen. Der Regressionstest wechselt 0→100→0 %, fährt mit M5 zur nächsten Zeile und prüft dort 0→50→0 %; beide Rasterzüge beginnen mit Nullleistung.
 
 Alle zehn CTest-Programme normal und mit ASan/UBSan bestanden; Leckprüfung deaktiviert (`detect_leaks=0`). Der Hardwarevergleich vom 11.11. ist gesonderte Materialevidenz, kein Teil dieser Softwareläufe. In dieser Runde kein Zugriff auf den ausgeschalteten Laser.
+
+
+## Produktionsreife T02 Kommunikation und Zustände (12.11.2026)
+
+Neue PTY-Fälle reproduzierten veraltete Startfreigaben nach ungültigen/mangelnden Statusdaten, fehlende erneute Konfigurationsabfrage bei verschachtelter Statusausgabe und eine nicht verworfene Controllerwarteschlange bei Door während eines Jobs. Der simulierte USB-Verlust deckte zusätzlich rekursive Fehlerbehandlung bis zum Stacküberlauf auf. Diese Fehler sind behoben.
+
+Bereitschaft benötigt jetzt aus derselben Statusmeldung gültige Position und bestätigte Nullleistung, bekannte Konfiguration einschließlich $31=0 und inaktive gemeldete Eingänge. Nichtnull-Leistung im Leerlauf, überhöhter gemeldeter Leistungs-Override während eines Jobs sowie Alarm/Door im aktiven Auftrag brechen ab. Verlorene Verbindungen verwerfen den Job; ein neuer Anschluss übernimmt ihn nicht. Ein Fehler kann die Best-Effort-Abschaltung nicht rekursiv erneut betreten, und Antworten hinter einem Verbindungsfehler werden nicht als neue Freigabe verbraucht. Eine verspätete Run-Meldung hebt eine ausdrücklich angeforderte Pause nicht auf.
+
+Während der sequenziellen Konfigurationsabfrage ist das Statuspolling angehalten. Verschachtelte Statusrahmen werden getrennt; ein davon betroffener Zahlenwert wird nicht zur Freigabe benutzt. Ein einmaliger sauberer Neuabruf ist erlaubt, wiederholte Verunreinigung schließt die Verbindung.
+
+25 Qt-Testfälle im GRBL-Programm bestanden; alle zehn CTest-Programme normal und mit ASan/UBSan bestanden (`detect_leaks=0`). Die neue Abschlussprüfung wartet auf gültige Position und Nullleistung; der Test synchronisiert ausdrücklich auf das Ende der Quittierungen, bevor er die fehlerhafte Idle-Meldung einspeist. Diese Softwareprüfungen ersetzen keine erneute Geräteabnahme. Es wurde kein physischer Port geöffnet.
