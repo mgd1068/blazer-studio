@@ -167,3 +167,10 @@ Bereitschaft benötigt jetzt aus derselben Statusmeldung gültige Position und b
 Während der sequenziellen Konfigurationsabfrage ist das Statuspolling angehalten. Verschachtelte Statusrahmen werden getrennt; ein davon betroffener Zahlenwert wird nicht zur Freigabe benutzt. Ein einmaliger sauberer Neuabruf ist erlaubt, wiederholte Verunreinigung schließt die Verbindung.
 
 25 Qt-Testfälle im GRBL-Programm bestanden; alle zehn CTest-Programme normal und mit ASan/UBSan bestanden (`detect_leaks=0`). Die neue Abschlussprüfung wartet auf gültige Position und Nullleistung; der Test synchronisiert ausdrücklich auf das Ende der Quittierungen, bevor er die fehlerhafte Idle-Meldung einspeist. Diese Softwareprüfungen ersetzen keine erneute Geräteabnahme. Es wurde kein physischer Port geöffnet.
+
+
+### T02 Arbeitsnullpunkt und physische Grenzen
+
+Vier neue Fehlerfälle reproduzierten, dass gültige Arbeitskoordinaten nach G54-Versatz außerhalb des realen 200×150-mm-Raums landen konnten, sowie eine Bewegungsfreigabe aus WPos ohne bekannten WCO. Der Treiber prüft nun vor dem ersten Jobbefehl sämtliche tatsächlich ausgegebenen Ziele einschließlich des bestätigten Versatzes. Jog, Rahmenfahrt und Fokusposition verwenden dieselbe physische Begrenzung. Die erste Modell-Herkunft eines Pfads wird nicht mit der tatsächlichen Startposition verwechselt; negative Versätze bleiben bei physisch gültigen Zielen möglich. Die Prüfung berücksichtigt die gesendete Drei-Nachkommastellen-Geometrie.
+
+31 GRBL-Testfälle und alle zehn Testprogramme normal sowie mit ASan/UBSan bestanden (`detect_leaks=0`). Die positiven und negativen Versatzfälle enthalten jeweils erlaubte und vollständig vor Ausgabe abgewiesene Jobs. Keine Hardwareaktion.

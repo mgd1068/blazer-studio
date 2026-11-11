@@ -46,6 +46,7 @@ class GrblSession : public QObject {
     void fail(const QString &message);
     void append(const QString &message);
     void handshake();
+    bool insideMachineBed(const QPointF &workPoint) const;
     QSerialPort serial;
     QTimer poll, timeout, focusTimer;
     QByteArray input;

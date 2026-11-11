@@ -21,6 +21,7 @@ class Controller : public QObject {
     QSocketNotifier *notifier = nullptr;
     QByteArray realtime;
     int feed = 100, power = 100;
+    QPointF machinePosition, workOffset;
     Controller() {
         int slave;
         char name[256];
@@ -141,7 +142,10 @@ class Controller : public QObject {
             QVERIFY(write(master, s.constData(), s.size()) == s.size());
     }
     void report() {
-        reply(("<" + status + "|MPos:0,0,0|WCO:0,0,0|FS:0,0" +
+        reply(("<" + status + "|MPos:" + QString::number(machinePosition.x()) + "," +
+               QString::number(machinePosition.y()) + ",0|WCO:" +
+               QString::number(workOffset.x()) + "," + QString::number(workOffset.y()) +
+               ",0|FS:0,0" +
                (withOverrides ? "|Ov:" + QString::number(feed) + ",100," + QString::number(power)
                               : QString()) +
                ">\r\n")
@@ -151,6 +155,80 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void jobBoundsIncludeWorkOffset_data() {
+        QTest::addColumn<QPointF>("offset");
+        QTest::addColumn<QPointF>("current");
+        QTest::addColumn<QRectF>("rect");
+        QTest::addColumn<bool>("allowed");
+        QTest::newRow("positive-offset-outside")
+            << QPointF(100, 75) << QPointF(100, 75) << QRectF(90, 10, 30, 20) << false;
+        QTest::newRow("positive-offset-inside")
+            << QPointF(100, 75) << QPointF(100, 75) << QRectF(10, 10, 20, 20) << true;
+        QTest::newRow("negative-offset-outside")
+            << QPointF(-20, -10) << QPointF(0, 0) << QRectF(0, 0, 10, 10) << false;
+        QTest::newRow("negative-offset-inside")
+            << QPointF(-20, -10) << QPointF(0, 0) << QRectF(30, 20, 10, 10) << true;
+    }
+    void jobBoundsIncludeWorkOffset() {
+        QFETCH(QPointF, offset);
+        QFETCH(QPointF, current);
+        QFETCH(QRectF, rect);
+        QFETCH(bool, allowed);
+        Controller c;
+        c.machinePosition = current;
+        c.workOffset = offset;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        d.setProperty("x", rect.x());
+        d.setProperty("y", rect.y());
+        d.setProperty("width", rect.width());
+        d.setProperty("height", rect.height());
+        QVERIFY(d.job().valid());
+        const auto before = c.commands.size();
+        s.start(d.job());
+        if (allowed) {
+            QVERIFY(s.busy());
+            QTRY_VERIFY(c.commands.contains("M4 S800"));
+        } else {
+            QVERIFY(!s.busy());
+            QTest::qWait(30);
+            QCOMPARE(c.commands.size(), before);
+        }
+        s.close();
+    }
+    void jogAndFrameRespectPhysicalBed() {
+        Controller c;
+        c.machinePosition = {199, 75};
+        c.workOffset = {100, 75};
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        const auto before = c.commands.size();
+        s.jog(2, 0);
+        QVERIFY(!s.busy());
+        s.frame({{"valid", true}, {"x", 190}, {"y", 10}, {"width", 5}, {"height", 5}});
+        QVERIFY(!s.busy());
+        QTest::qWait(30);
+        QCOMPARE(c.commands.size(), before);
+        s.jog(-1, 0);
+        QTRY_VERIFY(c.commands.contains("$J=G91 G21 X-1.000 Y0.000 F600"));
+    }
+    void workPositionWithoutOffsetDoesNotAuthorizeMotion() {
+        Controller c;
+        c.respondToStatus = false;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(c.commands.contains("$G"));
+        c.reply("<Idle|WPos:0,0,0|FS:0,0>\r\n");
+        QTest::qWait(30);
+        QVERIFY(!s.ready());
+        c.report();
+        QTRY_VERIFY(s.ready());
+    }
     void idleRequiresFreshValidStatus_data() {
         QTest::addColumn<QByteArray>("status");
         QTest::newRow("invalid-position") << QByteArray("<Idle|MPos:nan,0,0|FS:0,0>");

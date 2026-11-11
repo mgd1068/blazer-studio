@@ -46,10 +46,23 @@ void GrblSession::append(const QString &s) {
     emit changed();
 }
 bool GrblSession::ready() const {
-    return connected() && !handshaking && configurationValid() && knownPosition &&
+    return connected() && !handshaking && configurationValid() && knownPosition && knownOffset &&
            knownOutput && reportedOutput == 0 && !activeInputs &&
            (!overrideFeedback || powerOverride <= 100) && controllerState == "Idle" && !busy() &&
            !firing;
+}
+bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
+    if (!knownOffset || !std::isfinite(workPoint.x()) || !std::isfinite(workPoint.y()))
+        return false;
+    // Match the three-decimal coordinates actually sent in GCode. G54 changes
+    // the work origin, not the physical travel available to the machine.
+    const QPointF machinePoint{std::round(workPoint.x() * 1000) / 1000 + offset.x(),
+                               std::round(workPoint.y() * 1000) / 1000 + offset.y()};
+    constexpr double epsilon = .0000001;
+    return std::isfinite(machinePoint.x()) && std::isfinite(machinePoint.y()) &&
+           machinePoint.x() >= -epsilon && machinePoint.y() >= -epsilon &&
+           machinePoint.x() <= Geometry::bedWidth + epsilon &&
+           machinePoint.y() <= Geometry::bedHeight + epsilon;
 }
 bool GrblSession::open(const QString &port) {
     if (port.isEmpty() || connected())
@@ -349,8 +362,8 @@ void GrblSession::line(const QByteArray &s) {
         if (!busy() && !handshaking) {
             if (!configurationValid())
                 state = "GRBL-Konfiguration nicht freigegeben";
-            else if (!knownPosition || !knownOutput)
-                state = "Positions-/Leistungsrückmeldung fehlt";
+            else if (!knownPosition || !knownOffset || !knownOutput)
+                state = "Position, Nullpunkt oder Leistung nicht bestätigt";
             else if (activeInputs)
                 state = "Controller-Eingang aktiv";
             else if (overrideFeedback && powerOverride > 100)
@@ -467,14 +480,21 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     return connected() && busy();
 }
 void GrblSession::start(const JobPlan &job) {
-    if (position.x() < 0 || position.y() < 0 || position.x() > 200 || position.y() > 150) {
-        append("Aktuelle Arbeitsposition außerhalb des Arbeitsraums; Nullpunkt prüfen.");
+    if (!insideMachineBed(position)) {
+        append("Aktuelle Maschinenposition oder Arbeitsnullpunkt nicht freigegeben.");
         return;
     }
     if (!job.valid()) {
         append(job.errors.join("; "));
         return;
     }
+    // Only targets are emitted. The first move's model origin is not the
+    // current physical start position, which was checked above.
+    for (const auto &move : job.moves)
+        if (!insideMachineBed(move.to)) {
+            append("Auftrag mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
+            return;
+        }
     commands(job.gcode(), true);
 }
 void GrblSession::pause() {
@@ -518,10 +538,9 @@ void GrblSession::stop() {
     append("Feed Hold und Soft-Reset gesendet; keine automatische Fortsetzung.");
 }
 void GrblSession::jog(double dx, double dy) {
-    auto target = position + QPointF(dx, dy);
-    if (position.x() < 0 || position.y() < 0 || position.x() > 200 || position.y() > 150 ||
-        !std::isfinite(dx) || !std::isfinite(dy) || target.x() < 0 || target.y() < 0 ||
-        target.x() > 200 || target.y() > 150) {
+    const auto target = position + QPointF(n(dx).toDouble(), n(dy).toDouble());
+    if (!std::isfinite(dx) || !std::isfinite(dy) || !insideMachineBed(position) ||
+        !insideMachineBed(target)) {
         append("Bewegung außerhalb des Arbeitsraums abgelehnt.");
         return;
     }
@@ -558,6 +577,12 @@ void GrblSession::frame(const QVariantMap &b) {
         append("Ungültige Rahmenfahrt.");
         return;
     }
+    if (!insideMachineBed(position) || !insideMachineBed(r.topLeft()) ||
+        !insideMachineBed(r.topRight()) || !insideMachineBed(r.bottomRight()) ||
+        !insideMachineBed(r.bottomLeft())) {
+        append("Rahmenfahrt mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
+        return;
+    }
     QStringList lines{"M5", "G21", "G90", "G54"};
     for (auto p : {r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft(), r.topLeft()})
         lines << "G0 X" + n(p.x()) + " Y" + n(p.y());
@@ -573,7 +598,7 @@ void GrblSession::focus(bool on) {
         return;
     // A stationary GRBL M3 output has no independent watchdog. Host deadline and
     // release reset it; communication loss cannot guarantee output shutdown.
-    if (position.x() < 0 || position.y() < 0 || position.x() > 200 || position.y() > 150)
+    if (!insideMachineBed(position))
         return;
     // Send the finite pulse and its shutdown together, within the 128-byte RX buffer.
     if (!commands({"M5\nG21\nG90\nG1 F1 M3 S20\nG4 P0.2\nM5 S0\nG0"}))

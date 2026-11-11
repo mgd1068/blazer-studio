@@ -60,3 +60,6 @@ Zusätzlich in 0.6: freie weitere Operationen, Schnittfuge/Haltestege, Scanwinke
 Während der Einstellungsabfrage pausiert das Statuspolling. Werden Status und Einstellungszahl dennoch verschachtelt empfangen, wird die betroffene Konfiguration einmal vollständig neu abgefragt. Der möglicherweise abgeschnittene Wert wird nicht benutzt; ein wiederholter Konflikt trennt die Verbindung. Alarm/Door während eines aktiven Auftrags und USB-Verlust verwerfen den alten Auftrag. Nach einer neuen Verbindung erfolgt keine automatische Fortsetzung. Die Software kann bei einem unterbrochenen Kommunikationsweg keine physische Abschaltung bestätigen.
 
 Die erweiterten PTY-Prüfungen und ihre Grenzen stehen im [Prüfbericht](QA_REPORT.md); reale Ergebnisse im [Geräteprotokoll](HARDWARE_ACCEPTANCE.md). Der Laser blieb während dieser Entwicklungsrunde ausgeschaltet.
+
+
+Arbeitskoordinaten werden vor Ausgabe mit dem bestätigten G54-Versatz in Maschinenkoordinaten geprüft. Ein im Editor gültiger Job kann nach Verschieben des Arbeitsnullpunkts physisch außerhalb des 200×150-mm-Raums liegen; dann wird der ganze Job vor dem ersten Befehl abgelehnt. Dieselbe Prüfung gilt für Schrittbewegung, Rahmenfahrt und Fokusposition. WPos allein ohne bestätigten Versatz gibt keine Bewegung frei.
