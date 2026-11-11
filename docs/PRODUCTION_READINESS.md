@@ -14,8 +14,8 @@ Der Nutzer hat den Laser für die Nacht ausgeschaltet. Bis zur erneuten beaufsic
 
 | Thema | Arbeit und überprüfbares Ergebnis | Voraussetzung | Stand |
 |---|---|---|---|
-| T01 Ausgabe und Leistungswechsel | Inline-S-Fix einschließlich Nullleistung und Unterbrechung durch Leerfahrt prüfen; normale und ASan/UBSan-Regression bestehen; Änderung als eigene Revision sichern. | Vorhandene Reproduktion und Materialversuche | In Arbeit |
-| T02 Kommunikation und Zustände | Empfang fragmentierter/verschachtelter Statusdaten, Fehler, Pause/Stop, Reset und neue Verbindung mit PTY prüfen; bei Fehlern keine automatische Jobfortsetzung und keine Verwendung veralteter Freigaben. Gefundene Fehler mit Regression beheben. | T01 | Offen |
+| T01 Ausgabe und Leistungswechsel | Inline-S-Fix einschließlich Nullleistung und Unterbrechung durch Leerfahrt prüfen; normale und ASan/UBSan-Regression bestehen; Änderung als eigene Revision sichern. | Vorhandene Reproduktion und Materialversuche | Softwareprüfung bestanden |
+| T02 Kommunikation und Zustände | Empfang fragmentierter/verschachtelter Statusdaten, Fehler, Pause/Stop, Reset und neue Verbindung mit PTY prüfen; bei Fehlern keine automatische Jobfortsetzung und keine Verwendung veralteter Freigaben. Gefundene Fehler mit Regression beheben. | T01 | In Arbeit |
 | T03 Materialdaten und Versuchsnachweise | Herstellerdaten unverändert erhalten; reale Ergebnisse, fehlende Durchtrennung und Gegenlichtbefund dokumentieren; historische Aufbauangaben durch aktuelle, bedingte Testanweisungen ersetzen. | T02 | Offen |
 | T04 Vollständiger App-Ablauf | Normaler Einstieg, Import, Bearbeitung, Profilübernahme, Vorschau, GCode, Speichern/Wiederöffnen und Simulatorlauf über die echte Oberfläche prüfen; veraltete Jobs dürfen nicht starten. | T03 | Offen |
 | T05 Funktionsabnahme F01–F53 | Jede Familie mit Code-/Bedienungsnachweisen, Einschränkungen und offenem Abnahmefall verknüpfen; zugesagte Lücken systematisch abarbeiten. Keine vollständige Gleichwertigkeit aus vorhandenen Schaltern oder wenigen Tests ableiten. | T04 | Offen |
@@ -41,3 +41,5 @@ Für den ausdrücklich zugesagten Produktumfang müssen die zugehörigen Funktio
 ## Arbeitsjournal
 
 - 12.11.2026: Plan angelegt; isolierter Arbeitszweig `codex/production-readiness`. Nutzer schläft, Laser ausgeschaltet. Start mit T01, keine Hardwarezugriffe.
+
+- 12.11.2026, T01: Inline-S-Ausgabe einschließlich Nullleistung und Rasterneustart nach M5 geprüft. Alle zehn CTest-Programme normal und mit ASan/UBSan bestanden (`detect_leaks=0`; keine Leckfreiheitszusage). Keine Geräteverbindung. Nächstes Thema: Kommunikation und Zustände.

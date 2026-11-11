@@ -149,3 +149,10 @@ Das Paketprüfskript installiert nur Laufzeitabhängigkeiten auf einer frischen 
 Reale Hardware in diesem Schritt: M8 als Aux-only mit Laser-Aus quittiert, Nutzer bestätigt Lüfter weiterhin aus; M9 stellt Aux wieder zurück, READY bei X0/Y0. Keine Bewegung oder Emission. Kraftpapier ca. 100×100 mm mittig und maximal 5 % Sollleistung sind verbindlich für spätere Tests. Vorbereiteter 5-mm-Testauftrag wird softwareseitig auf Leistungsgrenze und Lage geprüft, nicht an den Laser gesendet. Gravur-, Schnitt- und allgemeine Reliefabnahme bleiben offen. [Anleitung und Testprotokoll](beta/START.md).
 
 Lokale Regression: alle zehn CTest-Programme normal sowie mit AddressSanitizer/UndefinedBehaviorSanitizer bestanden (`detect_leaks=0`, keine Leckfreiheitszusage). Erststart und Hilfe zusätzlich bei 1180×760 dunkel visuell geprüft. Die neuen Bedienungstests liefern keine QML-Laufzeitwarnungen. Die endgültige Paketrevision und ihre unabhängigen CI-Ergebnisse ergeben sich aus `BUILD-MANIFEST.json` und den GitHub-Actions-Läufen des jeweiligen Kandidaten.
+
+
+## Produktionsreife T01 Leistungswechsel auf Bewegungsblöcken (12.11.2026)
+
+GCode setzt Leistungsänderungen während eines bereits aktiven M4-Abschnitts auf denselben G1-Block wie die zugehörige Bewegung. Dadurch unterbrechen alleinstehende S-Änderungen den GRBL-Planer zwischen Vorlauf, Arbeitsstrecke und Nachlauf nicht mehr. Initiales M4 und M5 vor Leerfahrten bleiben bestehen. Der Regressionstest wechselt 0→100→0 %, fährt mit M5 zur nächsten Zeile und prüft dort 0→50→0 %; beide Rasterzüge beginnen mit Nullleistung.
+
+Alle zehn CTest-Programme normal und mit ASan/UBSan bestanden; Leckprüfung deaktiviert (`detect_leaks=0`). Der Hardwarevergleich vom 11.11. ist gesonderte Materialevidenz, kein Teil dieser Softwareläufe. In dieser Runde kein Zugriff auf den ausgeschalteten Laser.

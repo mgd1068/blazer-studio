@@ -880,12 +880,18 @@ QStringList JobPlan::gcode(const Cancellation &cancel) const {
             }
             lines << "G0 X" + num(m.to.x()) + " Y" + num(m.to.y());
         } else {
-            if (!emitting || m.power != lastPower) {
+            if (!emitting) {
                 lines << "M4 S" + QString::number(qRound(m.power * 10));
                 emitting = true;
                 lastPower = m.power;
             }
             auto line = "G1 X" + num(m.to.x()) + " Y" + num(m.to.y());
+            // A standalone S change drains GRBL's planner. Keep power changes on
+            // their motion block so raster overscan remains a continuous move.
+            if (m.power != lastPower) {
+                line += " S" + QString::number(qRound(m.power * 10));
+                lastPower = m.power;
+            }
             if (m.speed != lastFeed) {
                 line += " F" + num(m.speed);
                 lastFeed = m.speed;
