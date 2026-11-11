@@ -15,8 +15,8 @@ Der Nutzer hat den Laser für die Nacht ausgeschaltet. Bis zur erneuten beaufsic
 | Thema | Arbeit und überprüfbares Ergebnis | Voraussetzung | Stand |
 |---|---|---|---|
 | T01 Ausgabe und Leistungswechsel | Inline-S-Fix einschließlich Nullleistung und Unterbrechung durch Leerfahrt prüfen; normale und ASan/UBSan-Regression bestehen; Änderung als eigene Revision sichern. | Vorhandene Reproduktion und Materialversuche | Softwareprüfung bestanden |
-| T02 Kommunikation und Zustände | Empfang fragmentierter/verschachtelter Statusdaten, Fehler, Pause/Stop, Reset und neue Verbindung mit PTY prüfen; bei Fehlern keine automatische Jobfortsetzung und keine Verwendung veralteter Freigaben. Gefundene Fehler mit Regression beheben. | T01 | In Arbeit |
-| T03 Materialdaten und Versuchsnachweise | Herstellerdaten unverändert erhalten; reale Ergebnisse, fehlende Durchtrennung und Gegenlichtbefund dokumentieren; historische Aufbauangaben durch aktuelle, bedingte Testanweisungen ersetzen. | T02 | Offen |
+| T02 Kommunikation und Zustände | Empfang fragmentierter/verschachtelter Statusdaten, Fehler, Pause/Stop, Reset und neue Verbindung mit PTY prüfen; bei Fehlern keine automatische Jobfortsetzung und keine Verwendung veralteter Freigaben. Gefundene Fehler mit Regression beheben. | T01 | Softwareprüfung bestanden |
+| T03 Materialdaten und Versuchsnachweise | Herstellerdaten unverändert erhalten; reale Ergebnisse, fehlende Durchtrennung und Gegenlichtbefund dokumentieren; historische Aufbauangaben durch aktuelle, bedingte Testanweisungen ersetzen. | T02 | In Arbeit |
 | T04 Vollständiger App-Ablauf | Normaler Einstieg, Import, Bearbeitung, Profilübernahme, Vorschau, GCode, Speichern/Wiederöffnen und Simulatorlauf über die echte Oberfläche prüfen; veraltete Jobs dürfen nicht starten. | T03 | Offen |
 | T05 Funktionsabnahme F01–F53 | Jede Familie mit Code-/Bedienungsnachweisen, Einschränkungen und offenem Abnahmefall verknüpfen; zugesagte Lücken systematisch abarbeiten. Keine vollständige Gleichwertigkeit aus vorhandenen Schaltern oder wenigen Tests ableiten. | T04 | Offen |
 | T06 Reale Betriebsabnahme | Beaufsichtigt Pause/Fortsetzen, Stop, USB-/KVM-Verlust, Wiederverbindung und Schutzkontakt prüfen. Nur dokumentierte Bedienhandlungen; keine Umgehung von Alarmen oder Interlocks. Ergebnis je Fall eintragen. | T02, T04; Nutzer anwesend, Gerät bereit | Wartet auf Gerätebereitschaft |
@@ -47,3 +47,5 @@ Für den ausdrücklich zugesagten Produktumfang müssen die zugehörigen Funktio
 - 12.11.2026, T02: Empfangs-/Freigabe-/Abbruchfälle und USB-Fehlerrekursion behoben; 25 GRBL-Fälle sowie alle zehn Programme normal/ASan bestanden. Anschließend Arbeitsnullpunkt gegen physische Bewegungsgrenzen prüfen, bevor das Kommunikationsthema geschlossen wird. Reale Wiederabnahme bleibt T06.
 
 - 12.11.2026, T02: Physische Zielgrenzen einschließlich G54 ergänzt; 31 GRBL-Fälle und alle zehn Programme normal/ASan bestanden. Nächster Randfall: Nullpunktwechsel darf keine vor dessen Abschluss empfangene Offsetmeldung wiederverwenden.
+
+- 12.11.2026, T02 abgeschlossen für Software: Nullpunktwechsel gegen alte WCO-Meldung abgesichert; 32 GRBL-Fälle normal/ASan grün. Der vollständige vorherige Grenzprüfungsstand hatte zehn grüne Programme in beiden Varianten. T03 beginnt; T06 bleibt echte Geräteabnahme.

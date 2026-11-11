@@ -59,6 +59,7 @@ class GrblSession : public QObject {
     double reportedOutput = 0;
     bool contaminatedConfiguration = false, pauseRequested = false;
     bool handlingFailure = false;
+    bool zeroPending = false;
     int configurationRetries = 0;
     QString controllerState;
     QPointF offset;

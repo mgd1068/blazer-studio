@@ -63,3 +63,5 @@ Die erweiterten PTY-Prüfungen und ihre Grenzen stehen im [Prüfbericht](QA_REPO
 
 
 Arbeitskoordinaten werden vor Ausgabe mit dem bestätigten G54-Versatz in Maschinenkoordinaten geprüft. Ein im Editor gültiger Job kann nach Verschieben des Arbeitsnullpunkts physisch außerhalb des 200×150-mm-Raums liegen; dann wird der ganze Job vor dem ersten Befehl abgelehnt. Dieselbe Prüfung gilt für Schrittbewegung, Rahmenfahrt und Fokusposition. WPos allein ohne bestätigten Versatz gibt keine Bewegung frei.
+
+Nach **Arbeitsnullpunkt hier setzen** muss ein neuer Offset nach Abschluss der G10/G54-Befehle gemeldet sein. Ein während der Befehlsfolge eingetroffener alter WCO-Wert gibt keine Folgebewegung frei.

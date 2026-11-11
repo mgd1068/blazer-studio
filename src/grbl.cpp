@@ -79,7 +79,7 @@ bool GrblSession::open(const QString &port) {
     }
     input.clear();
     version = laserMode = powerScale = knownPosition = knownOffset = false;
-    minimumPower = knownOutput = activeInputs = pauseRequested = false;
+    minimumPower = knownOutput = activeInputs = pauseRequested = zeroPending = false;
     contaminatedConfiguration = false;
     configurationRetries = 0;
     overrideFeedback = false;
@@ -111,7 +111,7 @@ void GrblSession::handshake() {
     timeout.stop();
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
     laserMode = powerScale = minimumPower = knownPosition = knownOffset = knownOutput = false;
-    activeInputs = pauseRequested = contaminatedConfiguration = false;
+    activeInputs = pauseRequested = contaminatedConfiguration = zeroPending = false;
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
@@ -135,7 +135,7 @@ void GrblSession::close() {
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
-    pauseRequested = false;
+    pauseRequested = zeroPending = false;
     knownPosition = knownOffset = knownOutput = false;
     overrideFeedback = false;
     if (serial.isOpen()) {
@@ -165,7 +165,7 @@ void GrblSession::fail(const QString &message) {
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
-    pauseRequested = false;
+    pauseRequested = zeroPending = false;
     knownOutput = knownOffset = false;
     overrideFeedback = false;
     version = laserMode = powerScale = knownPosition = false;
@@ -349,7 +349,7 @@ void GrblSession::line(const QByteArray &s) {
             fail("Leistungs-Override über 100 %; Auftrag verworfen, Ausgang prüfen.");
             return;
         }
-        if (waitingIdle && controllerState == "Idle" && knownPosition && knownOutput &&
+        if (waitingIdle && controllerState == "Idle" && knownPosition && knownOffset && knownOutput &&
             reportedOutput == 0 && !activeInputs) {
             waitingIdle = false;
             timeout.stop();
@@ -419,6 +419,12 @@ void GrblSession::line(const QByteArray &s) {
                 serial.write("?");
                 poll.start();
             } else {
+                if (zeroPending) {
+                    // A report queued before G10 completed may still describe
+                    // the old work origin. Require a later WCO confirmation.
+                    knownPosition = knownOffset = false;
+                    zeroPending = false;
+                }
                 waitingIdle = true;
                 serial.write("?");
                 if (!paused)
@@ -521,7 +527,7 @@ void GrblSession::stop() {
     focusTimer.stop();
     firing = false;
     paused = false;
-    pauseRequested = false;
+    pauseRequested = zeroPending = false;
     knownOutput = false;
     queue.clear();
     inFlight.clear();
@@ -566,6 +572,7 @@ void GrblSession::home() {
 }
 void GrblSession::zero() {
     if (commands({"M5", "G10 L20 P1 X0 Y0", "G54"})) {
+        zeroPending = true;
         knownPosition = false;
         knownOffset = false;
     }

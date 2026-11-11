@@ -229,6 +229,31 @@ class GrblTest : public QObject {
         c.report();
         QTRY_VERIFY(s.ready());
     }
+    void zeroRequiresOffsetReportedAfterCommandCompletion() {
+        Controller c;
+        c.machinePosition = {100, 75};
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        c.autoAck = c.respondToStatus = false;
+        s.zero();
+        QTRY_VERIFY(c.commands.contains("M5"));
+        c.report(); // Old WCO arriving before the G10 operation.
+        QTest::qWait(30);
+        c.reply("ok\r\n");
+        QTRY_VERIFY(c.commands.contains("G10 L20 P1 X0 Y0"));
+        c.reply("ok\r\n");
+        QTRY_VERIFY(c.commands.contains("G54"));
+        c.reply("ok\r\n");
+        QTRY_COMPARE(s.progress, .99);
+        c.reply("<Idle|MPos:100,75,0|FS:0,0>\r\n");
+        QTest::qWait(30);
+        QVERIFY(!s.ready());
+        c.workOffset = {100, 75};
+        c.report();
+        QTRY_VERIFY(s.ready());
+        QCOMPARE(s.position, QPointF(0, 0));
+    }
     void idleRequiresFreshValidStatus_data() {
         QTest::addColumn<QByteArray>("status");
         QTest::newRow("invalid-position") << QByteArray("<Idle|MPos:nan,0,0|FS:0,0>");

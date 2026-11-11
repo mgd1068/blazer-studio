@@ -174,3 +174,10 @@ Während der sequenziellen Konfigurationsabfrage ist das Statuspolling angehalte
 Vier neue Fehlerfälle reproduzierten, dass gültige Arbeitskoordinaten nach G54-Versatz außerhalb des realen 200×150-mm-Raums landen konnten, sowie eine Bewegungsfreigabe aus WPos ohne bekannten WCO. Der Treiber prüft nun vor dem ersten Jobbefehl sämtliche tatsächlich ausgegebenen Ziele einschließlich des bestätigten Versatzes. Jog, Rahmenfahrt und Fokusposition verwenden dieselbe physische Begrenzung. Die erste Modell-Herkunft eines Pfads wird nicht mit der tatsächlichen Startposition verwechselt; negative Versätze bleiben bei physisch gültigen Zielen möglich. Die Prüfung berücksichtigt die gesendete Drei-Nachkommastellen-Geometrie.
 
 31 GRBL-Testfälle und alle zehn Testprogramme normal sowie mit ASan/UBSan bestanden (`detect_leaks=0`). Die positiven und negativen Versatzfälle enthalten jeweils erlaubte und vollständig vor Ausgabe abgewiesene Jobs. Keine Hardwareaktion.
+
+
+### T02 Frischer Offset nach Nullpunktwechsel
+
+Eine weitere PTY-Reproduktion zeigte, dass eine vor G10 eingetroffene WCO-Meldung nach dessen Abschluss erneut zur Freigabe benutzt werden konnte. Nach den letzten Quittierungen des Nullpunktwechsels werden Position und Offset deshalb nochmals ungültig. Erst eine spätere bestätigte Offset-/Positionsmeldung erlaubt den Abschluss und neue Bewegungen. Stop, Fehler, neuer Anschluss und Handshake verwerfen die offene Nullpunktänderung.
+
+Alle 32 GRBL-Testfälle normal und mit ASan/UBSan bestanden. Die anderen neun Programme waren unmittelbar zuvor beim vollständigen T02-Grenzprüfungsstand normal und mit Sanitizern grün; ein vollständiger Kandidatenlauf folgt nach den nächsten Änderungen. Kein physischer Gerätezugriff.
