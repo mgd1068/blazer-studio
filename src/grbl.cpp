@@ -514,7 +514,16 @@ void GrblSession::start(const JobPlan &job) {
             append("Auftrag mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
             return;
         }
-    commands(job.gcode(), true);
+    const auto program = job.encodedProgram();
+    if (!program.valid() || program.driverId() != m_deviceProfile.driverId() ||
+        program.transport() != m_deviceProfile.transport() ||
+        program.mediaType() != "text/x-gcode" ||
+        program.profileFingerprint() != m_deviceProfile.outputFingerprint()) {
+        append(program.errors().isEmpty() ? QString("Kein passender GRBL-Ausgabevertrag.")
+                                          : program.errors().join("; "));
+        return;
+    }
+    commands(program.gcodeLines(), true);
 }
 void GrblSession::pause() {
     if (!connected() || !busy() || firing || handshaking)

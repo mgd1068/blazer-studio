@@ -163,6 +163,29 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void changedMovesCannotSendAnOlderCachedProgram() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        auto plan = document.job();
+        plan.cacheCommands();
+        QVERIFY(plan.cachedCommands().contains("M4 S800"));
+        for (qsizetype index = 0; index < plan.moves.size(); ++index) {
+            auto move = plan.moves[index];
+            if (!move.rapid) {
+                move.power = 20;
+                plan.moves.replace(index, move);
+            }
+        }
+        QVERIFY(plan.cachedCommands().isEmpty());
+        session.start(plan);
+        QTRY_VERIFY(controller.commands.contains("M4 S200"));
+        QVERIFY(!controller.commands.contains("M4 S800"));
+    }
     void connectedMachinePreventsProjectProfileReplacement() {
         Controller controller;
         Document document;
@@ -240,7 +263,8 @@ class GrblTest : public QObject {
             auto plan = JobPlanner::build(input);
             QVERIFY2(plan.valid(), qPrintable(plan.errors.join(";")));
             plan.cacheCommands();
-            QVERIFY(!plan.cachedCommands().isEmpty());
+            QCOMPARE(!plan.cachedCommands().isEmpty(),
+                     ControllerAdapters::outputError(*profile).isEmpty());
             const auto before = controller.commands.size();
             session.start(plan);
             QTest::qWait(10);

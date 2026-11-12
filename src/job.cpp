@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <cmath>
 namespace {
-constexpr int maxMoves = 500000;
+constexpr int maxMoves = JobPlan::maximumMoves;
 class Capture : public QPaintEngine {
   public:
     Capture() : QPaintEngine(QPaintEngine::AllFeatures) {}
@@ -253,11 +253,6 @@ QPainterPath svgGlobalClip(const QByteArray &bytes, const QRectF &target, bool &
     painter.end();
     return device.engine.area;
 }
-QString num(double n) {
-    if (std::abs(n) < .0005)
-        n = 0;
-    return QString::number(n, 'f', 3);
-}
 } // namespace
 QPainterPath JobPlanner::geometry(const Artwork &a, QString &error, bool fill) {
     QPainterPath p;
@@ -329,9 +324,8 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     };
     if (isCancelled(cancel))
         return aborted();
-    const auto profileError = DeviceBackends::grblOutputError(d.deviceProfile);
-    if (!profileError.isEmpty()) {
-        job.errors = {profileError};
+    if (!d.deviceProfile.declares("motion-xy")) {
+        job.errors = {"Das Profil beschreibt keine XY-Bewegungsplanung."};
         return job;
     }
     if (bed.width() > Geometry::coordinateLimit || bed.height() > Geometry::coordinateLimit) {
@@ -356,6 +350,11 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     auto add = [&](QPointF point, double feed, double power, int layer, bool rapid, int slice = 0) {
         if (isCancelled(cancel))
             return false;
+        if (!std::isfinite(feed) || feed < 1 || feed > 100000 || !std::isfinite(power) ||
+            power < 0 || power > 100) {
+            job.errors << "Ungültiger physischer Vorschub oder Prozentwert.";
+            return false;
+        }
         if (job.moves.size() >= maxMoves) {
             if (!job.errors.contains("Job überschreitet 500000 Segmente."))
                 job.errors << "Job überschreitet 500000 Segmente.";
@@ -863,69 +862,12 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     }
     return job;
 }
-QStringList JobPlan::gcode(const Cancellation &cancel) const {
-    if (isCancelled(cancel) || !DeviceBackends::grblOutputError(m_deviceProfile).isEmpty())
-        return {};
-    const double powerScale = m_deviceProfile.driverSettings()["powerScale"].toDouble();
-    if (valid() && !m_commands.isEmpty())
-        return m_commands;
-    if (!valid())
-        return {};
-    QStringList lines{"M5",
-                      "(Blazer Studio: GRBL laser mode, $30=" +
-                          QString::number(powerScale, 'f', 0) + ", $32=1, G54)",
-                      "G21",
-                      "G90",
-                      "G54",
-                      "G17",
-                      "G94",
-                      "S0"};
-    bool emitting = false;
-    double lastPower = -1, lastFeed = -1;
-    int lastSlice = 0;
-    for (const auto &m : moves) {
-        if (isCancelled(cancel))
-            return {};
-        if (m.slice != 0 && m.slice != lastSlice) {
-            lines << (m.slice > 0 ? "(Relief slice " : "(Relief cleanup after ") +
-                         QString::number(std::abs(m.slice)) + ")";
-            lastSlice = m.slice;
-        }
-        if (m.rapid) {
-            if (emitting) {
-                lines << "M5";
-                emitting = false;
-            }
-            lines << "G0 X" + num(m.to.x()) + " Y" + num(m.to.y());
-        } else {
-            if (!emitting) {
-                lines << "M4 S" + QString::number(qRound64(m.power * powerScale / 100.));
-                emitting = true;
-                lastPower = m.power;
-            }
-            auto line = "G1 X" + num(m.to.x()) + " Y" + num(m.to.y());
-            // A standalone S change drains GRBL's planner. Keep power changes on
-            // their motion block so raster overscan remains a continuous move.
-            if (m.power != lastPower) {
-                line += " S" + QString::number(qRound64(m.power * powerScale / 100.));
-                lastPower = m.power;
-            }
-            if (m.speed != lastFeed) {
-                line += " F" + num(m.speed);
-                lastFeed = m.speed;
-            }
-            lines << line;
-        }
-    }
-    lines << "M5 S0" << "G0";
-    return lines;
-}
-void JobPlan::cacheCommands(const Cancellation &cancel) {
-    m_commands.clear();
-    m_commands = gcode(cancel);
-}
 QVariantMap JobPlan::summary() const {
-    return {{"deviceId", m_deviceProfile.id()},
+    const auto outputError = ControllerAdapters::outputError(m_deviceProfile);
+    return {{"outputSupported", outputError.isEmpty()},
+            {"outputError", outputError},
+            {"geometryValid", valid()},
+            {"deviceId", m_deviceProfile.id()},
             {"outputFingerprint", QString::fromLatin1(m_deviceProfile.outputFingerprint())},
             {"valid", valid()},
             {"errors", errors},
@@ -939,9 +881,8 @@ QVariantMap JobPlan::summary() const {
 JobPlan JobPlanner::materialTest(double minSpeed, double maxSpeed, double minPower, double maxPower,
                                  int steps, const DeviceProfile &profile) {
     JobPlan job(profile);
-    const auto profileError = DeviceBackends::grblOutputError(profile);
-    if (!profileError.isEmpty()) {
-        job.errors = {profileError};
+    if (!profile.declares("motion-xy")) {
+        job.errors = {"Das Profil beschreibt keine XY-Bewegungsplanung."};
         return job;
     }
     if (!std::isfinite(minSpeed) || !std::isfinite(maxSpeed) || !std::isfinite(minPower) ||

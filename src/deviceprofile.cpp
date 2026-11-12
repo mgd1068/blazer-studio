@@ -1,4 +1,5 @@
 #include "deviceprofile.h"
+#include "controlleradapter.h"
 #include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -206,45 +207,15 @@ QVariantMap DeviceProfile::legacyUiProperties() const {
         result[i.key()] = i.value();
     return result.toVariantMap();
 }
-QString DeviceBackends::grblOutputError(const DeviceProfile &profile) {
-    if (profile.driverId() != "grbl-serial" || profile.transport() != "serial")
-        return "Für dieses Profil ist kein GRBL-Ausgabeadapter vorhanden.";
-    const auto scale = profile.driverSettings()["powerScale"];
-    if (!number(scale, 1, 1000000000) || std::floor(scale.toDouble()) != scale.toDouble())
-        return "GRBL-Ausgabe benötigt eine ganzzahlige Leistungsskala von 1 bis 1000000000.";
-    if (!profile.declares("motion-xy") || !profile.declares("dynamic-power"))
-        return "Der vorhandene GRBL-Ausgabeadapter benötigt XY und dynamische Leistung.";
-    return {};
-}
 std::optional<DeviceProfile> DeviceBackends::projectProfile(const DeviceProfile &profile,
                                                             QString &error) {
-    auto fail = [&](QString message) -> std::optional<DeviceProfile> {
-        error = std::move(message);
-        return {};
-    };
-    if (profile.driverId() != "grbl-serial" || profile.transport() != "serial")
-        return fail("Für diesen Controller ist noch kein Projektprofilschema eingebunden.");
-    const auto settings = profile.driverSettings();
-    if (!keys(settings, {"baudRate", "powerScale", "focusPower", "zEnabled",
-                         "homeOnStartupConfigured", "originCode"}) ||
-        !number(settings["baudRate"], 1200, 4000000) ||
-        std::floor(settings["baudRate"].toDouble()) != settings["baudRate"].toDouble() ||
-        !number(settings["focusPower"], 0, 100) || settings["zEnabled"] != false ||
-        !settings["homeOnStartupConfigured"].isBool() || settings["originCode"] != 0 ||
-        !grblOutputError(profile).isEmpty())
-        return fail("Projektprofil benötigt bekannte GRBL-XY-Ausgabeparameter und Ursprung links "
-                    "unten; keine Anschluss- oder Zugangsdaten.");
-    if (profile.workArea().width() > 2000 || profile.workArea().height() > 2000)
-        return fail("Der aktuelle Editor unterstützt Arbeitsflächen bis 2000 × 2000 mm.");
-    auto data = profile.toJson();
-    data["provenance"] = QJsonObject{};
-    return DeviceProfile::parse(QJsonDocument(data).toJson(), error);
+    return ControllerAdapters::projectProfile(profile, error);
 }
 QString DeviceBackends::runtimeSupportError(const DeviceProfile &profile) {
     if (profile.driverId() != "grbl-serial")
         return "Für diesen Controller ist noch kein aktiver Treiber eingebunden.";
     if (profile.outputFingerprint() != DeviceProfile::m3Reference().outputFingerprint())
-        return "Dieses Profil ist noch nicht durchgängig mit Editor, Planung und Treiber "
-               "verbunden; nur der bisherige M3-Laufzeitvertrag ist freigegeben.";
+        return "Für dieses Profil ist noch keine reale Geräteanbindung freigegeben; "
+               "aktuell gilt ausschließlich der bisherige M3-Laufzeitvertrag.";
     return {};
 }

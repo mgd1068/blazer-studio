@@ -1476,7 +1476,14 @@ bool Document::exportGcode(const QUrl &url) {
         notify(job().errors.join("\n"));
         return false;
     }
-    const auto bytes = (job().gcode().join("\n") + "\n").toUtf8();
+    const auto program = job().encodedProgram();
+    if (!program.valid() || program.mediaType() != "text/x-gcode") {
+        notify(program.errors().isEmpty()
+                   ? QString("Für dieses Profil ist kein GCode-Export verfügbar.")
+                   : program.errors().join("; "));
+        return false;
+    }
+    const auto bytes = program.payload();
     QSaveFile f(url.toLocalFile());
     if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size() || !f.commit()) {
         notify("GCode konnte nicht gespeichert werden.");
@@ -1669,7 +1676,14 @@ bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSp
             .arg(maxSpeed)
             .arg(minPower)
             .arg(maxPower);
-    auto bytes = (guide + plan.gcode().join("\n") + "\n").toUtf8();
+    const auto program = plan.encodedProgram();
+    if (!program.valid() || program.mediaType() != "text/x-gcode") {
+        notify(program.errors().isEmpty()
+                   ? QString("Für dieses Profil ist kein GCode-Export verfügbar.")
+                   : program.errors().join("; "));
+        return false;
+    }
+    auto bytes = guide.toUtf8() + program.payload();
     QSaveFile file(url.toLocalFile());
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
         notify("Materialtest konnte nicht gespeichert werden.");

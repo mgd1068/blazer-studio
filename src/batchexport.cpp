@@ -129,10 +129,14 @@ BatchResult BatchExport::run(JobInput input, const QUrl &csv, const QUrl &direct
         auto destination = dir.filePath(name);
         if (QFile::exists(destination))
             return {"Stapelexport überschreibt keine vorhandenen Jobs."};
-        auto lines = plan.gcode(cancel);
+        const auto program = plan.encodedProgram(cancel);
         if (isCancelled(cancel))
             return {{}, 0, true};
-        auto bytes = (lines.join('\n') + '\n').toUtf8();
+        if (!program.valid() || program.mediaType() != "text/x-gcode")
+            return {"CSV-Zeile " + QString::number(rowIndex + 1) + ": " +
+                    (program.errors().isEmpty() ? QString("Kein GCode-Ausgabeadapter.")
+                                                : program.errors().join("; "))};
+        auto bytes = program.payload();
         stagedBytes += bytes.size();
         if (stagedBytes > 64 * 1024 * 1024)
             return {"CSV-Stapel überschreitet 64 MiB; kleinere Teilstapel verwenden."};

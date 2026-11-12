@@ -1,3 +1,4 @@
+#include "controlleradapter.h"
 #include "deviceprofile.h"
 #include <QDir>
 #include <QFile>
@@ -47,7 +48,7 @@ class DeviceProfileTest : public QObject {
             QString error;
             const auto profile = DeviceProfile::parse(bytes(descriptor), error);
             QVERIFY2(profile, qPrintable(error));
-            QVERIFY(!DeviceBackends::grblOutputError(*profile).isEmpty());
+            QVERIFY(!ControllerAdapters::outputError(*profile).isEmpty());
             QVERIFY(!DeviceBackends::runtimeSupportError(*profile).isEmpty());
         }
         for (const QString capability : {"motion-xy", "dynamic-power"}) {
@@ -58,7 +59,7 @@ class DeviceProfileTest : public QObject {
             QString error;
             const auto profile = DeviceProfile::parse(bytes(descriptor), error);
             QVERIFY(profile);
-            QVERIFY(!DeviceBackends::grblOutputError(*profile).isEmpty());
+            QVERIFY(!ControllerAdapters::outputError(*profile).isEmpty());
         }
     }
     void currentLegacyProfileKeepsUiAndHasIndependentIdentity() {

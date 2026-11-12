@@ -148,8 +148,9 @@ class JobTest : public QObject {
         QVERIFY(profile);
         input.deviceProfile = *profile;
         const auto unsupported = JobPlanner::build(input);
-        QVERIFY(!unsupported.valid());
-        QVERIFY(unsupported.moves.isEmpty());
+        QVERIFY(unsupported.valid()); // Geometry is independent of output-adapter availability.
+        QVERIFY(!unsupported.moves.isEmpty());
+        QVERIFY(!unsupported.encodedProgram().valid());
         QVERIFY(unsupported.gcode().isEmpty());
         JobPlan manual(*profile);
         manual.moves = plan.moves;

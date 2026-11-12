@@ -14,6 +14,8 @@ Blazer Studio startet im **Simulator**. Eine echte Verbindung entsteht erst im B
 
 Aktive Objekte außerhalb der Fläche des Projektprofils (beim M3 200 × 150 mm), nicht auswertbare Inhalte oder zu komplexe Jobs verhindern die gesamte Ausgabe. Es werden keine stillschweigend unvollständigen Jobs exportiert. Grenzen: 500000 Bewegungssegmente, begrenzte SVG-/Bildgröße. Ein globaler SVG-Clip in Benutzerkoordinaten ist unterstützt. Mehrere/gemischte Clips, Bounding-Box-/CSS-Clips und eingebettete Rasterinhalte werden noch abgelehnt. SVG-Dateien bleiben im Editor zusammenhängende Objekte. Farben werden nicht automatisch zu getrennten Laseroperationen.
 
+Die XY-Bewegungsplanung ist von der Controller-Kodierung getrennt. Ein berechneter Pfad allein bedeutet weder einen vorhandenen Ausgabeadapter noch eine geprüfte Geräteverbindung. GCode-Export verlangt einen vollständigen passenden Textpuffer; fehlende Adapter, ungültige Werte und Abbruch erzeugen keine teilweise oder nur aus einem Zeilenumbruch bestehende Datei. Der bestehende M3-GCode bleibt dabei unverändert.
+
 ## Bilder und Materialtests
 
 **Motiv laden** (Basic) beziehungsweise **Bild** (Advanced) importiert unterstützte Rasterformate mit Originalauflösung bis 4096 × 4096 Pixel innerhalb der [Speichergrenzen](RASTER_QUALITY.md). Unter **Werkzeuge → Bild** stehen Korrekturen, Zuschnitt, Masken, zwei Ditherverfahren, Schwellenwert und Graustufen-Leistungsmodulation zur Verfügung. Anfangsmaßstab: höchstens 100 mm lange Seite, bei kleinen Bildern 0,1 mm je Pixel; Maße und Ausgabe-Raster sind anschließend einstellbar.
