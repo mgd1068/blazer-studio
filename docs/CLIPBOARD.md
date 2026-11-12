@@ -92,3 +92,5 @@ Die normale Benutzerzwischenablage blieb unberührt. Das ersetzt keine Abnahme d
 Wayland, Clipboard-Managern, allen Fremdprogrammen oder dem Verhalten nach
 Beenden der Quellanwendung. Diese Fälle bleiben in T08 offen. Zollbedienung und
 Hilfslinien der Familie F07 bleiben zusätzliche Aufgaben.
+
+Auswahlen mit [Hilfsformen T1/T2](TOOL_SHAPES.md) bewahren ihre fehlende Laserausgabe im Blazer-Objektformat. Für diese Auswahl wird kein allgemeiner SVG-, Bild- oder Text-Ersatz ohne diese Zuordnung angeboten.

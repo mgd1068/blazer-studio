@@ -75,11 +75,13 @@ QVariant Document::data(const QModelIndex &i, int role) const {
     case KindRole:
         return a.kind;
     case ColorRole:
-        return layerColor(a.layer);
+        return a.toolLayer == 1 ? QColor("#d18228") : a.toolLayer == 2 ? QColor("#ad63b0") : layerColor(a.layer);
     case VisibleRole:
         return a.visible;
     case LayerRole:
         return a.layer;
+    case ToolLayerRole:
+        return a.toolLayer;
     case GroupRole:
         return a.groupId;
     case GroupNameRole:
@@ -97,7 +99,7 @@ QHash<int, QByteArray> Document::roleNames() const {
             {ColorRole, "artColor"},         {VisibleRole, "artVisible"},
             {LayerRole, "artLayer"},         {GroupRole, "artGroup"},
             {GroupNameRole, "artGroupName"}, {GroupFirstRole, "artGroupFirst"},
-            {OnPageRole, "artOnPage"}};
+            {OnPageRole, "artOnPage"}, {ToolLayerRole, "artToolLayer"}};
 }
 QColor Document::layerColor(int n) const {
     static const QList<QColor> colors{"#cb713c", "#4c7bd9", "#209b76",
@@ -125,6 +127,7 @@ QVariantMap Document::selection() const {
     const auto &a = m_items[m_selected];
     const auto bounds = selectionBounds();
     int layer = a.layer;
+    int toolLayer = a.toolLayer;
     bool visible = true;
     bool group = !a.groupId.isEmpty();
     int groupCount = 0;
@@ -134,6 +137,7 @@ QVariantMap Document::selection() const {
     for (int row : m_selection) {
         if (m_items[row].layer != layer)
             layer = -1;
+        if (m_items[row].toolLayer != toolLayer) toolLayer = -1;
         visible &= m_items[row].visible;
         group &= m_items[row].groupId == a.groupId;
     }
@@ -152,6 +156,7 @@ QVariantMap Document::selection() const {
             {"width", bounds.width()},
             {"height", bounds.height()},
             {"layer", layer},
+            {"toolLayer", toolLayer},
             {"visible", visible},
             {"count", m_selection.size()},
             {"grouped", group},
@@ -676,12 +681,14 @@ void Document::setLayer(int layerIndex) {
         }
     bool change = false;
     for (int row : m_selection)
-        change |= m_items[row].layer != layerIndex;
+        change |= m_items[row].layer != layerIndex || m_items[row].toolLayer != 0;
     if (!change)
         return;
     checkpoint("Bearbeitung zuweisen");
-    for (int row : m_selection)
+    for (int row : m_selection) {
         m_items[row].layer = layerIndex;
+        m_items[row].toolLayer = 0;
+    }
     emit dataChanged(index(0), index(m_items.size() - 1));
     refresh();
 }
@@ -697,7 +704,7 @@ void Document::setLayerSetting(int layerIndex, const QString &key, const QVarian
             return;
         if (key == "mode" && value == "Schnitt")
             for (const auto &a : m_items)
-                if (a.kind == "relief" &&
+                if ((a.kind == "relief" || a.kind == "image") &&
                     (a.layer == layerIndex || a.extraOperations.contains(layerIndex)))
                     return;
         canonical = value;
@@ -769,6 +776,7 @@ bool Document::materialModified() const {
                 return true;
     }
     for (const auto &a : m_items) {
+        if (a.toolLayer != 0) continue;
         auto expected = m_material[a.layer == 0 ? "engrave" : "cut"].toMap();
         for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
             if (expected.contains(it.key()) && expected[it.key()] != it.value())
@@ -864,6 +872,9 @@ QByteArray Document::serialize(const Snapshot &state) const {
             {"depthMap",
              a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
+    const bool hasTools = std::any_of(state.items.cbegin(), state.items.cend(), [](const Artwork &a){return a.toolLayer!=0;});
+    if (hasTools)
+        for (int i=0;i<objects.size();++i) {auto object=objects[i].toObject();object["toolLayer"]=state.items[i].toolLayer;objects[i]=object;}
     QJsonObject root{{"format", "blazer-studio"},
                      {"version", 8},
                      {"units", "mm"},
@@ -883,8 +894,8 @@ QByteArray Document::serialize(const Snapshot &state) const {
                      {"objects", objects},
                      {"layers", QJsonArray::fromVariantList(state.layers)},
                      {"material", QJsonObject::fromVariantMap(state.material)}};
-    if (!state.guides.isEmpty() || !state.guidesVisible || !state.guideSnapping) {
-        root["version"] = 9;
+    if (hasTools || !state.guides.isEmpty() || !state.guidesVisible || !state.guideSnapping) {
+        root["version"] = hasTools ? 10 : 9;
         root["guidesVisible"] = state.guidesVisible;
         root["guideSnapping"] = state.guideSnapping;
         QJsonArray guides;
@@ -905,7 +916,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 9) ||
+        !number(root, "version", 1, 10) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -1035,6 +1046,10 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
                   o["layer"].toInt(),
                   o["visible"].toBool(),
                   {}};
+        if (version >= 10) {
+            if (!number(o,"toolLayer",0,2) || std::floor(o["toolLayer"].toDouble()) != o["toolLayer"].toDouble()) return {};
+            a.toolLayer=o["toolLayer"].toInt();
+        } else if(o.contains("toolLayer")) return {};
         if (!QStringList{"rect", "ellipse", "text", "svg", "relief", "path", "image"}.contains(
                 a.kind))
             return {};
@@ -1611,7 +1626,7 @@ bool Document::validBudget(const QList<Artwork> &items) {
 QVariantMap Document::beginnerSummary() const {
     bool advanced = false;
     for (const auto &a : m_items)
-        if (a.page == m_activePage)
+        if (a.page == m_activePage && a.toolLayer == 0)
             advanced |= a.layer >= 2 || !a.extraOperations.isEmpty() || a.kind == "relief";
     for (int i = 0; i < 2; ++i) {
         const auto values = m_layers[i].toMap();

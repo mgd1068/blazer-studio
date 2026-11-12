@@ -12,11 +12,13 @@ struct Element {
     QRectF bounds;
     QString group;
     bool visible = true;
+    int toolLayer = 0;
 };
 struct Result {
     QList<Element> elements;
     QString error;
 };
-// Geometry only. No CNC/laser operations, device settings, or external files.
+// Geometry and non-output Tool classification only. No CNC/laser parameters,
+// device settings, or external files.
 Result read(const QByteArray &bytes, bool millmage);
 } // namespace NativeDesign

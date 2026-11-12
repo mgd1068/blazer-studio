@@ -5,6 +5,7 @@
 #include <QFont>
 #include <QHash>
 #include <QPainter>
+#include <QSet>
 #include <QTransform>
 #include <QUuid>
 #include <QXmlStreamReader>
@@ -96,6 +97,7 @@ class Numbers {
 class Reader {
     NativeDesign::Result result;
     QHash<int, bool> visibleLayers;
+    QSet<int> toolCuts;
     int shapes = 0, vertices = 0, elements = 0;
     qint64 pixels = 0, embedded = 0;
     bool millmageMode = false;
@@ -298,7 +300,7 @@ class Reader {
                fail("Eingebettete Bilder überschreiten Projektgrenzen");
     }
     bool shape(const QDomElement &node, const QTransform &parent, const QString &group,
-               bool inherited) {
+               bool inherited, int inheritedTool = 0) {
         if (++shapes > Geometry::objectLimit)
             return fail("Zu viele Formen/Gruppen");
         QTransform local;
@@ -316,6 +318,13 @@ class Reader {
                 layer > 255)
                 return fail("Ungültiger Grafik-Layer");
             visible = visible && visibleLayers.value(int(layer), true);
+        }
+        int toolLayer = inheritedTool;
+        if (!millmageMode && node.hasAttribute("CutIndex")) {
+            double cut;
+            if(!scalar(node,"CutIndex",cut,0) || cut<0 || cut>255 || std::floor(cut)!=cut)
+                return fail("Ungültige LightBurn-Layerzuordnung");
+            toolLayer = cut==31 ? 2 : (cut==30 || toolCuts.contains(int(cut))) ? 1 : 0;
         }
         const auto type = node.attribute("Type");
         if (type.size() > 64)
@@ -339,7 +348,7 @@ class Reader {
                 return fail("Gruppe ohne Children");
             for (auto child = children.firstChildElement(); !child.isNull();
                  child = child.nextSiblingElement())
-                if (child.tagName() != "Shape" || !shape(child, combined, id, visible))
+                if (child.tagName() != "Shape" || !shape(child, combined, id, visible, toolLayer))
                     return fail(result.error.isEmpty() ? "Unbekannter Gruppeninhalt"
                                                        : result.error);
             return true;
@@ -370,16 +379,20 @@ class Reader {
                 elements += text.elementCount();
                 if (elements > geometryLimit)
                     return fail("Zu viele Textkonturen");
-                result.elements.append({text, {}, {}, group, visible});
+                result.elements.append({text, {}, {}, group, visible, toolLayer});
                 return true;
             }
             if (!outline.nextSiblingElement().isNull())
                 return fail("Mehrdeutige Textkonturen");
-            return shape(outline, combined, group, visible);
+            const int first=result.elements.size();
+            if(!shape(outline, combined, group, visible, toolLayer))return false;
+            for(int i=first;i<result.elements.size();++i)result.elements[i].toolLayer=toolLayer;
+            return true;
         }
         NativeDesign::Element element;
         element.group = group;
         element.visible = visible;
+        element.toolLayer = toolLayer;
         if (type == "Bitmap") {
             if (!bitmap(node, combined, element))
                 return false;
@@ -458,6 +471,14 @@ class Reader {
                 return {{}, "Ungültige oder doppelte Grafik-Layer"};
             visibleLayers[int(index)] = hide == 0;
         }
+        if (!millmage)
+            for(auto cut=root.firstChildElement("CutSetting");!cut.isNull();cut=cut.nextSiblingElement("CutSetting"))
+                if(cut.attribute("type").compare("Tool",Qt::CaseInsensitive)==0) {
+                    QDomElement indexNode;double index;
+                    if(!unique(cut,"index",indexNode) || !scalar(indexNode,"Value",index,0,true) || index<0 || index>255 || std::floor(index)!=index)
+                        return {{},"Ungültige LightBurn-Werkzeugebene"};
+                    toolCuts.insert(int(index));
+                }
         const QStringList metadata{"Layer",        "Thumbnail",  "CNCProjectSetup",
                                    "VariableText", "UIPrefs",    "Operation",
                                    "Notes",        "CutSetting", "CutSetting_Img"};

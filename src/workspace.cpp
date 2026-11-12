@@ -336,14 +336,14 @@ void Workspace::paint(QPainter *p) {
                     ++idx;
                     continue;
                 }
-                QColor c = m_document->layerColor(a.layer);
-                p->setOpacity(!a.visible ? .18 : enabled ? 1 : .3);
+                QColor c = a.toolLayer == 1 ? QColor("#d18228") : a.toolLayer == 2 ? QColor("#ad63b0") : m_document->layerColor(a.layer);
+                p->setOpacity(!a.visible ? .18 : (a.toolLayer != 0 || enabled) ? 1 : .3);
                 if (m_preview) {
                     p->setPen(QPen(QColor("#a4b6bb"), .35, Qt::DashLine));
                     p->drawLine(previous, a.bounds.topLeft());
                     previous = a.bounds.topLeft();
                 }
-                p->setPen(QPen(c, .45));
+                p->setPen(QPen(c, .45, a.toolLayer != 0 ? Qt::DashLine : Qt::SolidLine));
                 p->setBrush(Qt::NoBrush);
                 if (a.kind == "path") {
                     QString error;
@@ -351,7 +351,7 @@ void Workspace::paint(QPainter *p) {
                     QTransform t;
                     t.translate(0, 150);
                     t.scale(1, -1);
-                    if (m_document->layers()[a.layer].toMap()["mode"] == "Schnitt")
+                    if (a.toolLayer != 0 || m_document->layers()[a.layer].toMap()["mode"] == "Schnitt")
                         p->drawPath(t.map(path));
                     else
                         p->fillPath(t.map(path), c);

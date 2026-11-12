@@ -57,7 +57,8 @@ class Document : public QAbstractListModel {
         GroupRole,
         GroupNameRole,
         GroupFirstRole,
-        OnPageRole
+        OnPageRole,
+        ToolLayerRole
     };
     explicit Document(QObject *parent = nullptr);
     void setBackgroundPlanning(bool enabled);
@@ -161,6 +162,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void duplicateSelected();
     Q_INVOKABLE void toggleVisible(int row);
     Q_INVOKABLE void setProperty(const QString &name, const QVariant &value);
+    Q_INVOKABLE bool setToolLayer(int toolLayer);
     Q_INVOKABLE void setLayer(int layer);
     Q_INVOKABLE void setLayerSetting(int layer, const QString &key, const QVariant &value);
     QVariantMap beginnerSummary() const;

@@ -638,6 +638,7 @@ ApplicationWindow {
                             required property string artKind
                             required property color artColor
                             required property bool artVisible
+                            required property int artToolLayer
                             required property int artLayer
                             required property string artGroup
                             required property string artGroupName
@@ -658,7 +659,7 @@ ApplicationWindow {
                                     Layout.fillWidth: true; spacing: 7
                                     CheckBox { HelpBubble { target: parent } objectName: "objectCheck" + objectRow.index; implicitWidth: 20; implicitHeight: 20; checked: project.selectedRows.indexOf(objectRow.index) >= 0; onClicked: { objectList.forceActiveFocus(Qt.MouseFocusReason); project.toggleSelection(objectRow.index) } }
                                     Rectangle { width: 7; height: 7; radius: 2; color: objectRow.artColor }
-                                    Text { text: objectRow.artName; elide: Text.ElideRight; Layout.fillWidth: true; color: objectRow.artVisible ? win.ink : win.muted; font.pixelSize: 11 }
+                                    Text { text: (objectRow.artToolLayer>0 ? "T"+objectRow.artToolLayer+" · " : "")+objectRow.artName; elide: Text.ElideRight; Layout.fillWidth: true; color: objectRow.artVisible ? win.ink : win.muted; font.pixelSize: 11 }
                                     Text { text: objectRow.artKind === "text" ? "T" : objectRow.artKind === "svg" ? "SVG" : objectRow.artKind === "ellipse" ? "○" : "□"; color: win.muted; font.pixelSize: 11 }
                                 }
                                 RowLayout {
@@ -668,11 +669,11 @@ ApplicationWindow {
                                         id: objectOperation
                                         objectName: "objectOperation" + objectRow.index
                                         enabled: !win.basic || (project.layers[0].enabled && project.layers[1].enabled)
-                                        model: project.layers.map(op=>op.name)
-                                        currentIndex: objectRow.artLayer
+                                        model: project.layers.map(op=>op.name).concat(["T1 · Hilfsform","T2 · Hilfsform"])
+                                        currentIndex: objectRow.artToolLayer>0 ? project.layers.length+objectRow.artToolLayer-1 : objectRow.artLayer
                                         implicitHeight: 28; implicitWidth: 112
                                         leftPadding: 7; rightPadding: 7
-                                        onActivated: operation => { win.selectObject(objectRow.index); project.setLayer(operation) }
+                                        onActivated: operation => { win.selectObject(objectRow.index); if(operation>=project.layers.length)project.setToolLayer(operation-project.layers.length+1);else project.setLayer(operation) }
                                         contentItem: Text { text: objectOperation.displayText; color: win.ink; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; rightPadding: objectOperation.indicator.width + 5 }
                                         indicator: Text { x: objectOperation.width - width - 7; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink; font.pixelSize: 12 }
                                         background: Rectangle { radius: 4; color: win.bg; border.color: win.line }
@@ -929,23 +930,24 @@ ApplicationWindow {
                                 SectionLabel { text: "EINSTELLUNGEN"; dark: win.night; Layout.fillWidth: true }
                                 Rectangle { width: 53; height: 21; radius: 4; color: win.bg; Text { anchors.centerIn: parent; text: win.basic ? "Basic" : "Advanced"; color: win.muted; font.pixelSize: 11 } }
                             }
-                            Text { objectName: "basicValues"; visible: win.basic; text: "Übernommene Bearbeitung\n"+win.currentLayer.name+"\nGeschwindigkeit: "+win.currentLayer.speed+" mm/min\nLeistung: "+win.currentLayer.power+" %\nDurchgänge: "+win.currentLayer.passes+(win.currentLayer.mode==="Schnitt" ? "" : "\nLinienabstand: "+Number(win.currentLayer.interval).toFixed(3)+" mm"); color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
-                            Text { visible: !win.basic; text: win.currentLayer.name; color: win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+                            Text { objectName: "basicValues"; visible: win.basic && !(project.selection.toolLayer>0); text: "Übernommene Bearbeitung\n"+win.currentLayer.name+"\nGeschwindigkeit: "+win.currentLayer.speed+" mm/min\nLeistung: "+win.currentLayer.power+" %\nDurchgänge: "+win.currentLayer.passes+(win.currentLayer.mode==="Schnitt" ? "" : "\nLinienabstand: "+Number(win.currentLayer.interval).toFixed(3)+" mm"); color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
+                            Text { visible: !win.basic; text: project.selection.toolLayer>0 ? "Hilfsform T"+project.selection.toolLayer : win.currentLayer.name; color: win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
                             Rectangle {
-                                visible: !win.basic; Layout.fillWidth: true; height: 31; radius: 5; color: win.bg
+                                visible: !win.basic && !(project.selection.toolLayer>0); Layout.fillWidth: true; height: 31; radius: 5; color: win.bg
                                 RowLayout {
                                     anchors.fill: parent; anchors.leftMargin: 9; anchors.rightMargin: 9
                                     Text { text: "Operation ausgeben"; color: win.ink; font.pixelSize: 11; Layout.fillWidth: true }
                                     Switch { HelpBubble { target: parent } checked: win.currentLayer.enabled; implicitHeight: 24; onToggled: project.setLayerSetting(win.operation,"enabled",checked) }
                                 }
                             }
-                            NumberField { visible: !win.basic && project.selection.kind !== "relief"; label: "v"; value: win.currentLayer.speed; unit: "mm/min"; decimals: 0; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"speed",n) }
-                            NumberField { visible: !win.basic && project.selection.kind !== "relief"; label: "P"; value: win.currentLayer.power; unit: "%"; decimals: 1; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"power",n) }
-                            NumberField { visible: !win.basic && project.selection.kind !== "relief"; label: "×"; value: win.currentLayer.passes; unit: "Mal"; decimals: 0; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"passes",n) }
-                            NumberField { visible: !win.basic && win.operation === 0 && project.selection.kind !== "relief"; label: "↕"; value: win.currentLayer.interval; unit: "mm"; decimals: 3; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"interval",n) }
-                            Text { text: project.selection.kind === "relief" ? "Relief: eigene Objektwerte unten; Schichten und Raster im Bereich Relief." : "Profilwerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            NumberField { visible: !win.basic && !(project.selection.toolLayer>0) && project.selection.kind !== "relief"; label: "v"; value: win.currentLayer.speed; unit: "mm/min"; decimals: 0; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"speed",n) }
+                            NumberField { visible: !win.basic && !(project.selection.toolLayer>0) && project.selection.kind !== "relief"; label: "P"; value: win.currentLayer.power; unit: "%"; decimals: 1; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"power",n) }
+                            NumberField { visible: !win.basic && !(project.selection.toolLayer>0) && project.selection.kind !== "relief"; label: "×"; value: win.currentLayer.passes; unit: "Mal"; decimals: 0; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"passes",n) }
+                            NumberField { visible: !win.basic && !(project.selection.toolLayer>0) && win.operation === 0 && project.selection.kind !== "relief"; label: "↕"; value: win.currentLayer.interval; unit: "mm"; decimals: 3; dark: win.night; Layout.fillWidth: true; enabled: !win.basic; onEdited: n => project.setLayerSetting(win.operation,"interval",n) }
+                            Text { text: project.selection.toolLayer>0 ? "Diese Form dient der Platzierung und wird niemals gelasert." : project.selection.kind === "relief" ? "Relief: eigene Objektwerte unten; Schichten und Raster im Bereich Relief." : "Profilwerte · Materialtest erforderlich"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                             SectionLabel { text: "AUSGEWÄHLTES OBJEKT"; dark: win.night }
+                            Text { objectName: "toolShapeStatus"; visible: project.selection.toolLayer>0; text: "T"+project.selection.toolLayer+" · Hilfsform · keine Laserausgabe"; color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
                             TextField { HelpBubble { target: parent }
                                 objectName: "objectNameInput"
                                 Layout.fillWidth: true; enabled: project.selected >= 0 && project.selection.kind !== "selection"
@@ -983,8 +985,8 @@ ApplicationWindow {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
-                                ActionButton { objectName: "engraveObjectButton"; text: "Gravieren"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 0; enabled: project.selected >= 0 && (!win.basic || project.layers[0].enabled); onClicked: project.setLayer(0) }
-                                ActionButton { objectName: "cutObjectButton"; text: "Schneiden"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.layer === 1; enabled: project.selected >= 0 && (!win.basic || project.layers[1].enabled); onClicked: project.setLayer(1) }
+                                ActionButton { objectName: "engraveObjectButton"; text: "Gravieren"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 0; enabled: project.selected >= 0 && (!win.basic || project.layers[0].enabled); onClicked: project.setLayer(0) }
+                                ActionButton { objectName: "cutObjectButton"; text: "Schneiden"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 1; enabled: project.selected >= 0 && (!win.basic || project.layers[1].enabled); onClicked: project.setLayer(1) }
                             }
                             ActionButton { text: project.selection.visible ? "Objekt ausblenden" : "Objekt einblenden"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: project.selected >= 0; onClicked: project.toggleVisible(project.selected) }
                             Rectangle { visible: !win.basic; Layout.fillWidth: true; height: 1; color: win.line }

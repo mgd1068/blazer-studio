@@ -654,9 +654,11 @@ class UiTest : public QObject {
         auto *operation = item("objectOperation3");
         QVERIFY(operation);
         click(operation);
-        QTest::keyClick(w, Qt::Key_End);
+        QTest::keyClick(w, Qt::Key_Home);
+        QTest::keyClick(w, Qt::Key_Down); // Cut operation; T1/T2 follow the normal operations.
         QTest::keyClick(w, Qt::Key_Return);
         QTRY_COMPARE(project.items()[3].layer, 1);
+        QCOMPARE(project.items()[3].toolLayer,0);
         QCOMPARE(project.items()[4].layer, 0);
         auto *widthInput = item("objectWidthInput");
         QVERIFY(widthInput);

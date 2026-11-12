@@ -333,6 +333,7 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
         return job;
     }
     for (const auto &art : d.items) {
+        if (art.toolLayer<0 || art.toolLayer>2) {job.errors={"Ungültige Hilfsformzuordnung."};return job;}
         auto operations = art.extraOperations;
         operations.prepend(art.layer);
         for (int operation : operations)
@@ -377,7 +378,7 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     for (const auto &original : d.items) {
         if (isCancelled(cancel))
             return aborted();
-        if (original.page != d.activePage)
+        if (original.toolLayer != 0 || original.page != d.activePage)
             continue;
         QList<int> operations{original.layer};
         operations.append(original.extraOperations);

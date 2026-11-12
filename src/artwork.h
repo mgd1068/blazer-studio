@@ -18,5 +18,6 @@ struct Artwork {
     QVariantMap style{};
     QList<int> extraOperations{};
     int page = 0;
+    int toolLayer = 0; // 0: laser artwork; 1/2: non-output T1/T2 helper shapes
     bool operator==(const Artwork &) const = default;
 };

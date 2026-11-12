@@ -35,13 +35,13 @@ keine vorhandenen Hilfslinien des Zielprojekts.
 
 Hilfslinien werden in Projekten, eigenen Vorlagen und Wiederherstellungen
 aufbewahrt. Projekte mit Linien oder abweichenden Hilfslinienschaltern verwenden
-**Format 9**. Ohne Linien und mit beiden Schaltern eingeschaltet bleibt Format 8.
+**Format 9**; mit zusätzlichen [Hilfsformen T1/T2](TOOL_SHAPES.md) **Format 10**. Ohne Linien und mit beiden Schaltern eingeschaltet bleibt Format 8.
 Frühere Versionen einschließlich beta.3 müssen Format 9 ablehnen. Grenzen:
 höchstens 1000 Linien je Projekt, Positionen von −2000 bis +2000 mm; gültige,
 eindeutige Kennungen und Blattzuordnung werden vor der Übernahme geprüft.
 
 Die Linien gelangen weder in GCode, SVG-Ausgabe, Frame, Auftragsgrenzen noch in
 Serienaufträge. Speichern oder Verschieben einer Hilfslinie verändert keine
-Laserparameter. Drehbare Linien, allgemeine Werkzeugformen und weitere
+Laserparameter. [Hilfsformen T1/T2](TOOL_SHAPES.md) erlauben zusätzliche bearbeitbare Platzhalter. Weitere
 Eingabevarianten sowie native Desktop- und externe Bedienungsabnahmen bleiben
 Teil der offenen F07-/T08-Arbeit.

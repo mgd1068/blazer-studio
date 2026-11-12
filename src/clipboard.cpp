@@ -35,7 +35,7 @@ QByteArray vectorSvg(const QList<Artwork> &items, const QVariantList &layers) {
     QRectF bounds;
     bool first = true;
     for (const auto &a : items) {
-        if (a.reliefAsset)
+        if (a.reliefAsset || a.toolLayer != 0)
             return {};
         QString error;
         auto path = JobPlanner::geometry(a, error, true);
@@ -143,7 +143,7 @@ bool Document::copySelectionToClipboard(bool cut) {
     const auto svg = vectorSvg(state.items, state.layers);
     if (!svg.isEmpty() && svg.size() <= 8 * 1024 * 1024)
         data->setData("image/svg+xml", svg);
-    if (state.items.size() == 1) {
+    if (state.items.size() == 1 && state.items.first().toolLayer == 0) {
         const auto &a = state.items.first();
         if (a.kind == "text")
             data->setText(a.text);

@@ -912,7 +912,7 @@ bool Document::exportSvg(const QUrl &url) const {
     out.writeAttribute("height", "150mm");
     out.writeAttribute("viewBox", "0 0 200 150");
     for (const auto &a : m_items)
-        if (a.page == m_activePage && a.visible) {
+        if (a.page == m_activePage && a.visible && a.toolLayer == 0) {
             QString error;
             auto path = JobPlanner::geometry(a, error, true);
             if (!error.isEmpty())
@@ -1006,7 +1006,7 @@ bool Document::removePage(int page) {
     return true;
 }
 bool Document::outputs(const Artwork &a) const {
-    if (!a.visible || a.page != m_activePage)
+    if (a.toolLayer != 0 || !a.visible || a.page != m_activePage)
         return false;
     QList<int> operations{a.layer};
     operations.append(a.extraOperations);
@@ -1018,4 +1018,16 @@ bool Document::outputs(const Artwork &a) const {
             return true;
     }
     return false;
+}
+
+bool Document::setToolLayer(int toolLayer) {
+    if (toolLayer < 0 || toolLayer > 2 || m_selection.isEmpty()) return false;
+    bool changed=false;
+    for(int row:m_selection) changed |= m_items[row].toolLayer!=toolLayer;
+    if(!changed) return true;
+    checkpoint(toolLayer ? "Hilfsform T"+QString::number(toolLayer) : "Laserausgabe zuweisen");
+    for(int row:m_selection)m_items[row].toolLayer=toolLayer;
+    emit dataChanged(index(0),index(m_items.size()-1));
+    refresh();
+    return true;
 }

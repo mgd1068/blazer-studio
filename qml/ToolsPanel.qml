@@ -90,6 +90,13 @@ ScrollView {
             Text { text: "Transformationen und Pfade"; color: tools.ink; font.pixelSize: 16 }
             RowLayout {
                 Layout.fillWidth: true
+                ActionButton { objectName: "assignTool1"; text: "T1 · Hilfsform"; dark: tools.dark; enabled: project.selected>=0; onClicked: project.setToolLayer(1) }
+                ActionButton { objectName: "assignTool2"; text: "T2 · Hilfsform"; dark: tools.dark; enabled: project.selected>=0; onClicked: project.setToolLayer(2) }
+            }
+            Text { text: "Hilfsformen werden niemals gelasert. Für eine Laserausgabe links eine Bearbeitung oder rechts Gravieren/Schneiden wählen."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 11 }
+
+            RowLayout {
+                Layout.fillWidth: true
                 ActionButton { text: "Linie"; dark: tools.dark; onClicked: tools.apply("addLine") }
                 ActionButton { text: "Bézier"; dark: tools.dark; onClicked: tools.apply("addBezier") }
                 ActionButton { text: "Knoten bearbeiten"; dark: tools.dark; onClicked: {tools.apply("convert");tools.nodesRequested()} }
@@ -155,6 +162,7 @@ ScrollView {
                 model: project.layers
                 CheckBox { HelpBubble { target: parent }
                     required property var modelData; required property int index
+                    enabled: !(project.selection.toolLayer>0)
                     objectName: "operationAssign"+index
                     text: modelData.name; checked: (project.selection.operations || []).indexOf(index)>=0
                     onClicked: {let rows=(project.selection.operations || []).slice();let pos=rows.indexOf(index);if(checked&&pos<0)rows.push(index);else if(!checked&&pos>=0)rows.splice(pos,1);project.assignOperations(rows)}

@@ -232,6 +232,7 @@ bool Document::importFile(const QUrl &url) {
             a.name = (ext == "mage" ? "MillMage " : "LightBurn ") + QString::number(imported.size() + 1);
             a.page = m_activePage;
             a.visible = element.visible;
+            a.toolLayer = element.toolLayer;
             a.groupId = element.group;
             a.groupName = a.groupId.isEmpty() ? QString() : "Importgruppe";
             if (element.image) {
