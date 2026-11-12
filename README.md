@@ -64,6 +64,8 @@ Editor, Jobmodell, Werkzeugwegerzeugung und Geräteadapter sind getrennt. Ein si
 
 Die installierte LightBurn-Konfiguration enthält das Profil **M3 / GRBL**, **200 × 150 mm**, seriell **115200 Baud**, S-Max **1000** und **2 %** für den Fokuspunkt; Z-Steuerung ist deaktiviert. Vorhandene Projekthinweise nennen das Gerät **Blaze X M3 / 5-W-Modul**. Siehe [Profilherkunft](docs/DEVICE_PROFILE.md). Controllerkommunikation, Bewegung und erste Materialwirkung auf Kraftpapier wurden geprüft. Der kurze Fokus-Puls sowie vollständige Betriebs- und Materialfreigaben bleiben separat abzunehmen.
 
+Weitere Laser sind als langfristiges Produktziel vorgesehen. Der [Mehrgeräteplan](docs/MULTI_DEVICE_PLAN.md) trennt Profil, Laserkopf, Controlleradapter und reale Geräteabnahme. Die neue Profilvalidierung kann weitere Geräte beschreiben; aktuell bleibt ausschließlich die bisherige M3-Konfiguration ansteuerbar. Die durchgängige Umstellung von Editor, Planung und Treibern ist noch offen.
+
 ## Direkte Gerätefunktionen
 
 Anforderung von Mathias (09.11.2026): Ein **Laserpunkt mit 2 % Sollleistung** zum Einstellen der Position und des Fokus gehört in den Gerätebereich.

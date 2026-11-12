@@ -20,6 +20,7 @@ option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 qt_add_library(blazer-core STATIC
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
     src/clipboard.cpp src/guides.cpp src/guide.h src/framing.cpp
+    src/deviceprofile.cpp src/deviceprofile.h
     src/nativedesign.cpp src/nativedesign.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
@@ -55,6 +56,11 @@ target_link_libraries(blazer-studio PRIVATE blazer-core Qt6::QuickControls2)
 
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(blazer-deviceprofile-tests tests/deviceprofile_test.cpp)
+    target_link_libraries(blazer-deviceprofile-tests PRIVATE blazer-core Qt6::Test)
+    target_compile_definitions(blazer-deviceprofile-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" BLAZER_APP="$<TARGET_FILE:blazer-studio>")
+    add_dependencies(blazer-deviceprofile-tests blazer-studio)
+    add_test(NAME deviceprofile COMMAND blazer-deviceprofile-tests)
     qt_add_executable(blazer-release-tests tests/release_test.cpp)
     target_link_libraries(blazer-release-tests PRIVATE blazer-core Qt6::Test)
     target_compile_definitions(blazer-release-tests PRIVATE BLAZER_APP="$<TARGET_FILE:blazer-studio>")
@@ -111,7 +117,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-workflow-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-workflow-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME workflow COMMAND blazer-workflow-tests -platform offscreen)
-    set_tests_properties(release stability core ui workflow job grbl relief expansion nativeimport imageexport clipboard raster toolshape PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    set_tests_properties(release stability core ui workflow job grbl relief expansion nativeimport imageexport clipboard raster toolshape deviceprofile PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)

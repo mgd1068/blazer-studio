@@ -4,6 +4,8 @@ Stand: 12.11.2026. Ausgangspunkt ist `0.9.0-beta.1` auf `6a7b1c0` mit dem lokal 
 
 ## Produktziel und Arbeitsregeln
 
+Ergänzung vom 12.11.2026: Weitere Laser sollen später eingebunden werden, mit Unterstützung aller am Markt befindlichen Laser als langfristigem Ziel. Der [Mehrgeräteplan MD1–MD5](MULTI_DEVICE_PLAN.md) ist deshalb eine verbindliche Architekturvorgabe. Neue Funktionen dürfen Geräteparameter und Controllerprotokolle nicht weiter mit dem ersten M3 verknüpfen. Eine gültige Profilbeschreibung allein bedeutet keine Geräteunterstützung.
+
 Das bestehende Gesamtziel in [F01–F53](LIGHTBURN_SCOPE.md) bleibt erhalten: LightBurn Core/Pro dient als versionierte funktionale Referenz; Linux und der vorhandene Blaze X M3 sind die erste Plattform und Geräteintegration. Bereits vorhandene Teilimplementierungen werden anhand konkreter Beispiele bewertet. Hardwarebedingt nicht anwendbare Funktionen erhalten eine Begründung. Ein engerer Umfang für eine erste 1.0 wäre eine ausdrückliche Produktentscheidung, keine stillschweigende Kürzung dieser Liste.
 
 Herstellerparameter bleiben unverändert und erhalten keinen pauschalen Leistungs-Offset. Quelle, Modell, Modul und fehlende Werte bleiben sichtbar. Eigene Versuchswerte und gemessene Ergebnisse werden getrennt geführt. Herstellerreferenzen für M3 Pro sind keine automatische Materialfreigabe für M3.
@@ -39,6 +41,8 @@ Softwarearbeiten an späteren Themen können vorbereitet werden, wenn ein physis
 Für den ausdrücklich zugesagten Produktumfang müssen die zugehörigen Funktions-, Betriebs-, Ergebnis- und Bedienungsfälle bestanden sein. Keine bekannten kritischen Fehler bei Datenhaltung, Jobzuordnung, Leistungswerten oder Abschaltung. Das geprüfte Installationspaket muss aus genau der freigegebenen Revision stammen. Offene, nicht zugesagte Erweiterungen bleiben nachvollziehbar in der Zielmatrix; zugesagte Lücken werden vor einer entsprechenden 1.0-Zusage geschlossen.
 
 ## Arbeitsjournal
+
+- 12.11.2026, Mehrgerätearchitektur MD1: Nutzerziel aller am Markt befindlichen Laser verbindlich in [MD1–MD5](MULTI_DEVICE_PLAN.md) aufgenommen. Unveränderlichen Profilvertrag, begrenzte Validierung, ausgaberelevanten Fingerprint, unveränderte M3-Konvertierung und Offline-CLI ohne GUI/Maschinenobjekt eingeführt. Laufzeit bleibt ausdrücklich auf den bisherigen M3-Vertrag begrenzt, bis MD2/MD3 alle Verbraucher anbinden. Synthetische andere Arbeitsräume, Skalen und Controller sind nur Beschreibungen. Vollständig **18/18 normal (128,21 s)** und **18/18 ASan/UBSan (169,68 s, detect_leaks=0)**; keine Leckfreiheitszusage, Compiler-/QML-Laufzeitprotokolle ohne Warnungen, 186 Dokumentationsziele gültig. Vorheriger Rahmenstand 60eb7a3 in allen vier GitHub-Läufen grün. Nächster Architekturpunkt MD2: Profilbindung durch Projekt, Plan und alle Arbeitsraum-/Ausgabeverbraucher; keine zusätzliche reale Geräteunterstützung. Herstellerdateien und beta.3-Kandidat unverändert, keine Geräteaktion.
 
 - 12.11.2026: Plan angelegt; isolierter Arbeitszweig `codex/production-readiness`. Nutzer schläft, Laser ausgeschaltet. Start mit T01, keine Hardwarezugriffe.
 
