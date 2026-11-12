@@ -262,3 +262,10 @@ Nach der Recovery-Erweiterung sind alle 13 Testprogramme normal und mit ASan/UBS
 ## Beta.3 – Abhängigkeit der isolierten Desktopprüfung
 
 Der erste GitHub-Gesamtlauf fand eine fehlende Testabhängigkeit: `xdg-mime query filetype` braucht im generischen Desktopmodus `mimetype` aus `libfile-mimeinfo-perl`, um die registrierte Shared-MIME-Datenbank abzufragen. Ohne dieses Backend fällt es auf das im Minimalcontainer ebenfalls fehlende `file` zurück und endet mit Status 4. Der Fehler wurde im isolierten Builder ohne `file` identisch reproduziert; nach Installation von `libfile-mimeinfo-perl` bestehen alle acht Python-Fälle. CI installiert das Backend jetzt ausdrücklich; der optionale Desktopfall prüft seine Verfügbarkeit. Die tatsächlichen Paket-Selbsttests einschließlich Qt-MIME-Kennung und Upgrade bestanden bereits. Für den abschließenden Kandidaten ist eine neue exakte Paketrevision mit erneuten GitHub-Prüfungen nötig.
+
+
+## Geprüfter Kandidat beta.3
+
+Der abschließende Kandidat stammt aus `4da2e97a82594bf85836210d521c797a946c95e0`. Alle 149 versionierten Quelldateien sind vollständig/bytegleich im Archiv und behalten ihr ausführbares Kennzeichen. Die GitHub-Gesamtprüfung besteht alle 13 Programme normal (90,25 s) und mit ASan/UBSan (100,50 s, `detect_leaks=0`); normale und Sanitizer-Regression sowie Paket-/Runtime-Pipelines sind auf Arbeitszweig und PR grün. Der zuvor fehlende Shared-MIME-Abfragebackend ist ausdrücklich installiert und geprüft.
+
+Frische lokale Laufzeitprüfung mit Upgrade von beta.2, tatsächlicher alter Projektdatei und persönlichen Testeinstellungen, Nicht-root-Start, exakter Herkunft, Qt-Vorlagen-MIME-Kennung, Vorlagen-/Projektrundlauf, Neuinstallation und Entfernung bestanden. Legacy-Projekt und Einstellungen blieben bytegleich, alter/neuer Leser und neue Vorlage erzeugten denselben GCode. 117 lokale Verweise im Download und installierten Paket sowie sämtliche Prüfsummen bestanden. Protokoll und Summen: [Kandidat beta.3](beta/CANDIDATE_BETA3.md). Kein Hostupgrade und keine Geräteaktion; kein Nachweis tatsächlicher nativer Desktopbedienung, externer Anfänger oder vollständiger Geräte-/Materialfreigabe.
