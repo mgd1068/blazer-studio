@@ -161,7 +161,7 @@ class Document : public QAbstractListModel {
     void beginMove();
     void moveSelection(QPointF position);
     Q_INVOKABLE void finishMove();
-    void notify(const QString &message);
+    Q_INVOKABLE void notify(const QString &message);
   signals:
     void changed();
     void selectionChanged();

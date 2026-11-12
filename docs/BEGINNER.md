@@ -45,3 +45,6 @@ In Advanced unter **05 Werkzeuge → Bild** kann genau ein ausgewähltes Rasterb
 
 
 Unter der Objektliste stehen **Kopieren** und **Einfügen** bereit. Auf der Arbeitsfläche gelten Strg+C/X/V, Strg+Umschalt+V fügt Blazer-Objekte an der ursprünglichen Position ein. Native Kopien erhalten ihre zugeordneten Bearbeitungen; diese vor der Ausgabe prüfen. Textfelder behalten ihre eigenen Kürzel. [Zwischenablage und Grenzen](CLIPBOARD.md) gehören zur Entwicklung beta.4-dev, noch nicht zum beta.3-Paket.
+
+
+Unten rechts im Editor kann die Längeneinheit zwischen **mm** und **in** wechseln. Längenfelder akzeptieren auch ausdrückliche Angaben wie `1,25 in` oder `25.4 mm`. Reines Umschalten ändert das Motiv und die Laserparameter nicht. [Einheiten, Raster und Genauigkeit](EDITOR_UNITS.md) gehören zur Entwicklung beta.4-dev; Geschwindigkeiten und Herstellerreferenzen behalten ihre ausgewiesenen Einheiten.

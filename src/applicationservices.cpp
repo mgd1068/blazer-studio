@@ -9,6 +9,7 @@
 #include <QSysInfo>
 #include <algorithm>
 namespace {
+constexpr auto lengthUnitKey = "editor/v1/lengthUnit";
 constexpr auto recentKey = "projects/v1/recent";
 QString localProjectKey(const QUrl &url) {
     if (!url.isValid() || !url.isLocalFile() ||
@@ -41,6 +42,7 @@ ApplicationServices::ApplicationServices(Document *document, Simulator *machine,
       m_settings(settingsFile.isEmpty()
                      ? std::make_unique<QSettings>()
                      : std::make_unique<QSettings>(settingsFile, QSettings::IniFormat)) {
+    m_lengthUnit = m_settings->value(lengthUnitKey,"mm").toString()=="in" ? "in" : "mm";
     m_complete = m_settings->value("onboarding/v1/complete", false).toBool();
     if (m_settings->status() == QSettings::NoError)
         m_recent = recentList(m_settings->value(recentKey));
@@ -214,4 +216,38 @@ bool ApplicationServices::exportDiagnostics(const QUrl &file) {
                    : error;
     emit changed();
     return ok;
+}
+
+bool ApplicationServices::setLengthUnit(const QString &unit) {
+    if (unit != "mm" && unit != "in")
+        return false;
+    if (m_settings->status() != QSettings::NoError) {
+        const auto path = m_settings->fileName();
+        const auto format = m_settings->format();
+        m_settings.reset();
+        m_settings = std::make_unique<QSettings>(path, format);
+    }
+    m_settings->sync();
+    const auto previous = m_settings->value(lengthUnitKey);
+    if (m_settings->status() == QSettings::NoError && unit == m_lengthUnit &&
+        (!previous.isValid() || previous.toString() == unit))
+        return true;
+    if (m_settings->status() == QSettings::NoError) {
+        m_settings->setValue(lengthUnitKey, unit);
+        m_settings->sync();
+        if (m_settings->status() == QSettings::NoError) {
+            m_lengthUnit = unit;
+            m_message.clear();
+            emit changed();
+            return true;
+        }
+        if (previous.isValid())
+            m_settings->setValue(lengthUnitKey, previous);
+        else
+            m_settings->remove(lengthUnitKey);
+    }
+    m_message =
+        "Die Maßeinheit konnte nicht gespeichert werden; bisherige Einheit bleibt erhalten.";
+    emit changed();
+    return false;
 }

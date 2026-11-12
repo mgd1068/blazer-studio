@@ -14,6 +14,8 @@ class Workspace : public QQuickPaintedItem {
     Q_PROPERTY(bool preview READ preview WRITE setPreview NOTIFY previewChanged)
     Q_PROPERTY(bool dark READ dark WRITE setDark NOTIFY darkChanged)
     Q_PROPERTY(bool nodes READ nodeMode WRITE setNodeMode NOTIFY nodeModeChanged)
+    Q_PROPERTY(bool imperial READ imperial WRITE setImperial NOTIFY imperialChanged)
+    Q_PROPERTY(double snapStep READ snapStep NOTIFY imperialChanged)
     Q_PROPERTY(double zoom READ zoom NOTIFY zoomChanged)
   public:
     explicit Workspace(QQuickItem *p = nullptr);
@@ -49,6 +51,15 @@ class Workspace : public QQuickPaintedItem {
         update();
         emit nodeModeChanged();
     }
+    bool imperial() const { return m_imperial; }
+    double snapStep() const { return m_imperial ? .025 * 25.4 : .5; }
+    void setImperial(bool value) {
+        if (m_imperial == value)
+            return;
+        m_imperial = value;
+        emit imperialChanged();
+        update();
+    }
     double zoom() const { return m_zoom; }
     Q_INVOKABLE void fit() {
         m_zoom = 1;
@@ -67,6 +78,7 @@ class Workspace : public QQuickPaintedItem {
     void previewChanged();
     void darkChanged();
     void zoomChanged();
+    void imperialChanged();
     void nodeModeChanged();
 
   protected:
@@ -85,7 +97,7 @@ class Workspace : public QQuickPaintedItem {
     QPointer<Document> m_document;
     QPointer<Simulator> m_simulator;
     bool m_preview = false, m_dark = false, m_drag = false, m_panning = false;
-    bool m_nodes = false;
+    bool m_nodes = false, m_imperial = false;
     int m_dragNode = -1;
     double m_zoom = 1;
     QPointF m_pan, m_last, m_offset;

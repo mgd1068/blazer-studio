@@ -133,8 +133,8 @@ void Workspace::mouseMoveEvent(QMouseEvent *e) {
         update();
     } else if (m_drag && m_document) {
         auto pos = toWorld(e->position()) - m_offset;
-        pos.setX(std::round(pos.x() * 2) / 2);
-        pos.setY(std::round(pos.y() * 2) / 2);
+        pos.setX(std::round(pos.x() / snapStep()) * snapStep());
+        pos.setY(std::round(pos.y() / snapStep()) * snapStep());
         if (!e->modifiers().testFlag(Qt::AltModifier)) {
             QList<double> xs{0, 100, 200}, ys{0, 75, 150};
             for (int i = 0; i < m_document->items().size(); ++i) {
@@ -201,15 +201,18 @@ void Workspace::paint(QPainter *p) {
     p->save();
     p->setClipRect(bed);
     p->setPen(QPen(m_dark ? QColor("#35434a") : QColor("#eef0e9"), 1));
-    for (int x = 0; x <= 200; x += 5)
+    const double minor = m_imperial ? 2.54 : 5, major = m_imperial ? 25.4 : 25;
+    for (double x = 0; x <= 200; x += minor)
         p->drawLine(QPointF(o.x() + x * s, o.y()), QPointF(o.x() + x * s, o.y() + 150 * s));
-    for (int y = 0; y <= 150; y += 5)
-        p->drawLine(QPointF(o.x(), o.y() + y * s), QPointF(o.x() + 200 * s, o.y() + y * s));
+    for (double y = 0; y <= 150; y += minor)
+        p->drawLine(QPointF(o.x(), o.y() + (150 - y) * s),
+                    QPointF(o.x() + 200 * s, o.y() + (150 - y) * s));
     p->setPen(QPen(m_dark ? QColor("#43515a") : QColor("#dde3d9"), 1));
-    for (int x = 0; x <= 200; x += 25)
+    for (double x = 0; x <= 200; x += major)
         p->drawLine(QPointF(o.x() + x * s, o.y()), QPointF(o.x() + x * s, o.y() + 150 * s));
-    for (int y = 0; y <= 150; y += 25)
-        p->drawLine(QPointF(o.x(), o.y() + y * s), QPointF(o.x() + 200 * s, o.y() + y * s));
+    for (double y = 0; y <= 150; y += major)
+        p->drawLine(QPointF(o.x(), o.y() + (150 - y) * s),
+                    QPointF(o.x() + 200 * s, o.y() + (150 - y) * s));
     if (m_document) {
         p->setClipRect(boundingRect());
         p->translate(o);
@@ -327,14 +330,15 @@ void Workspace::paint(QPainter *p) {
     p->drawRect(bed);
     p->setFont(QFont("DejaVu Sans", 8));
     p->setPen(m_dark ? QColor("#9cabb4") : QColor("#768994"));
-    for (int x = 0; x <= 200; x += 25) {
+    for (double x = 0; x <= 200; x += major) {
         auto px = o.x() + x * s;
-        p->drawText(QRectF(px - 15, o.y() - 24, 30, 15), Qt::AlignCenter, QString::number(x));
+        p->drawText(QRectF(px - 15, o.y() - 24, 30, 15), Qt::AlignCenter,
+                    QString::number(m_imperial ? qRound(x / 25.4) : qRound(x)));
     }
-    for (int y = 0; y <= 150; y += 25) {
-        auto py = o.y() + y * s;
+    for (double y = 0; y <= 150; y += major) {
+        const auto py = o.y() + (150 - y) * s;
         p->drawText(QRectF(o.x() - 36, py - 7, 25, 14), Qt::AlignRight | Qt::AlignVCenter,
-                    QString::number(150 - y));
+                    QString::number(m_imperial ? qRound(y / 25.4) : qRound(y)));
     }
     p->setPen(QPen(QColor("#bc6955"), 2));
     p->drawLine(bed.bottomLeft(), bed.bottomLeft() + QPointF(18, 0));

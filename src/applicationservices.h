@@ -5,6 +5,7 @@
 #include <memory>
 class ApplicationServices : public QObject {
     Q_OBJECT
+    Q_PROPERTY(QString lengthUnit READ lengthUnit NOTIFY changed)
     Q_PROPERTY(bool firstRun READ firstRun NOTIFY changed)
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(QString revision READ revision CONSTANT)
@@ -13,6 +14,8 @@ class ApplicationServices : public QObject {
   public:
     ApplicationServices(Document *document, Simulator *machine, const QString &settingsFile = {},
                         QObject *parent = nullptr);
+    QString lengthUnit() const { return m_lengthUnit; }
+    Q_INVOKABLE bool setLengthUnit(const QString &unit);
     bool firstRun() const { return !m_complete; }
     QString version() const;
     QString revision() const;
@@ -34,6 +37,7 @@ class ApplicationServices : public QObject {
     std::unique_ptr<QSettings> m_settings;
     bool m_complete = false;
     QString m_message;
+    QString m_lengthUnit="mm";
     QStringList m_recent;
     bool storeRecentProjects(const QStringList &files);
 };

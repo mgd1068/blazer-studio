@@ -19,6 +19,51 @@ class ReleaseTest : public QObject {
         return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
     }
   private slots:
+    void lengthUnitPreferenceIsValidatedPersistentAndIndependent() {
+        QTemporaryDir dir;
+        const auto ini = dir.filePath("units.ini");
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        Simulator machine;
+        const auto before = d.projectBytes();
+        const auto revision = d.historyRevision();
+        const auto code = d.job().gcode();
+        {
+            ApplicationServices service(&d, &machine, ini);
+            QCOMPARE(service.lengthUnit(), QString("mm"));
+            QVERIFY(!service.setLengthUnit("cm"));
+            QVERIFY(service.setLengthUnit("in"));
+            QCOMPARE(service.lengthUnit(), QString("in"));
+            QCOMPARE(d.projectBytes(), before);
+            QCOMPARE(d.historyRevision(), revision);
+            QCOMPARE(d.job().gcode(), code);
+        }
+        {
+            ApplicationServices restored(&d, &machine, ini);
+            QCOMPARE(restored.lengthUnit(), QString("in"));
+            QVERIFY(restored.setLengthUnit("mm"));
+        }
+        ApplicationServices service(&d, &machine, ini);
+        QCOMPARE(service.lengthUnit(), QString("mm"));
+        QVERIFY(QFile::remove(ini));
+        QVERIFY(QDir().mkdir(ini));
+        QVERIFY(!service.setLengthUnit("in"));
+        QCOMPARE(service.lengthUnit(), QString("mm"));
+        QVERIFY(service.message().contains("Maßeinheit"));
+        QCOMPARE(d.projectBytes(), before);
+        QVERIFY(QDir().rmdir(ini));
+        QVERIFY(service.setLengthUnit("in"));
+        QCOMPARE(service.lengthUnit(), QString("in"));
+        QSettings untrusted(dir.filePath("invalid.ini"), QSettings::IniFormat);
+        untrusted.setValue("editor/v1/lengthUnit", "furlong");
+        untrusted.sync();
+        ApplicationServices invalid(&d, &machine, untrusted.fileName());
+        QCOMPARE(invalid.lengthUnit(), QString("mm"));
+        QVERIFY(invalid.setLengthUnit("mm"));
+        untrusted.sync();
+        QCOMPARE(untrusted.value("editor/v1/lengthUnit").toString(), QString("mm"));
+    }
     void retiredSaveDialogReclaimsOnlyItsChooserResources() {
         Document d;
         Simulator machine;

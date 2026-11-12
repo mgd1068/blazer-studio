@@ -113,8 +113,8 @@ function numeric(label,unit,control) {
  var meanings={
   "Links": "Abstand des linken Motivrandes vom linken Rand der Arbeitsfläche.",
   "Unten": "Abstand des unteren Motivrandes vom unteren Rand der Arbeitsfläche.",
-  "Breite": "Breite der Auswahl in Millimetern.",
-  "Höhe": "Höhe der Auswahl in Millimetern.",
+  "Breite": "Breite der Auswahl in der angezeigten Einheit.",
+  "Höhe": "Höhe der Auswahl in der angezeigten Einheit.",
   "v": "Geschwindigkeit: Wie schnell sich der Kopf bewegt. Langsamer kann mehr Material abtragen.",
   "P": "Leistung: Angeforderter Anteil der Laserleistung. Ein höherer Wert kann mehr Material abtragen.",
   "×": "Anzahl der Wiederholungen. Mehr Durchgänge können die Bearbeitung vertiefen.",
@@ -135,6 +135,7 @@ function numeric(label,unit,control) {
 function describe(control) {
  if(!control)return ""
  var named={
+  "editorUnitChoice": "Maßeinheit für Längenfelder, Lineale und Fangraster: mm oder Zoll (in). Projekt und GCode bleiben in Millimetern. Längen können auch mit mm oder in eingegeben werden.",
   "toolHeadChoice": "Wähle die Nennleistung des tatsächlich eingebauten Laserkopfs. Danach zeigt die Materialliste nur passende Profile. Der Kopf wird nicht automatisch erkannt.",
   "materialChoice": "Wähle das tatsächliche Material und seine Dicke. Die Werte stammen aus dem Profil; Herstellerwerte müssen am eigenen Gerät geprüft werden.",
   "objectNameInput": "Name des ausgewählten Objekts. Eingabe oder Verlassen des Feldes übernimmt die Änderung.",

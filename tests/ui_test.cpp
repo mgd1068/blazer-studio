@@ -8,6 +8,8 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
+#include <QMouseEvent>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -36,6 +38,109 @@ class UiTest : public QObject {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
+    }
+    void lengthFieldsConvertSuffixesAndPreserveUneditedPrecision() {
+        QTemporaryDir storage;
+        Document project;
+        Simulator machine;
+        ApplicationServices services(&project, &machine, storage.filePath("units.ini"));
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("appServices", &services);
+        QQmlComponent component(&engine, QUrl("qrc:/qt/qml/BlazerStudio/qml/NumberField.qml"));
+        std::unique_ptr<QObject> field(component.create());
+        QVERIFY2(field, qPrintable(component.errorString()));
+        auto *input = field->findChild<QObject *>("numericEditor");
+        QVERIFY(input);
+        QSignalSpy edited(field.get(), SIGNAL(edited(double)));
+        field->setProperty("value", 65.);
+        QVERIFY(services.setLengthUnit("in"));
+        QCOMPARE(field->property("shownUnit").toString(), QString("in"));
+        QCOMPARE(field->property("inputText").toString(), QString("2.5591"));
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QCOMPARE(edited.count(), 0);
+        QCOMPARE(field->property("value").toDouble(), 65.);
+        QVariant value;
+        QVERIFY(
+            QMetaObject::invokeMethod(field.get(), "numericValue", Q_RETURN_ARG(QVariant, value)));
+        QCOMPARE(value.toDouble(), 65.);
+        const QList<QPair<QString, double>> cases{
+            {"1,25 in", 31.75}, {"25.4 mm", 25.4}, {"2\"", 50.8}, {".5", 12.7}, {"1e-2 in", .254}};
+        for (const auto &entry : cases) {
+            field->setProperty("inputText", entry.first);
+            QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+            QVERIFY(!edited.isEmpty());
+            QVERIFY(qAbs(edited.takeLast()[0].toDouble() - entry.second) < 1e-10);
+        }
+        field->setProperty("inputText", "1/2 in");
+        const auto count = edited.count();
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QCOMPARE(edited.count(), count);
+        QVERIFY(services.setLengthUnit("mm"));
+        field->setProperty("inputText", "2.5");
+        QVERIFY(QMetaObject::invokeMethod(input, "textEdited"));
+        QVERIFY(services.setLengthUnit("in"));
+        QCOMPARE(field->property("shownUnit").toString(), QString("mm"));
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QCOMPARE(edited.takeLast()[0].toDouble(), 2.5);
+        field->setProperty("unit", "mm/min");
+        field->setProperty("value", 1234.);
+        QVERIFY(QMetaObject::invokeMethod(field.get(), "resetInput"));
+        QCOMPARE(field->property("shownUnit").toString(), QString("mm/min"));
+        QCOMPARE(field->property("inputText").toString(), QString("1234.0"));
+        field->setProperty("inputText", "1 in");
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QVERIFY(edited.isEmpty());
+        Workspace workspace;
+        QSignalSpy changed(&workspace, &Workspace::imperialChanged);
+        QCOMPARE(workspace.snapStep(), .5);
+        workspace.setImperial(true);
+        QCOMPARE(workspace.snapStep(), .635);
+        QCOMPARE(changed.count(), 1);
+        workspace.setImperial(true);
+        QCOMPARE(changed.count(), 1);
+    }
+    void imperialDragSnapsInWorldUnitsAndIsOneUndoStep() {
+        class TestWorkspace : public Workspace {
+          public:
+            using Workspace::mouseMoveEvent;
+            using Workspace::mousePressEvent;
+            using Workspace::mouseReleaseEvent;
+        };
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        d.setProperty("x", 50.8);
+        d.setProperty("y", 50.8);
+        d.setProperty("width", 25.4);
+        d.setProperty("height", 25.4);
+        TestWorkspace workspace;
+        workspace.setWidth(1000);
+        workspace.setHeight(800);
+        workspace.setDocument(&d);
+        workspace.setImperial(true);
+        const auto bounds = workspace.selectedScreenBounds();
+        const QPointF start = bounds.center();
+        const double pixelsPerMm = bounds.width() / 25.4;
+        const auto before = d.projectBytes();
+        const auto position = d.historyPosition();
+        QMouseEvent press(QEvent::MouseButtonPress, start, start, Qt::LeftButton, Qt::LeftButton,
+                          Qt::AltModifier);
+        workspace.mousePressEvent(&press);
+        const QPointF end = start + QPointF(.27 * 25.4 * pixelsPerMm, -.08 * 25.4 * pixelsPerMm);
+        QMouseEvent move(QEvent::MouseMove, end, end, Qt::NoButton, Qt::LeftButton,
+                         Qt::AltModifier);
+        workspace.mouseMoveEvent(&move);
+        QMouseEvent release(QEvent::MouseButtonRelease, end, end, Qt::LeftButton, Qt::NoButton,
+                            Qt::AltModifier);
+        workspace.mouseReleaseEvent(&release);
+        QVERIFY(qAbs(d.items()[0].bounds.x() - 57.785) < 1e-9);
+        QVERIFY(qAbs(d.items()[0].bounds.y() - 52.705) < 1e-9);
+        QCOMPARE(d.historyPosition(), position + 1);
+        QVERIFY(d.job().valid());
+        QVERIFY(d.job().gcode().contains("G21"));
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        QVERIFY(workspace.imperial());
     }
     void editNavigateAndFocus() {
         Document project;

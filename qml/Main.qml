@@ -39,6 +39,7 @@ ApplicationWindow {
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
     readonly property bool projectDialogActive: historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
+    readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
     readonly property color panel: night ? "#202e39" : "#ffffff"
@@ -260,8 +261,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+V"; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.pasteFromClipboard(true) }
     Shortcut { sequences: [StandardKey.Save]; enabled: !projectDialogActive; onActivated: win.showSaveDialog() }
     Shortcut { sequences: [StandardKey.Open]; enabled: !projectDialogActive; onActivated: win.requestAction("open") }
-    Shortcut { sequences: [StandardKey.Undo]; enabled: !projectDialogActive; onActivated: project.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; enabled: !projectDialogActive; onActivated: project.redo() }
+    Shortcut { sequences: [StandardKey.Undo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; enabled: !projectDialogActive; onActivated: importDialog.open() }
     Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDialogActive; onActivated: { machine.stop(); project.select(-1) } }
     FileDialog { id: importDialog; objectName: "importMotifDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik, GCode oder Modell importieren"; nameFilters: ["Geometrie, Bilder und Modelle (*.svg *.dxf *.hpgl *.plt *.gc *.gcode *.nc *.rd *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2 *.mage)"]; onAccepted: win.importMotif(selectedFile) }
@@ -785,11 +786,19 @@ ApplicationWindow {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     currentIndex: win.page === 4 ? 3 : win.page === 3 ? 2 : win.page === 2 ? 1 : 0
                     Item {
-                        Workspace { id: canvas; objectName: "workspace"; anchors.fill: parent; document: project; registration: typeof cameraRegistration!=="undefined" ? cameraRegistration : null; simulator: machine; preview: win.page === 1; dark: win.night }
+                        Workspace { id: canvas; objectName: "workspace"; anchors.fill: parent; document: project; registration: typeof cameraRegistration!=="undefined" ? cameraRegistration : null; simulator: machine; preview: win.page === 1; dark: win.night; imperial: win.lengthUnit==="in" }
                         Rectangle {
                             anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 20
-                            width: 168; height: 30; radius: 15; color: win.panel; border.color: win.line
-                            Text { anchors.centerIn: parent; text: win.page === 0 ? project.pages[project.activePage]+" · 200 × 150 mm" : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 12 }
+                            width: win.lengthUnit==="in" ? 190 : 168; height: 30; radius: 15; color: win.panel; border.color: win.line
+                            Text { objectName: "editorBedSize"; anchors.centerIn: parent; width: parent.width-14; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; textFormat: Text.PlainText; text: win.page === 0 ? project.pages[project.activePage]+" · "+(win.lengthUnit==="in" ? (200/25.4).toFixed(3)+" × "+(150/25.4).toFixed(3)+" in" : "200 × 150 mm") : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 12 }
+                        }
+                        ToolCombo {
+                            objectName: "editorUnitChoice"; dark: win.night; width: 76; height: 30
+                            anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 20
+                            model: ["mm","in"]
+                            currentIndex: win.lengthUnit==="in" ? 1 : 0
+                            enabled: typeof appServices!=="undefined" && appServices!==null
+                            onActivated: index=>{if(!appServices.setLengthUnit(index===1?"in":"mm"))project.notify(appServices.message);else project.notify(index===1?"Maßeinheit für Längen: Zoll (in).":"Maßeinheit für Längen: Millimeter (mm).");currentIndex=Qt.binding(function(){return win.lengthUnit==="in"?1:0})}
                         }
                         Row {
                             id: zoomBar
@@ -900,7 +909,7 @@ ApplicationWindow {
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
                         Text { objectName: "activePageFooter"; text: "●  " + (win.page === 2 ? machine.state : project.pages[project.activePage]); textFormat: Text.PlainText; color: "#209b76"; font.pixelSize: 12; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight }
-                        Text { objectName: "workspaceHint"; text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: 0,5 mm   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 11 }
+                        Text { objectName: "workspaceHint"; text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: "+(win.lengthUnit==="in" ? "0.025 in" : "0,5 mm")+"   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 11 }
                     }
                 }
             }
