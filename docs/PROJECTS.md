@@ -1,6 +1,6 @@
 # Projektname und Notizen
 
-Entwicklungsstand nach dem geprüften Kandidaten beta.2, ab `0.9.0-beta.3-dev`.
+Verfügbar ab `0.9.0-beta.3`. Die Geräte- und externen Bedienungsabnahmen bleiben gesondert offen.
 
 Oben links **Projektname → Projektangaben** wählen. Der Dialog öffnet einen Entwurf für Name und Notizen. **Übernehmen** ändert das geöffnete Projekt; **Abbrechen** oder Escape verwirft den Entwurf. Danach das Projekt speichern. Undo/Redo kann eine übernommene Änderung zurücknehmen beziehungsweise wiederholen.
 

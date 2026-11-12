@@ -8,7 +8,7 @@ Ein Testname belegt nur seinen beschriebenen Fall. **Teilumfang** bedeutet vorha
 
 | ID | Vorhandener Umfang und Nachweis | Verbleibende Arbeit |
 |---|---|---|
-| F01 | Projektdateien, Namen/Notizen, eigene Vorlagen, lokaler Dateiverlauf, Undo/Redo und Dateirundlauf: `projectMetadataHistoryAndRoundtrip`, `projectMetadataValidationIsAtomic`, `projectMetadataReadsLegacyWithoutNotes`, `recentProjectsPersistBoundAndDeduplicate`, `projectTemplateIsIndependentAndKeepsEmbeddedContent`, `workflow` | Softwarefälle geprüft; native Desktop-/externe Bedienung bleiben T08. Format 8 und Vorlagen benötigen den Entwicklungsstand nach beta.2 |
+| F01 | Projektdateien, Namen/Notizen, eigene Vorlagen, lokaler Dateiverlauf, Undo/Redo und Dateirundlauf: `projectMetadataHistoryAndRoundtrip`, `projectMetadataValidationIsAtomic`, `projectMetadataReadsLegacyWithoutNotes`, `recentProjectsPersistBoundAndDeduplicate`, `projectTemplateIsIndependentAndKeepsEmbeddedContent`, `workflow` | Softwarefälle geprüft; native Desktop-/externe Bedienung bleiben T08. Format 8 und Vorlagen benötigen mindestens beta.3 |
 | F02 | Benannte Blätter, aktive Ausgabe und Verschachteln über Blätter: `operationManagementAndMultiSheet` | Blattkopien und sämtliche blattübergreifenden Bearbeitungsfälle spezifizieren |
 | F03 | Undo/Redo, atomare Sicherung und Recovery: `stability`, `modelAndCleanHistory` | Sichtbaren Verlauf und praktische Wiederherstellungsfälle am Desktop abnehmen |
 | F04 | SVG, DXF-Teilmenge, PDF/AI/EPS über Inkscape: `vectorImportsAndExport`, `pdfLightBurnAndVectorClip` | HPGL/PLT, GCode-Geometrie und aufgeführte Austauschformate implementieren; Importkorpus verbreitern |
