@@ -1,5 +1,7 @@
 # Bekannte Einschränkungen des Testkandidaten
 
+- Reale Verbindungen sind ausschließlich für den bisherigen M3-Ausgabevertrag verfügbar. Abweichende bekannte GRBL-XY-Projekte sind offline nutzbar; eine Beschreibung ist keine Freigabe weiterer Laser.
+- Projekte mit Hilfslinien, Hilfsformen oder abweichendem Geräteprofil verwenden Formate 9–11 und können mit beta.3 nicht geöffnet werden.
 - Erste reale Kraftpapier-Kontur-/Rasterversuche am M3 sind dokumentiert. Vollständige Betriebs-, Schnitt- und Reliefabnahme sowie externe Bedienungstests stehen aus; der fast durchgehende Papierschnitt benötigte mechanische Hilfe. Siehe [Geräteprotokoll](../HARDWARE_ACCEPTANCE.md).
 - Die Herstellerprofile beziehen sich auf M3 Pro. Fehlende Gravur-Durchgänge und das anfängliche Raster enthalten ausdrücklich eigene Arbeitswerte.
 - Die Steuerung des Gehäuselüfters ist nicht nachgewiesen; M8 führte trotz Quittierung zu keinem vom Nutzer bestätigten Lüfterlauf.

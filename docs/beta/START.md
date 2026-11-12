@@ -23,7 +23,7 @@ Die Paketverwaltung installiert die benötigten Laufzeitbibliotheken. Ein Compil
 
 Der Hintergrundauftrag lässt sich abbrechen und neu berechnen. **Berechnung abbrechen** und **Laser-Stop** sind unterschiedliche Aktionen.
 
-Über **Projektname → Projektangaben** lassen sich Name und Notizen bearbeiten. Dasselbe Menü bietet eigene Vorlagen an; **Zuletzt** öffnet den lokalen Projektverlauf. Siehe [Projekte und Vorlagen](../PROJECTS.md). Format-8-Dateien mit Notizen benötigen mindestens beta.3 und lassen sich mit beta.2 nicht öffnen.
+Über **Projektname → Projektangaben** lassen sich Name und Notizen bearbeiten. Dasselbe Menü bietet eigene Vorlagen an; **Zuletzt** öffnet den lokalen Projektverlauf. Siehe [Projekte und Vorlagen](../PROJECTS.md). Format-8-Dateien mit Notizen benötigen mindestens beta.3 und lassen sich mit beta.2 nicht öffnen. Beta.4 ergänzt je nach verwendeten Daten die Formate 9–11; beta.3 kann diese nicht öffnen. Details und Grenzen: [Änderungen zu beta.4](CHANGES_BETA4.md).
 
 ## Hilfe und Fehlerberichte
 
