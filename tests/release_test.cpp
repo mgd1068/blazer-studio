@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -18,6 +19,37 @@ class ReleaseTest : public QObject {
         return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
     }
   private slots:
+    void retiredSaveDialogReclaimsOnlyItsChooserResources() {
+        Document d;
+        Simulator machine;
+        ApplicationServices service(&d, &machine, storage.filePath("dialog-ownership.ini"));
+        QObject owner;
+        auto *dialog = new QObject(&owner);
+        dialog->setObjectName("saveProjectDialog");
+        dialog->setProperty("title", "Project save");
+        dialog->setProperty("visible", true);
+        QPointer<QObject> chooser = new QObject(&owner);
+        chooser->setProperty("title", "Project save");
+        chooser->setProperty("selectedFile", QUrl());
+        chooser->setProperty("currentFolder", QUrl());
+        QObject unrelated(&owner);
+        unrelated.setProperty("title", "Other chooser");
+        unrelated.setProperty("selectedFile", QUrl());
+        unrelated.setProperty("currentFolder", QUrl());
+        QObject sameTitle(&owner);
+        sameTitle.setProperty("title", "Project save");
+        QCOMPARE(service.reclaimFileDialogResources(dialog, &owner), 0);
+        dialog->setProperty("visible", false);
+        QCOMPARE(service.reclaimFileDialogResources(nullptr, &owner), 0);
+        QCOMPARE(service.reclaimFileDialogResources(dialog, nullptr), 0);
+        QCOMPARE(service.reclaimFileDialogResources(dialog, &unrelated), 0);
+        QCOMPARE(service.reclaimFileDialogResources(dialog, &owner), 1);
+        QCOMPARE(chooser->parent(), dialog);
+        QCOMPARE(unrelated.parent(), &owner);
+        QCOMPARE(sameTitle.parent(), &owner);
+        delete dialog;
+        QVERIFY(chooser.isNull());
+    }
     void recentProjectsPersistBoundAndDeduplicate() {
         QTemporaryDir dir;
         const auto ini = dir.filePath("settings.ini");
@@ -147,6 +179,7 @@ class ReleaseTest : public QObject {
         QTest::addColumn<QString>("mode");
         QTest::newRow("screenshot") << QString("screenshot");
         QTest::newRow("gcode-export") << QString("export");
+        QTest::newRow("template-export") << QString("template");
         QTest::newRow("self-test") << QString("self-test");
     }
     void offlineCliLeavesUserLibraryUntouched() {
@@ -181,6 +214,7 @@ class ReleaseTest : public QObject {
         environment.insert("QT_QPA_PLATFORM", "offscreen");
         environment.insert("QT_QUICK_BACKEND", "software");
         QStringList arguments;
+        QByteArray expectedGcode;
         if (mode == "screenshot")
             arguments = {"--new", "--screenshot", isolated.filePath("window.png")};
         else if (mode == "self-test")
@@ -189,10 +223,15 @@ class ReleaseTest : public QObject {
             Document d;
             d.newProject();
             d.addShape("rect");
-            const auto project = isolated.filePath("input.blazer");
-            QVERIFY(d.save(QUrl::fromLocalFile(project)));
-            arguments = {"--open-project", project, "--export-gcode",
-                         isolated.filePath("output.gcode")};
+            const auto project =
+                isolated.filePath(mode == "template" ? "input.blazertemplate" : "input.blazer");
+            if (mode == "template")
+                QVERIFY(d.saveTemplate(QUrl::fromLocalFile(project)));
+            else
+                QVERIFY(d.save(QUrl::fromLocalFile(project)));
+            expectedGcode = (d.job().gcode().join('\n') + '\n').toUtf8();
+            arguments = {mode == "template" ? "--new-from-template" : "--open-project", project,
+                         "--export-gcode", isolated.filePath("output.gcode")};
         }
         QProcess process;
         process.setProcessEnvironment(environment);
@@ -201,6 +240,8 @@ class ReleaseTest : public QObject {
         QVERIFY(process.waitForFinished(15000));
         QCOMPARE(process.exitStatus(), QProcess::NormalExit);
         QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+        if (!expectedGcode.isEmpty())
+            QCOMPARE(read(isolated.filePath("output.gcode")), expectedGcode);
         QCOMPARE(read(libraryPath), original);
         QCOMPARE(read(settingsPath), originalSettings);
         QVERIFY(!QFile::exists(libraryPath + ".before-manufacturer-v1.bak"));

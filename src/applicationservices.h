@@ -24,6 +24,7 @@ class ApplicationServices : public QObject {
     Q_INVOKABLE bool clearRecentProjects();
     Q_INVOKABLE bool openRecentProject(const QUrl &file);
     Q_INVOKABLE void refreshRecentProjects() { emit changed(); }
+    Q_INVOKABLE int reclaimFileDialogResources(QObject *dialog, QObject *owner);
   signals:
     void changed();
 

@@ -237,6 +237,95 @@ class StabilityTest : public QObject {
         QVERIFY(restored.restoreBytes(read(a.location())));
         QCOMPARE(restored.items()[0].bounds.width(), 20.);
     }
+    void startupDocumentCannotReplaceUnresolvedRecovery() {
+        const auto folder = temp.filePath("unresolved-recovery");
+        QString path;
+        {
+            Document old;
+            Recovery recovery(&old, folder);
+            old.addShape("rect");
+            old.setProperty("width", 21.);
+            QVERIFY(recovery.save());
+            old.setProperty("width", 31.);
+            QVERIFY(recovery.save());
+            path = recovery.location();
+        }
+        const auto current = read(path), previous = read(path + ".previous");
+        QVERIFY(current != previous);
+        Document incoming;
+        Recovery recovery(&incoming, folder);
+        QVERIFY(recovery.pendingDecision());
+        incoming.addShape("text");
+        QTest::qWait(1800);
+        QCOMPARE(read(path), current);
+        QCOMPARE(read(path + ".previous"), previous);
+        QVERIFY(!recovery.save());
+        recovery.closeSession();
+        incoming.addShape("ellipse");
+        QTest::qWait(1800);
+        QCOMPARE(read(path), current);
+        QCOMPARE(read(path + ".previous"), previous);
+    }
+    void recoveryDecisionReleasesAutosaveOnlyAfterSuccess() {
+        const auto folder = temp.filePath("recovery-decisions");
+        QString path;
+        {
+            Document old;
+            old.newProject();
+            Recovery recovery(&old, folder);
+            old.addShape("rect");
+            old.setProperty("width", 43.);
+            QVERIFY(recovery.save());
+            path = recovery.location();
+        }
+        {
+            Document incoming;
+            Recovery recovery(&incoming, folder);
+            incoming.addShape("text");
+            QVERIFY(recovery.pendingDecision());
+            QVERIFY(recovery.restore());
+            QVERIFY(!recovery.pendingDecision());
+            QCOMPARE(incoming.items()[0].bounds.width(), 43.);
+            incoming.setProperty("width", 47.);
+            QTest::qWait(1800);
+            Document check;
+            QVERIFY(check.restoreBytes(read(path)));
+            QCOMPARE(check.items()[0].bounds.width(), 47.);
+        }
+        {
+            Document incoming;
+            Recovery recovery(&incoming, folder);
+            incoming.addShape("ellipse");
+            const auto expected = incoming.projectBytes();
+            QVERIFY(recovery.pendingDecision());
+            recovery.clear();
+            QVERIFY(!recovery.pendingDecision());
+            QTest::qWait(1800);
+            QCOMPARE(read(path), expected);
+            recovery.closeSession();
+            QVERIFY(!QFile::exists(path));
+            incoming.addShape("rect");
+            QTest::qWait(1800);
+            QVERIFY(!QFile::exists(path));
+            QVERIFY(!recovery.save());
+        }
+        // An unremovable entry must not silently acknowledge the decision.
+        QVERIFY(QDir().mkpath(path));
+        QVERIFY(!put("recovery-decisions/autosave.blazer/keep", "sentinel").isEmpty());
+        Document incoming;
+        Recovery recovery(&incoming, folder);
+        incoming.addShape("text");
+        QVERIFY(recovery.pendingDecision());
+        QVERIFY(!recovery.restore());
+        recovery.clear();
+        QVERIFY(recovery.pendingDecision());
+        QVERIFY(!recovery.save());
+        QCOMPARE(read(path + "/keep"), QByteArray("sentinel"));
+        QVERIFY(QDir(path).removeRecursively());
+        recovery.clear();
+        QVERIFY(!recovery.pendingDecision());
+        QVERIFY(recovery.save());
+    }
     void killedProcessRecoversAndReleasesItsLock() {
         auto folder = temp.filePath("crash-recovery");
         QProcess child;

@@ -330,6 +330,12 @@ void Document::markClean() {
     m_saved = snapshot();
     m_dirty = false;
 }
+void Document::setFileUrl(const QUrl &url) {
+    if (m_fileUrl == url)
+        return;
+    m_fileUrl = url;
+    emit fileUrlChanged();
+}
 void Document::applySnapshot(const Snapshot &s) {
     beginResetModel();
     m_items = s.items;
@@ -346,6 +352,7 @@ void Document::applySnapshot(const Snapshot &s) {
     refresh();
 }
 void Document::demo() {
+    setFileUrl({});
     beginResetModel();
     m_title = "Werkstattschild";
     m_notes.clear();
@@ -1110,6 +1117,15 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
 }
 bool Document::save(const QUrl &url) {
     finishMove();
+    const QFileInfo target(url.toLocalFile());
+    const auto isTemplate = [](const QFileInfo &file) {
+        return file.suffix().compare("blazertemplate", Qt::CaseInsensitive) == 0;
+    };
+    if (isTemplate(target) || isTemplate(QFileInfo(target.canonicalFilePath()))) {
+        notify("Bitte das neue Projekt als .blazer speichern. Eine Vorlage wird nur über "
+               "Als Vorlage speichern geändert.");
+        return false;
+    }
     if (!url.isLocalFile()) {
         notify("Bitte einen lokalen Dateipfad wählen.");
         return false;
@@ -1125,9 +1141,10 @@ bool Document::save(const QUrl &url) {
         return false;
     }
     markClean();
+    setFileUrl(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     emit changed();
     notify("Projekt gespeichert.");
-    emit projectFileUsed(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
+    emit projectFileUsed(m_fileUrl);
     return true;
 }
 bool Document::open(const QUrl &url) {
@@ -1145,9 +1162,65 @@ bool Document::open(const QUrl &url) {
     m_undo.clear();
     m_redo.clear();
     markClean();
+    setFileUrl(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     emit changed();
     notify("Projekt geöffnet.");
-    emit projectFileUsed(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
+    emit projectFileUsed(m_fileUrl);
+    return true;
+}
+bool Document::saveTemplate(const QUrl &url) {
+    if (!url.isLocalFile() ||
+        QFileInfo(url.toLocalFile()).suffix().compare("blazertemplate", Qt::CaseInsensitive) != 0) {
+        notify("Bitte eine lokale .blazertemplate-Datei für die Vorlage wählen.");
+        return false;
+    }
+    finishMove();
+    auto root = QJsonDocument::fromJson(serialize()).object();
+    root["format"] = "blazer-studio-template";
+    root["templateVersion"] = 1;
+    const auto bytes = QJsonDocument(root).toJson();
+    if (bytes.size() > maxProjectBytes) {
+        notify("Vorlage ist größer als 64 MiB; Speichern abgebrochen.");
+        return false;
+    }
+    QString error;
+    if (!AtomicFile::write(url.toLocalFile(), bytes, error, ".bak")) {
+        notify(error);
+        return false;
+    }
+    notify(m_dirty ? "Vorlage gespeichert; Projektänderungen sind weiterhin ungespeichert."
+                   : "Vorlage gespeichert.");
+    return true;
+}
+bool Document::newFromTemplate(const QUrl &url) {
+    QFile file(url.toLocalFile());
+    if (!url.isLocalFile() || !file.open(QIODevice::ReadOnly) || file.size() > maxProjectBytes) {
+        notify("Vorlage konnte nicht gelesen werden.");
+        return false;
+    }
+    QJsonParseError error;
+    const auto json = QJsonDocument::fromJson(file.read(maxProjectBytes + 1), &error);
+    auto root = json.object();
+    if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio-template" ||
+        root["templateVersion"] != 1) {
+        notify("Keine unterstützte Blazer-Vorlage; das aktuelle Projekt bleibt erhalten.");
+        return false;
+    }
+    root["format"] = "blazer-studio";
+    root.remove("templateVersion");
+    const auto state = parse(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    if (!state) {
+        notify("Vorlage enthält kein gültiges Projekt; das aktuelle Projekt bleibt erhalten.");
+        return false;
+    }
+    // A template starts an independent, unsaved document with fresh history.
+    // Its source is never treated as the project's ordinary save destination.
+    m_undo.clear();
+    m_redo.clear();
+    m_saved = Snapshot{};
+    setFileUrl({});
+    applySnapshot(*state);
+    notify("Neues Projekt aus Vorlage; bitte unter eigenem Projektnamen speichern.");
     return true;
 }
 QPainterPath Document::outline(const Artwork &a) {

@@ -119,6 +119,28 @@ bool ApplicationServices::openRecentProject(const QUrl &file) {
     emit changed(); // Refresh availability even when opening fails.
     return opened;
 }
+int ApplicationServices::reclaimFileDialogResources(QObject *dialog, QObject *owner) {
+    if (!dialog || !owner || dialog->parent() != owner ||
+        dialog->objectName() != "saveProjectDialog" || dialog->property("visible").toBool())
+        return 0;
+    const auto title = dialog->property("title").toString();
+    if (title.isEmpty())
+        return 0;
+    int reclaimed = 0;
+    // Qt's Quick fallback reparents its chooser to the window. Give these
+    // retired chooser objects back to their wrapper before destroying it.
+    // Use the unique chooser title and its properties, not private Qt types.
+    const auto children = owner->children();
+    for (auto *child : children) {
+        if (child == dialog || child->property("title").toString() != title ||
+            !child->property("selectedFile").isValid() ||
+            !child->property("currentFolder").isValid())
+            continue;
+        child->setParent(dialog);
+        ++reclaimed;
+    }
+    return reclaimed;
+}
 QString ApplicationServices::version() const { return QStringLiteral(BLAZER_VERSION); }
 QString ApplicationServices::revision() const { return QStringLiteral(BLAZER_REVISION); }
 bool ApplicationServices::finishOnboarding() {

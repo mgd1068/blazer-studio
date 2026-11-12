@@ -43,6 +43,7 @@ import json, subprocess, sys
 manifest, actual = [json.load(open(path)) for path in sys.argv[1:]]
 assert actual['selfTest'] == 'passed' and actual['simulation'] is True
 assert actual['hardwareTested'] is False
+assert actual['templateMimeType'] == 'application/x-blazer-template', actual
 assert actual['version'] == manifest['version'], (actual, manifest)
 assert actual['revision'] == manifest['revision'], (actual, manifest)
 installed = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'blazer-studio'], text=True)

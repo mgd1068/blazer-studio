@@ -28,6 +28,7 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QVariantList layers READ layers NOTIFY changed)
     Q_PROPERTY(QString title READ title NOTIFY changed)
     Q_PROPERTY(QString notes READ notes NOTIFY changed)
+    Q_PROPERTY(QUrl fileUrl READ fileUrl NOTIFY fileUrlChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY changed)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY changed)
@@ -98,6 +99,7 @@ class Document : public QAbstractListModel {
     QVariantList layers() const { return m_layers; }
     QString title() const { return m_title; }
     QString notes() const { return m_notes; }
+    QUrl fileUrl() const { return m_fileUrl; }
     Q_INVOKABLE bool setMetadata(const QString &title, const QString &notes);
     QString message() const { return m_message; }
     bool dirty() const { return m_dirty; }
@@ -139,6 +141,8 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE bool importSvg(const QUrl &url);
     Q_INVOKABLE bool save(const QUrl &url);
     Q_INVOKABLE bool open(const QUrl &url);
+    Q_INVOKABLE bool saveTemplate(const QUrl &url);
+    Q_INVOKABLE bool newFromTemplate(const QUrl &url);
     void beginMove();
     void moveSelection(QPointF position);
     void finishMove();
@@ -148,6 +152,7 @@ class Document : public QAbstractListModel {
     void selectionChanged();
     void messageChanged();
     void projectFileUsed(const QUrl &file);
+    void fileUrlChanged();
 
   private:
     struct Snapshot {
@@ -169,6 +174,7 @@ class Document : public QAbstractListModel {
     void checkpoint();
     void refresh(int row = -1);
     void markClean();
+    void setFileUrl(const QUrl &url);
     bool transformSelection(const QRectF &bounds, bool history = true);
     void normalizeGroups();
     bool canAppend(const Artwork &item);
@@ -183,6 +189,7 @@ class Document : public QAbstractListModel {
     QStringList m_pages{"Blatt 01"};
     int m_activePage = 0;
     QString m_title = "Werkstattschild", m_notes, m_message;
+    QUrl m_fileUrl;
     bool m_dirty = false;
     Snapshot m_saved;
     QList<Snapshot> m_undo, m_redo;

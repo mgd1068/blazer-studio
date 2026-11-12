@@ -5,4 +5,9 @@
     <comment xml:lang="de">Blazer-Studio-Projekt</comment>
     <glob pattern="*.blazer"/>
   </mime-type>
+  <mime-type type="application/x-blazer-template">
+    <comment>Blazer Studio project template</comment>
+    <comment xml:lang="de">Blazer-Studio-Projektvorlage</comment>
+    <glob pattern="*.blazertemplate"/>
+  </mime-type>
 </mime-info>

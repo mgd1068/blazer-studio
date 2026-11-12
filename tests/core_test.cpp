@@ -8,13 +8,213 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <limits>
 
 class CoreTest : public QObject {
     Q_OBJECT
+    static QByteArray readFile(const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    }
   private slots:
+    void projectFileIdentityFollowsAccessAndNewDocuments() {
+        QTemporaryDir dir;
+        Document d;
+        QVERIFY(d.fileUrl().isEmpty());
+        const auto first = QUrl::fromLocalFile(dir.filePath("first.blazer"));
+        const auto second = QUrl::fromLocalFile(dir.filePath("second copy.blazer"));
+        const auto source = QUrl::fromLocalFile(dir.filePath("source.blazertemplate"));
+        QVERIFY(d.save(first));
+        QCOMPARE(d.fileUrl(), first);
+        QVERIFY(!d.projectBytes().contains(dir.path().toUtf8()));
+        QVERIFY(d.setMetadata("Changed", "Notes"));
+        QVERIFY(d.save(second));
+        QCOMPARE(d.fileUrl(), second);
+        d.undo();
+        QCOMPARE(d.fileUrl(), second); // Undo changes content, not the save destination.
+        d.redo();
+        QCOMPARE(d.fileUrl(), second);
+        QVERIFY(d.open(first));
+        QCOMPARE(d.fileUrl(), first);
+        QVERIFY(!d.open(QUrl::fromLocalFile(dir.filePath("missing.blazer"))));
+        QVERIFY(!d.save(QUrl::fromLocalFile(dir.filePath("missing/project.blazer"))));
+        QVERIFY(!d.newFromTemplate(QUrl::fromLocalFile(dir.filePath("missing.blazertemplate"))));
+        QCOMPARE(d.fileUrl(), first);
+        QVERIFY(d.saveTemplate(source));
+        QCOMPARE(d.fileUrl(), first);
+        QVERIFY(!d.dirty());
+        QVERIFY(d.newFromTemplate(source));
+        QVERIFY(d.fileUrl().isEmpty());
+        QVERIFY(d.dirty());
+        QVERIFY(!d.save(source));
+        QVERIFY(d.fileUrl().isEmpty());
+        QVERIFY(d.save(second));
+        QCOMPARE(d.fileUrl(), second);
+        const auto saved = d.projectBytes();
+        QVERIFY(d.restoreBytes(saved)); // Even identical recovery data needs a separate save.
+        QVERIFY(d.fileUrl().isEmpty());
+        QVERIFY(d.dirty());
+        d.undo();
+        QVERIFY(d.fileUrl().isEmpty());
+        QVERIFY(d.save(first));
+        d.newProject();
+        QVERIFY(d.fileUrl().isEmpty());
+        QVERIFY(d.save(first));
+        d.demo();
+        QVERIFY(d.fileUrl().isEmpty());
+    }
+    void projectTemplateIsIndependentAndKeepsEmbeddedContent() {
+        QTemporaryDir dir;
+        const auto svgPath = dir.filePath("source.svg");
+        QFile svg(svgPath);
+        QVERIFY(svg.open(QIODevice::WriteOnly));
+        QVERIFY(svg.write("<svg xmlns='http://www.w3.org/2000/svg' width='4mm' height='3mm' "
+                          "viewBox='0 0 4 3'><path d='M0 0H4V3H0Z'/></svg>") > 0);
+        svg.close();
+        const auto imagePath = dir.filePath("source.png");
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::gray);
+        QVERIFY(image.save(imagePath));
+        Document d;
+        d.newProject();
+        QVERIFY(d.importSvg(QUrl::fromLocalFile(svgPath)));
+        QVERIFY(d.importImage(QUrl::fromLocalFile(imagePath)));
+        const int extra = d.addOperation("Extra engraving", "Gravur");
+        QVERIFY(extra >= 2);
+        d.assignOperations({0, extra});
+        QVERIFY(d.addPage("Rest"));
+        d.activatePage(0);
+        QVERIFY(d.setMetadata("Reusable", "Material and result\n<b>Plain text</b>"));
+        const auto project = QUrl::fromLocalFile(dir.filePath("original.blazer"));
+        QVERIFY(d.save(project));
+        const auto original = d.projectBytes();
+        QVERIFY(d.setMetadata("Reusable", "New notes for the template"));
+        const auto content = d.projectBytes();
+        const auto gcode = d.job().gcode();
+        QSignalSpy used(&d, &Document::projectFileUsed);
+        const auto file = QUrl::fromLocalFile(dir.filePath("reusable.blazertemplate"));
+        QVERIFY(d.saveTemplate(file));
+        QCOMPARE(d.fileUrl(), project);
+        QCOMPARE(d.projectBytes(), content);
+        QVERIFY(d.dirty());
+        QCOMPARE(used.count(), 0);
+        d.undo();
+        QCOMPARE(d.projectBytes(), original);
+        QVERIFY(!d.dirty());
+        d.redo();
+        QCOMPARE(d.projectBytes(), content);
+        const auto templateBytes = readFile(file.toLocalFile());
+        const auto root = QJsonDocument::fromJson(templateBytes).object();
+        QCOMPARE(root["format"].toString(), QString("blazer-studio-template"));
+        QCOMPARE(root["templateVersion"].toInt(), 1);
+        QCOMPARE(root["version"].toInt(), 8);
+        QVERIFY(QFile::remove(svgPath));
+        QVERIFY(QFile::remove(imagePath));
+        d.newProject();
+        QVERIFY(d.newFromTemplate(file));
+        QVERIFY(d.fileUrl().isEmpty());
+        QCOMPARE(d.projectBytes(), content);
+        QCOMPARE(d.job().gcode(), gcode);
+        QCOMPARE(d.pages().size(), 2);
+        QCOMPARE(d.layers().size(), 3);
+        QVERIFY(d.items()[0].asset);
+        QVERIFY(d.items()[1].reliefAsset);
+        QVERIFY(d.dirty());
+        QVERIFY(!d.canUndo());
+        QVERIFY(!d.canRedo());
+        QCOMPARE(used.count(), 0);
+        QVERIFY(!d.save(file));
+        QCOMPARE(readFile(file.toLocalFile()), templateBytes);
+        QCOMPARE(d.projectBytes(), content);
+        QVERIFY(d.dirty());
+        const auto alias = dir.filePath("template-alias.blazer");
+        QVERIFY(QFile::link(file.toLocalFile(), alias));
+        QVERIFY(!d.save(QUrl::fromLocalFile(alias)));
+        QCOMPARE(readFile(file.toLocalFile()), templateBytes);
+        QVERIFY(d.save(QUrl::fromLocalFile(dir.filePath("independent.blazer"))));
+        QVERIFY(!d.dirty());
+        QCOMPARE(used.count(), 1);
+        QCOMPARE(readFile(file.toLocalFile()), templateBytes);
+    }
+    void projectTemplateRejectsInvalidContentAtomically() {
+        QTemporaryDir dir;
+        const auto url = QUrl::fromLocalFile(dir.filePath("test.blazertemplate"));
+        Document source;
+        QVERIFY(source.saveTemplate(url));
+        const auto templateBytes = readFile(url.toLocalFile());
+        Document d;
+        d.newProject();
+        d.addShape("ellipse");
+        const auto before = d.projectBytes();
+        const auto root = QJsonDocument::fromJson(templateBytes).object();
+        for (int variant = 0; variant < 7; ++variant) {
+            auto bad = root;
+            if (variant == 0)
+                bad["format"] = "blazer-studio";
+            if (variant == 1)
+                bad["templateVersion"] = 2;
+            if (variant == 2)
+                bad["templateVersion"] = "1";
+            if (variant == 3)
+                bad["version"] = 9;
+            if (variant == 4)
+                bad.remove("notes");
+            if (variant == 5) {
+                auto objects = bad["objects"].toArray();
+                auto object = objects[0].toObject();
+                object["width"] = -1;
+                objects[0] = object;
+                bad["objects"] = objects;
+            }
+            const auto bytes =
+                variant == 6 ? QByteArray("{truncated") : QJsonDocument(bad).toJson();
+            QFile file(url.toLocalFile());
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QCOMPARE(file.write(bytes), bytes.size());
+            file.close();
+            QVERIFY(!d.newFromTemplate(url));
+            QCOMPARE(d.projectBytes(), before);
+            QVERIFY(d.dirty());
+            QVERIFY(d.canUndo());
+        }
+        QFile oversized(url.toLocalFile());
+        QVERIFY(oversized.open(QIODevice::WriteOnly));
+        QVERIFY(oversized.resize(64 * 1024 * 1024 + 1));
+        oversized.close();
+        QVERIFY(!d.newFromTemplate(url));
+        QVERIFY(!d.newFromTemplate(QUrl("https://example.org/template.blazertemplate")));
+        QCOMPARE(d.projectBytes(), before);
+        d.undo();
+        QCOMPARE(d.count(), 0);
+    }
+    void projectTemplateOverwriteUsesBackupAndFailuresPreserveSource() {
+        QTemporaryDir dir;
+        Document d;
+        const auto url = QUrl::fromLocalFile(dir.filePath("test.blazertemplate"));
+        QVERIFY(d.saveTemplate(url));
+        QVERIFY(!d.dirty());
+        const auto previous = readFile(url.toLocalFile());
+        QVERIFY(d.setMetadata("Changed", "Updated notes"));
+        const auto content = d.projectBytes();
+        QLockFile lock(url.toLocalFile() + ".lock");
+        QVERIFY(lock.tryLock(0));
+        QVERIFY(!d.saveTemplate(url));
+        QCOMPARE(readFile(url.toLocalFile()), previous);
+        QCOMPARE(d.projectBytes(), content);
+        QVERIFY(d.dirty());
+        lock.unlock();
+        QVERIFY(!d.saveTemplate(QUrl::fromLocalFile(dir.filePath("project.blazer"))));
+        QVERIFY(!d.saveTemplate(QUrl("https://example.org/template.blazertemplate")));
+        QCOMPARE(d.projectBytes(), content);
+        QVERIFY(d.saveTemplate(url));
+        QCOMPARE(readFile(url.toLocalFile() + ".bak"), previous);
+        QVERIFY(readFile(url.toLocalFile()) != previous);
+        QCOMPARE(d.projectBytes(), content);
+        QVERIFY(d.dirty());
+    }
     void projectMetadataHistoryAndRoundtrip() {
         QTemporaryDir dir;
         Document d;

@@ -32,10 +32,12 @@ class UiMachine : public Simulator {
 class UiTest : public QObject {
     Q_OBJECT
   private slots:
-    void editNavigateAndFocus() {
+    void initTestCase() {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
+    }
+    void editNavigateAndFocus() {
         Document project;
         QTemporaryDir storage;
         MaterialLibrary library(storage.filePath("materials.json"));
@@ -701,7 +703,13 @@ class UiTest : public QObject {
         QVERIFY(!discard->property("visible").toBool());
         QVERIFY(!machine.busy());
     }
+    void recoveryDialogEscapeKeepsOldRecovery_data() {
+        QTest::addColumn<bool>("incomingDirty");
+        QTest::newRow("clean-start") << false;
+        QTest::newRow("new-template-draft") << true;
+    }
     void recoveryDialogEscapeKeepsOldRecovery() {
+        QFETCH(bool, incomingDirty);
         Document project;
         QTemporaryDir storage;
         QString recoveryPath;
@@ -717,6 +725,8 @@ class UiTest : public QObject {
         original.close();
         project.newProject();
         Recovery recovery(&project, storage.filePath("recovery"));
+        if (incomingDirty)
+            project.addShape("text");
         MaterialLibrary library(storage.filePath("materials.json"));
         UiMachine machine;
         ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
@@ -744,6 +754,38 @@ class UiTest : public QObject {
         QVERIFY(QTest::qWaitForWindowExposed(window));
         QTest::qWait(50);
         QTest::keyClick(window, Qt::Key_Escape);
+        if (incomingDirty) {
+            auto *discard = window->findChild<QObject *>("discardDialog");
+            QTRY_VERIFY(discard->property("visible").toBool());
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY(dialog->property("visible").toBool());
+            QVERIFY(recovery.pendingDecision());
+            const auto before = project.projectBytes();
+            QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+            QCOMPARE(project.projectBytes(), before);
+            QTest::qWait(1800);
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY(discard->property("visible").toBool());
+            auto *save = window->findChild<QQuickItem *>("saveChangesButton");
+            QVERIFY(save);
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                              save->mapToScene(QPointF(save->width()/2, save->height()/2)).toPoint());
+            auto *picker = window->findChild<QObject *>("saveProjectDialog");
+            QVERIFY(picker);
+            QTRY_VERIFY(picker->property("visible").toBool());
+            QVERIFY(QMetaObject::invokeMethod(picker, "reject"));
+            QTRY_VERIFY(dialog->property("visible").toBool());
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            window->requestActivate();
+            QVERIFY(QTest::qWaitForWindowActive(window));
+            QTRY_VERIFY(dialog->property("activeFocus").toBool());
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY(discard->property("visible").toBool());
+            auto *button = window->findChild<QQuickItem *>("discardChangesButton");
+            QVERIFY(button);
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                              button->mapToScene(QPointF(button->width()/2, button->height()/2)).toPoint());
+        }
         QTRY_VERIFY(!window->isVisible());
         QVERIFY(original.open(QIODevice::ReadOnly));
         QCOMPARE(original.readAll(), bytes);

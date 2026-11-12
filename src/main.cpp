@@ -9,11 +9,13 @@
 #include "workspace.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMimeDatabase>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -59,11 +61,12 @@ int main(int argc, char **argv) {
         return app.exec();
     }
     MaterialLibrary materialLibrary(transient ? transientRecovery.filePath("materials.json")
-                                             : QString());
-    Machine simulator(&document, nullptr, transient ? Machine::HardwareAccess::Disabled
-                                                  : Machine::HardwareAccess::Allowed);
-    ApplicationServices services(&document, &simulator,
-                                 transient ? transientRecovery.filePath("settings.ini") : QString());
+                                              : QString());
+    Machine simulator(&document, nullptr,
+                      transient ? Machine::HardwareAccess::Disabled
+                                : Machine::HardwareAccess::Allowed);
+    ApplicationServices services(
+        &document, &simulator, transient ? transientRecovery.filePath("settings.ini") : QString());
     QFile f(":/profiles/blaze-x-m3.json");
     if (!f.open(QIODevice::ReadOnly))
         return 1;
@@ -107,8 +110,17 @@ int main(int argc, char **argv) {
         if (auto *tools = root->findChild<QObject *>("toolsPanel"))
             tools->setProperty("section", args[toolsSection + 1].toInt());
     // Desktop Exec supplies an optional positional .blazer file; an empty %f means normal startup.
-    if (args.size() == 2 && !args[1].startsWith('-') &&
-        !document.open(QUrl::fromLocalFile(args[1])))
+    if (args.size() == 2 && !args[1].startsWith('-')) {
+        const auto file = QUrl::fromLocalFile(args[1]);
+        const bool isTemplate =
+            QFileInfo(args[1]).suffix().compare("blazertemplate", Qt::CaseInsensitive) == 0;
+        if (!(isTemplate ? document.newFromTemplate(file) : document.open(file)))
+            return 2;
+    }
+    int templateIndex = args.indexOf("--new-from-template");
+    if (templateIndex >= 0 &&
+        (templateIndex + 1 >= args.size() ||
+         !document.newFromTemplate(QUrl::fromLocalFile(args[templateIndex + 1]))))
         return 2;
     int opened = args.indexOf("--open-project");
     if (opened >= 0 &&
@@ -177,6 +189,14 @@ int main(int argc, char **argv) {
                     fail("project roundtrip or diagnostics");
                     return;
                 }
+                const auto templateFile =
+                    QUrl::fromLocalFile(transientRecovery.filePath("reusable.blazertemplate"));
+                if (!document.saveTemplate(templateFile) ||
+                    !document.newFromTemplate(templateFile) || !document.dirty() ||
+                    document.count() != 3) {
+                    fail("project template roundtrip");
+                    return;
+                }
                 auto *poll = new QTimer(&app);
                 poll->setInterval(50);
                 QObject::connect(
@@ -194,12 +214,18 @@ int main(int argc, char **argv) {
                             return;
                         }
                         const auto output =
-                            QJsonDocument(QJsonObject{{"selfTest", "passed"},
-                                                      {"version", services.version()},
-                                                      {"revision", services.revision()},
-                                                      {"simulation", true},
-                                                      {"objects", document.count()},
-                                                      {"hardwareTested", false}})
+                            QJsonDocument(
+                                QJsonObject{{"selfTest", "passed"},
+                                            {"version", services.version()},
+                                            {"revision", services.revision()},
+                                            {"simulation", true},
+                                            {"objects", document.count()},
+                                            {"templateMimeType",
+                                             QMimeDatabase()
+                                                 .mimeTypeForFile("example.blazertemplate",
+                                                                  QMimeDatabase::MatchExtension)
+                                                 .name()},
+                                            {"hardwareTested", false}})
                                 .toJson();
                         fwrite(output.constData(), 1, output.size(), stdout);
                         app.exit(0);

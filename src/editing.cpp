@@ -150,6 +150,8 @@ bool Document::restoreBytes(const QByteArray &bytes) {
         return false;
     }
     checkpoint();
+    m_saved = Snapshot{};
+    setFileUrl({});
     applySnapshot(*state);
     notify("Projekt wiederhergestellt; bitte separat speichern.");
     return true;

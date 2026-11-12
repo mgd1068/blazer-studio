@@ -16,11 +16,11 @@
 #include <algorithm>
 
 namespace {
-QQuickItem *findItem(QQuickItem *root, const QString &name) {
-    if (root->objectName() == name)
+QQuickItem *findItem(QQuickItem *root, const QString &name, bool visibleOnly = false) {
+    if (root->objectName() == name && (!visibleOnly || root->isVisible()))
         return root;
     for (auto *child : root->childItems())
-        if (auto *found = findItem(child, name))
+        if (auto *found = findItem(child, name, visibleOnly))
             return found;
     return nullptr;
 }
@@ -126,6 +126,13 @@ class WorkflowTest : public QObject {
             return QMetaObject::invokeMethod(dialog, "accepted") &&
                    QMetaObject::invokeMethod(dialog, "reject");
         };
+        auto projectMenuAction = [&](const QString &name) {
+            if (!click(window, item("projectDetailsButton")))
+                return false;
+            if (!QTest::qWaitFor([&] { return item(name) && item(name)->isVisible(); }, 1000))
+                return false;
+            return click(window, item(name));
+        };
         // Project metadata is a modal draft. Editor shortcuts and Escape must
         // not change the underlying selection, history or project files.
         project.addShape("rect");
@@ -133,7 +140,7 @@ class WorkflowTest : public QObject {
         const int beforeSelection = project.selected();
         auto *details = window->findChild<QObject *>("projectDetailsDialog");
         QVERIFY(details);
-        QVERIFY(click(window, item("projectDetailsButton")));
+        QVERIFY(projectMenuAction("projectMetadataMenuItem"));
         QTRY_VERIFY(details->property("visible").toBool());
         QVERIFY(click(window, item("projectNotesEditor")));
         typeText(window, "Discarded notes");
@@ -147,7 +154,7 @@ class WorkflowTest : public QObject {
         QTRY_VERIFY(!details->property("visible").toBool());
         QCOMPARE(project.projectBytes(), beforeDetails);
         QCOMPARE(project.selected(), beforeSelection);
-        QVERIFY(click(window, item("projectDetailsButton")));
+        QVERIFY(projectMenuAction("projectMetadataMenuItem"));
         QTRY_VERIFY(details->property("visible").toBool());
         QVERIFY(item("projectNotesEditor")->property("text").toString().isEmpty());
         item("projectNotesEditor")->setProperty("text", QString(16001, 'x'));
@@ -155,7 +162,7 @@ class WorkflowTest : public QObject {
         QVERIFY(click(window, item("cancelProjectDetails")));
         QCOMPARE(project.projectBytes(), beforeDetails);
         project.newProject();
-        QVERIFY(click(window, item("projectDetailsButton")));
+        QVERIFY(projectMenuAction("projectMetadataMenuItem"));
         QTRY_VERIFY(details->property("visible").toBool());
         QVERIFY(click(window, item("projectNameEditor")));
         QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
@@ -317,6 +324,7 @@ class WorkflowTest : public QObject {
         QVERIFY(chooseFile("openProjectDialog", projectPath));
         QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy() && project.job().valid(), 5000);
         QCOMPARE(project.projectBytes(), originalBytes);
+        QCOMPARE(project.fileUrl(), QUrl::fromLocalFile(projectPath));
         QCOMPARE(project.title(), QString("Rasterversuch"));
         QCOMPARE(project.notes(), expectedNotes);
         QCOMPARE(project.job().gcode(), originalGcode);
@@ -369,6 +377,7 @@ class WorkflowTest : public QObject {
         QCOMPARE(project.notes(), QString("Other project notes"));
         QVERIFY(!project.dirty());
         const auto current = project.projectBytes();
+        QCOMPARE(project.fileUrl(), QUrl::fromLocalFile(otherPath));
         const auto currentSelection = project.selected();
         const auto currentLog = machine.log();
         QVERIFY(QFile::remove(thirdPath));
@@ -389,6 +398,102 @@ class WorkflowTest : public QObject {
         QVERIFY(QFile::exists(otherPath));
         QCOMPARE(project.projectBytes(), current);
         QVERIFY(click(window, item("closeRecentProjects")));
+        QVERIFY(project.setMetadata("Template base", "Reusable project notes"));
+        const auto templateContent = project.projectBytes();
+        QVERIFY(click(window, item("projectDetailsButton")));
+        QVERIFY(screenshot("template-menu"));
+        QVERIFY(click(window, item("saveTemplateMenuItem")));
+        QTRY_VERIFY(
+            window->findChild<QObject *>("saveTemplateDialog")->property("visible").toBool());
+        const auto templatePath = storage.filePath("reusable.blazertemplate");
+        QVERIFY(chooseFile("saveTemplateDialog", templatePath));
+        QVERIFY(project.dirty());
+        QCOMPARE(project.projectBytes(), templateContent);
+        QVERIFY(services.recentProjects().isEmpty());
+        const auto templateFileBytes = read(templatePath);
+        QVERIFY(!templateFileBytes.isEmpty());
+        QVERIFY(projectMenuAction("newTemplateMenuItem"));
+        QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("cancelCloseButton")));
+        QCOMPARE(project.projectBytes(), templateContent);
+        QVERIFY(!window->findChild<QObject *>("openTemplateDialog")->property("visible").toBool());
+        QVERIFY(projectMenuAction("newTemplateMenuItem"));
+        QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("discardChangesButton")));
+        QTRY_VERIFY(
+            window->findChild<QObject *>("openTemplateDialog")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window->findChild<QObject *>("openTemplateDialog"),
+                                          "reject"));
+        QCOMPARE(project.projectBytes(), templateContent);
+        // Ordinary saving must neither replace the source template nor start
+        // the queued template action after that save has been rejected.
+        QVERIFY(projectMenuAction("newTemplateMenuItem"));
+        QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("saveChangesButton")));
+        QTRY_VERIFY(
+            window->findChild<QObject *>("saveProjectDialog")->property("visible").toBool());
+        QVERIFY(chooseFile("saveProjectDialog", templatePath));
+        QVERIFY(!window->findChild<QObject *>("openTemplateDialog")->property("visible").toBool());
+        QCOMPARE(project.projectBytes(), templateContent);
+        QCOMPARE(read(templatePath), templateFileBytes);
+        QVERIFY(project.dirty());
+        QVERIFY(projectMenuAction("newTemplateMenuItem"));
+        QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("saveChangesButton")));
+        QTRY_VERIFY(
+            window->findChild<QObject *>("saveProjectDialog")->property("visible").toBool());
+        const auto beforeTemplatePath = storage.filePath("saved-before-template.blazer");
+        QVERIFY(chooseFile("saveProjectDialog", beforeTemplatePath));
+        QTRY_VERIFY(
+            window->findChild<QObject *>("openTemplateDialog")->property("visible").toBool());
+        window->setProperty("proofConfirmed", true);
+        window->setProperty("probeKey", window->property("parameterKey"));
+        QVERIFY(chooseFile("openTemplateDialog", templatePath));
+        QTRY_COMPARE(project.projectBytes(), templateContent);
+        QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy() && project.job().valid(), 5000);
+        QVERIFY(project.dirty());
+        QVERIFY(!project.canUndo());
+        QVERIFY(!project.canRedo());
+        QVERIFY(project.fileUrl().isEmpty());
+        QVERIFY(!window->property("proofConfirmed").toBool());
+        QVERIFY(window->property("probeKey").toString().isEmpty());
+        QCOMPARE(window->property("page").toInt(), 0);
+        QCOMPARE(services.recentProjects().size(), 1);
+        QCOMPARE(read(templatePath), templateFileBytes);
+        QVERIFY(project.setMetadata("Independent project", "Notes for this instance"));
+        QVERIFY(click(window, item("saveProjectButton")));
+        QTRY_VERIFY(
+            window->findChild<QObject *>("saveProjectDialog")->property("visible").toBool());
+        auto fileNameEditor = []() -> QQuickItem * {
+            for (auto *candidate : QGuiApplication::allWindows())
+                if (auto *quick = qobject_cast<QQuickWindow *>(candidate);
+                    quick && quick->isVisible())
+                    if (auto *editor = findItem(quick->contentItem(), "fileNameTextField", true))
+                        return editor;
+            return nullptr;
+        };
+        QTRY_VERIFY(fileNameEditor());
+        // Qt's selectedFile getter appends defaultSuffix even to an empty URL.
+        // Verify the filename the user actually sees, not that derived getter.
+        QTRY_COMPARE(fileNameEditor()->property("text").toString(), QString());
+        const auto independentPath = storage.filePath("independent.blazer");
+        QVERIFY(chooseFile("saveProjectDialog", independentPath));
+        QVERIFY(!project.dirty());
+        QVERIFY(QFile::exists(independentPath));
+        QCOMPARE(read(templatePath), templateFileBytes);
+        QCOMPARE(services.recentProjects().size(), 2);
+        auto saveResourceCount = [&] {
+            int count = 0;
+            for (auto *child : window->children())
+                if (child->property("title").toString() == "Blazer-Projekt speichern" &&
+                    child->property("selectedFile").isValid() &&
+                    child->property("currentFolder").isValid())
+                    ++count;
+            return count;
+        };
+        // Multiple save operations may retain only the current wrapper and
+        // its fallback chooser, rather than one hidden chooser per operation.
+        QTRY_VERIFY(saveResourceCount() <= 2);
         QVERIFY(machine.simulation());
         QVERIFY(!machine.log().join('\n').contains("Baud geöffnet"));
         QVERIFY(window->close());
