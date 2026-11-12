@@ -33,7 +33,9 @@ Für einen hilfreichen Bericht: genaue Version, Schritte, erwartetes und tatsäc
 
 Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Gerätebereich. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
 
-Eine geschlossene Einhausung und laufende geeignete Absaugung gehören zur realen Prüfung. Die gerätespezifische Lüftersteuerung ist noch ungeklärt. Am vorhandenen M3 wurde M8 vom Controller quittiert, der Nutzer bestätigte aber weiterhin einen ausgeschalteten Gehäuselüfter. Deshalb wird M8 nicht als funktionierender Lüfterknopf angeboten. Reale Laserprüfungen sind bis zur Klärung ausstehend.
+Eine geschlossene Einhausung und laufende geeignete Absaugung gehören zur realen Prüfung. Die gerätespezifische Lüftersteuerung über M8 ist nicht nachgewiesen; M8 wird deshalb nicht als funktionierender Lüfterknopf angeboten. Bei den beaufsichtigten Kraftpapierversuchen waren Gehäuse und externe Absaugung betriebsbereit. Materialwirkung ist bestätigt, die vollständige Betriebs-, Schnitt- und Reliefabnahme bleibt offen. Details: [Geräte und Materialabnahme](../HARDWARE_ACCEPTANCE.md).
+
+Eine USB-Verbindung über einen umschaltenden KVM kann beim Wechsel zum anderen PC verloren gehen. Der Auftrag wird bei Kommunikationsverlust verworfen. Nach erneutem Anschließen Konfiguration, Position und Materiallage neu prüfen; eine alte Ausgabe wird nicht automatisch wieder aufgenommen.
 
 ## Optionale Komponenten
 

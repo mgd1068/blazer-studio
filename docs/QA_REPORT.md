@@ -181,3 +181,10 @@ Vier neue Fehlerfälle reproduzierten, dass gültige Arbeitskoordinaten nach G54
 Eine weitere PTY-Reproduktion zeigte, dass eine vor G10 eingetroffene WCO-Meldung nach dessen Abschluss erneut zur Freigabe benutzt werden konnte. Nach den letzten Quittierungen des Nullpunktwechsels werden Position und Offset deshalb nochmals ungültig. Erst eine spätere bestätigte Offset-/Positionsmeldung erlaubt den Abschluss und neue Bewegungen. Stop, Fehler, neuer Anschluss und Handshake verwerfen die offene Nullpunktänderung.
 
 Alle 32 GRBL-Testfälle normal und mit ASan/UBSan bestanden. Die anderen neun Programme waren unmittelbar zuvor beim vollständigen T02-Grenzprüfungsstand normal und mit Sanitizern grün; ein vollständiger Kandidatenlauf folgt nach den nächsten Änderungen. Kein physischer Gerätezugriff.
+
+
+## Produktionsreife T03 Materialdaten und tatsächliche Befunde
+
+Das neue Geräteprotokoll trennt digitale Ausgabe, sichtbare Rasterwirkung, Gegenlichtprüfung und vollständige Materialtrennung. Historische pauschale Aufbauangaben (100-mm-Papier, maximal5%, Lüfteraus) wurden im aktuellen Beta-Testprotokoll durch je Test auszufüllende Bedingungen ersetzt. Die tatsächlichen 80-mm-Papierproben, transparenten Zahlen/Felder und der mechanisch getrennte Ausschnitt stehen als begrenzte Befunde darin. Die genaue Gerätezuordnung M3Pro/M3 sowie fehlende Herstellerwerte bleiben offen. Herstellerkatalog und Herstellerparameter sind bytegleich unverändert.
+
+Anleitung und Fähigkeitenanzeige unterscheiden externe Webcam-Prüfaufnahmen von der vorhandenen manuellen Referenzfoto-Registrierung und fehlender Live-Anbindung. Die Herstelleransicht bezeichnet ihre Werte als unverändert und allgemein nicht materialfreigegeben. Kern-, UI- und Katalogprogramme normal und mit ASan/UBSan bestanden (je drei Programme, `detect_leaks=0`). 47 lokale Dokumentationsverweise wurden im Quellbaum geprüft; die Auflösung im Installations-/Downloadpaket folgt separat in T09. Keine Hardwareaktion und keine Änderung an Benutzerbibliotheken.

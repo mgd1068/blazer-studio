@@ -1,11 +1,11 @@
-# Berechnete Jobs und GRBL – Version 0.6
+# Berechnete Jobs und GRBL
 
 Blazer Studio startet im **Simulator**. Eine echte Verbindung entsteht erst im Bereich **Gerät** durch Auswahl des seriellen Anschlusses und **GRBL verbinden**. Es gibt keine automatische Verbindung, Referenzfahrt oder Jobausführung beim Start.
 
 ## Projekt → Pfade → Vorschau → Ausgabe
 
-- Rechtecke, Ellipsen, Textkonturen und unterstützte SVG-Vektoren werden in geometrische Pfade umgewandelt. Text verwendet dieselbe DejaVu-Sans-Darstellung wie der Editor.
-- **Gravieren:** horizontale, abwechselnd gerichtete Fülllinien mit dem eingestellten Intervall. Innenräume bleiben nach der Füllregel frei.
+- Rechtecke, Ellipsen, Textkonturen und unterstützte SVG-Vektoren werden in geometrische Pfade umgewandelt. Text verwendet die gespeicherte Schriftwahl und dieselbe Pfadgeometrie wie der Editor.
+- **Gravieren:** gerichtete Fülllinien mit dem eingestellten Intervall; Winkel, Kreuzschraffur und Überlauf werden im Pfadsatz berücksichtigt. Innenräume bleiben nach der Füllregel frei.
 - **Schneiden:** linearisierte Konturen mit eingestellten Durchgängen. Kleinere Begrenzungen werden vor größeren ausgegeben; dies ist noch keine vollständige Schnittreihenfolgenoptimierung.
 - Die Vorschau zeichnet die berechneten Arbeits- und Leerfahrten. GCode und Live-Übertragung verwenden denselben eingefrorenen Pfadsatz. Die erste Leerfahrt wird ab Arbeitsnull dargestellt; beim realen Start kann die aktuelle Maschinenposition davon abweichen.
 - Die Zeitangabe ist eine geometrische Schätzung aus Strecken und Vorschüben, mit angenommenen 3000 mm/min für Leerfahrten. Die angezeigte Dauer ergänzt einen konservativen Start-/Stopp-Ansatz mit 240 mm/s²; die reine Vorschubzeit bleibt als Untergrenze verfügbar. Tatsächliche Eilganggeschwindigkeit, Lookahead und Kommunikationspausen sind nicht gemessen.
@@ -20,7 +20,7 @@ Aktive Objekte außerhalb von 200 × 150 mm, nicht auswertbare Inhalte oder zu k
 
 **Materialtest** erzeugt ein neues bearbeitbares Projekt: 2–10 Stufen je Achse, 5-mm-Gravurfelder mit 8 mm Abstand ab X10/Y10. Zeilen von unten nach oben ändern die Geschwindigkeit; Spalten von links nach rechts die Leistung. Die einzelnen Zellen besitzen eigene Leistungs-/Geschwindigkeitswerte, die rechts sichtbar und editierbar sind. Erzeugung allein startet keinen Laser. Vorschau, Projektdatei und GCode-Export funktionieren wie bei anderen Projekten.
 
-Projektformat **6** speichert eigene Objektwerte und [Relief-Tiefenkarten](RELIEF.md). Formate 1–5 bleiben lesbar. Neu gespeicherte Dateien benötigen Version 0.6 oder neuer. Ein laufender übertragener Job bleibt unverändert, auch wenn der Editor danach geändert wird.
+Projektformat **7** speichert eigene Objektwerte und [Relief-Tiefenkarten](RELIEF.md). Formate 1–6 bleiben lesbar. Neu gespeicherte Dateien benötigen Version 0.7 oder neuer. Ein laufender übertragener Job bleibt unverändert, auch wenn der Editor danach geändert wird.
 
 ![Bearbeitbare Materialtestmatrix](../assets/material-test.png)
 

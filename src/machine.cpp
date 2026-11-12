@@ -100,11 +100,12 @@ QVariantList Machine::capabilities() const {
     return {
         QVariantMap{{"name", "XY / GRBL / Referenzfahrt"},
                     {"status", "Vorhanden"},
-                    {"detail", "M3: Konfiguration und Bewegung ohne Laser bestätigt."}},
+                    {"detail", "M3: Grundkonfiguration und erste Kraftpapierbearbeitung bestätigt; "
+                               "vollständige Geräteabnahme offen."}},
         QVariantMap{{"name", "Kamera und Registrierung"},
-                    {"status", "Keine Kamera eingerichtet"},
-                    {"detail", "Kein kalibriertes Kamerabild vorhanden; keine automatische "
-                               "Positionierung freigegeben."}},
+                    {"status", "Referenzfoto, keine Live-Anbindung"},
+                    {"detail", "Manuelles Bild mit Vierpunktregistrierung verfügbar; Live-Kamera "
+                               "und automatische Positionierung nicht abgenommen."}},
         QVariantMap{{"name", "Rotary / Z / Autofokus"},
                     {"status", "Nicht nachgewiesen"},
                     {"detail", "Geräteprofil verwendet nur X/Y. Keine ungeprüften Achsenbefehle."}},

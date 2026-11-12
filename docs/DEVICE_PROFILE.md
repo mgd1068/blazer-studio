@@ -27,3 +27,6 @@ Seit Projektformat 2 verwenden Objektkoordinaten und Maschinenmarker einheitlich
 ## Ergänzte Herstellerquelle
 
 Die vom Nutzer genannte [Maschineneinstellungsseite](https://de.blazexlaser.com/pages/maschineneinstellung) ist als separate [Materialreferenz](MANUFACTURER_MATERIALS.md) erfasst. Sie nennt M3 Pro; eine Gleichsetzung mit dem eingerichteten M3 ist nicht bestätigt.
+
+
+Aktueller Material- und Betriebsstand vom 11./12.11.2026: [Geräte und Materialabnahme](HARDWARE_ACCEPTANCE.md). Digitale Leistungsskala und erste Kraftpapierwirkung sind bestätigt; eine optische Leistungsmessung und vollständige Geräte-/Materialfreigabe fehlen.

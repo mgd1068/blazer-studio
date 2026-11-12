@@ -22,13 +22,19 @@ Für jeden Fall **bestanden**, **fehlgeschlagen** oder **nicht durchgeführt** e
 | H02 | Rahmenfahrt mit ausgeschaltetem Laser | Motiv innerhalb des eingelegten Materials | |
 | H03 | Kleine begleitete Markierung | Ergebnis und Leistung dokumentieren, danach Laser-Aus bestätigt | |
 | H04 | Pause, Fortsetzen, Stop, normale Trennung und Wiederverbindung | Keine automatische Wiederaufnahme, definierter Leerlauf | |
-| H05 | Gravur, Schnittkontur, allgemeines Relief | Jeweils Ergebnis und Wiederholbarkeit bewerten; Schnittmodus ist nicht gleich erfolgreicher Materialdurchtrennung | |
+| H05 | Gravur, vollständiger Schnitt, allgemeines Relief | Materialqualität und Wiederholbarkeit prüfen; vollständiger Schnitt ohne Druck zum Trennen; fehlender Versuch bleibt offen | |
+| H06 | Vollständiger Ablauf in der normalen App | Import, Material, Vorschau, laserfreie Rahmenfahrt, beaufsichtigter Job und bestätigter Abschluss gehören zum selben geprüften Ablauf | |
+| H07 | Werkstück nach Bearbeitung prüfen | Maße, Gegenlicht, verbleibende Verbindungen und Oberflächenqualität dokumentieren; Kamerabild allein genügt nicht | |
 
-## Aktueller Auftrag am vorhandenen M3
+## Aufbau für einen neuen Gerätetest
 
-Der Nutzer hat Kraftpapier von ungefähr 100×100 mm in der Mitte eingelegt und für reale Tests **maximal 5 % Sollleistung** vorgegeben. Diese Obergrenze ist verbindlich und darf bei fehlender Wirkung nicht erhöht werden. Die Lüfter-/Absaugbereitschaft und das geschlossene Gehäuse müssen vor Emission bestätigt sein. Aktuell bestätigt: Lüfter aus; keine Emissionsfreigabe aus einem Softwaretest ableiten.
+Vor Ausführung eintragen: genaue App-Revision, Gerät/Modul, Material und Dicke beziehungsweise Grammatur, Materiallage, manuell eingestellter Fokus, Betriebsbereitschaft von Einhausung und Absaugung, vereinbarte Sollleistung/Vorschub/Durchgänge sowie anwesender Bediener. Fehlende Herstellerwerte bleiben als solche erkennbar; eigene Ergänzungen erhalten eine eigene Kennzeichnung.
 
-Ein Vorschlag für einen kleinen, materialschonenden Test liegt nahe X100/Y75 im 200×150-mm-Arbeitsraum. Erst Materiallage und laserfreie Rahmenfahrt prüfen; dann eine kurze Markierung innerhalb der vorgegebenen Grenze. Bei 5 % kann Materialdurchtrennung oder sichtbarer Abtrag ausbleiben. Dann das Ergebnis als solches protokollieren. Daraus folgen weder höhere Leistung noch eine allgemeine Abtragskalibrierung.
+Ein früheres Testprotokoll ist keine aktuelle Gerätefreigabe. Nach USB-/KVM-Wechsel oder Trennen/Entnehmen des Materials Lage und Controllerzustand neu prüfen; alte Aufträge nicht automatisch fortsetzen. Erste Betriebsprüfungen eines neuen Treiberstands erfolgen ohne Emission. Ohne anwesenden Bediener keine Geräteaktionen.
+
+Herstellerprofile bleiben unverändert; ein pauschaler Leistungs-Offset wird nicht verwendet. Die Quellenangabe M3 Pro ist keine bestätigte Gleichsetzung mit dem vorhandenen M3. Hersteller-Gravurwerte sind keine Schnittwerte. Auch bei sichtbarer Kontur oder dunklem Raster werden Durchtrennung, Transparenz und mechanischer Zusammenhalt am Werkstück getrennt beurteilt.
+
+Die Ergebnisse vom 11./12.11.2026 stehen in [Geräte und Materialabnahme](../HARDWARE_ACCEPTANCE.md): Rasterwirkung bestätigt; Zahlen und Felder 3/6a/6b transparent; der Ausschnitt musste mit leichtem Druck getrennt werden. Das ersetzt keine vollständige Schnitt-, Relief- oder erneute Betriebsabnahme des geänderten Treibers.
 
 ## Auswertung
 

@@ -2,9 +2,11 @@
 
 Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Status:** 0.9.0-beta.1 als Software-Testkandidat für Ubuntu 26.04 / x86_64. Neu: Debian-Paket mit passendem Quellarchiv, Erststartführung, Hilfe / Beta und freiwilliger lokaler Diagnoseexport. Geräte-/Materialabnahme und externe Einsteigertests sind offen. C++20 / Qt Quick: abbrechbare Hintergrundberechnung für Jobs und CSV-Stapel, abgesicherte Dateispeicherung und Wiederherstellung; Basic/Advanced mit geführtem Einstieg und Tooltips, Originalbilder bis 4096 × 4096 sowie speichersparendere Rasterverarbeitung; weiterhin Editor mit Pfadwerkzeugen, freie zusätzliche Operationen und Arbeitsblätter, Autosave/Wiederherstellung, Bild-/Vektorimporte, Schnitt-/Scanoptionen, Serienexport und Relief mit 16-Bit-/3D-/lokaler Foto-Tiefenschätzung. Verbindung, Referenzfahrt, 5-mm-Jog-Rückfahrt und ein vollständiger Kontur-Trockenlauf am M3 mit Laser-Aus bestätigt; reale Laser-/Materialbearbeitung noch nicht abgenommen.
+**Status:** 0.9.0-beta.1 als Software-Testkandidat für Ubuntu 26.04 / x86_64. Neu: Debian-Paket mit passendem Quellarchiv, Erststartführung, Hilfe / Beta und freiwilliger lokaler Diagnoseexport. Geräte-/Materialabnahme und externe Einsteigertests sind offen. C++20 / Qt Quick: abbrechbare Hintergrundberechnung für Jobs und CSV-Stapel, abgesicherte Dateispeicherung und Wiederherstellung; Basic/Advanced mit geführtem Einstieg und Tooltips, Originalbilder bis 4096 × 4096 sowie speichersparendere Rasterverarbeitung; weiterhin Editor mit Pfadwerkzeugen, freie zusätzliche Operationen und Arbeitsblätter, Autosave/Wiederherstellung, Bild-/Vektorimporte, Schnitt-/Scanoptionen, Serienexport und Relief mit 16-Bit-/3D-/lokaler Foto-Tiefenschätzung. Verbindung, Referenzfahrt und erste reale Kraftpapier-Kontur-/Rasterversuche am M3 sind bestätigt; vollständige Betriebs-, Schnitt- und Reliefabnahme stehen aus.
 
 **Lizenz:** [Source Available, Nutzung auch gewerblich erlaubt, Weitergabe nur kostenlos](LICENSE). Bezahlte Laserarbeiten sind erlaubt; das Programm und abgeleitete Versionen dürfen nicht verkauft oder gegen Bezahlung zugänglich gemacht werden. Das Verkaufsverbot entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
+
+[Plan zur Produktionsreife](docs/PRODUCTION_READINESS.md) · [Reale Geräte- und Materialbefunde](docs/HARDWARE_ACCEPTANCE.md). Änderungen auf dem Produktionsreife-Zweig sind erst nach einem neuen geprüften Paket Bestandteil eines Downloads.
 
 ## Testkandidat installieren
 
@@ -56,7 +58,7 @@ Editor, Jobmodell, Werkzeugwegerzeugung und Geräteadapter sind getrennt. Ein si
 
 ## BlazerX-Unterstützung
 
-Die installierte LightBurn-Konfiguration enthält das Profil **M3 / GRBL**, **200 × 150 mm**, seriell **115200 Baud**, S-Max **1000** und **2 %** für den Fokuspunkt; Z-Steuerung ist deaktiviert. Vorhandene Projekthinweise nennen das Gerät **Blaze X M3 / 5-W-Modul**. Siehe [Profilherkunft](docs/DEVICE_PROFILE.md). Controllerkommunikation und Bewegung wurden am M3 ohne Laseremission geprüft. Reale Laserwirkung, Fokus-Puls und Materialwerte benötigen weiterhin eine Geräteabnahme.
+Die installierte LightBurn-Konfiguration enthält das Profil **M3 / GRBL**, **200 × 150 mm**, seriell **115200 Baud**, S-Max **1000** und **2 %** für den Fokuspunkt; Z-Steuerung ist deaktiviert. Vorhandene Projekthinweise nennen das Gerät **Blaze X M3 / 5-W-Modul**. Siehe [Profilherkunft](docs/DEVICE_PROFILE.md). Controllerkommunikation, Bewegung und erste Materialwirkung auf Kraftpapier wurden geprüft. Der kurze Fokus-Puls sowie vollständige Betriebs- und Materialfreigaben bleiben separat abzunehmen.
 
 ## Direkte Gerätefunktionen
 
@@ -74,7 +76,7 @@ Der Simulator bildet Halten/Loslassen, Zeitlimit, Zustandswechsel, Jobkonflikte 
 
 ## Erste Ausbaustufe
 
-SVG-/Bildimport, Objekttransformationen, Schnitt- und Füllpfade, gemeinsame Vorschau/GCode-Ausgabe und GRBL-Übertragung sind implementiert. Der Simulator spielt den Pfadsatz im Zeitraffer ab. Reale Bewegung wurde am eingerichteten M3 bestätigt; eine echte Bearbeitungsprobe folgt mit Material und betriebsbereiter Absaugung.
+SVG-/Bildimport, Objekttransformationen, Schnitt- und Füllpfade, gemeinsame Vorschau/GCode-Ausgabe und GRBL-Übertragung sind implementiert. Der Simulator spielt den Pfadsatz im Zeitraffer ab. Reale Bewegung und Kraftpapierbearbeitung wurden am eingerichteten M3 bestätigt. Sichtbare Rasterwirkung und ein nahezu durchgehender Schnitt sind noch keine vollständige Produktionsabnahme; die konkreten Befunde stehen im [Geräteprotokoll](docs/HARDWARE_ACCEPTANCE.md).
 
 Bestehende Schutzfunktionen müssen erhalten bleiben. Erste Kommunikation und Bewegung werden ohne Laseremission geprüft; reale Bearbeitung folgt nach Validierung der Einheiten, Grenzen und Leistungsskalierung. Software-Abbruch ersetzt keinen Hardware-Not-Aus.
 
