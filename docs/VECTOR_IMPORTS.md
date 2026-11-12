@@ -209,11 +209,13 @@ Unterstützt sind Rechtecke mit optionalem Eckenradius, Ellipsen, Linien-/kubisc
 Bézierpfade, Gruppen und gespeicherte Textkonturen. Lokale affine Transformationen
 werden über die Gruppen hinweg kombiniert; Grafik-Layer liefern die Sichtbarkeit,
 keine Fräs-/Laseroperationen. Getrennte Pfadkonturen bleiben getrennt. Vollständige
-Kontrollpunktpaare sind absolute Koordinaten; die native Kurzform `c0x1`/`c1x1`
+Kontrollpunktpaare sind absolute Koordinaten. Bei einer kubischen Verbindung A→B ist `c0` von A der ausgehende und `c1` von B der eingehende Kontrollpunkt. Die frühere Zuordnung war vertauscht und ist korrigiert; das betrifft neue native Importe. Bereits gespeicherte Blazer-Pfade bleiben unverändert und werden bei Bedarf aus dem Original neu importiert. Die native Kurzform `c0x1`/`c1x1`
 ohne Y bezeichnet einen deaktivierten Griff. Andere unvollständige Griffe werden
 abgewiesen. MillMage-Text ohne gespeicherte Konturen wird abgewiesen. Der bisherige
 LightBurn-Ersatz über installierte Systemschriften bleibt erhalten und kann vom
-Original abweichen.
+Original abweichen. Seine Glyphen werden aus der Qt-Schriftkoordinate in die
+lokale Y-nach-oben-Konvention umgerechnet; ein bisheriger vertikaler Spiegelungsfehler
+ist korrigiert. Ausdrückliche Objekt-/Gruppenspiegelungen bleiben erhalten.
 
 **Eingebettete Bilder:** PNG-Daten werden mit physischer Breite/Höhe und ihrer
 Transformation übernommen. Die native Bildzeilenrichtung wird in die gewöhnliche
@@ -258,6 +260,50 @@ Die [offizielle MillMage-Dateidokumentation](https://docs.millmagesoftware.com/l
 beschreibt Grafikimport getrennt von CNC-Operationen. RDWorks-Projekte, SignCut, weitere
 MillMage-Varianten und der breitere F04-Korpus bleiben offen.
 
+
+## Geteilte LightBurn-Listen und kompakte Linienzüge
+
+Der LightBurn-Leser löst dokumentweite `VertID`-/`PrimID`-Referenzen einschließlich
+Vorwärtsverweisen auf. Definitionen bleiben in lokalen Koordinaten; jede Instanz
+behält ihre eigenen Gruppen-/Objekttransformationen und ihre T1-/T2-Zuordnung.
+`LineOpen` und `LineClosed` verbinden die jeweiligen Instanzpunkte in Reihenfolge,
+bei `LineClosed` zusätzlich zurück zum Anfang. Dieselbe Topologiedefinition kann
+so für unterschiedlich viele Punkte verwendet werden.
+
+Kennungen enthalten höchstens 32 Dezimalziffern; führende Nullen sind gleichwertig.
+Gleichlautende Mehrfachdefinitionen sind erlaubt, widersprüchliche Definitionen,
+fehlende Ziele und ungültige Kennungen werden vor dem Einfügen abgewiesen.
+Die Grenzen für XML, Formen und Geometrie bleiben bestehen. Auch wiederverwendete
+Punkte und Segmente zählen für jede ausgegebene Instanz gegen das Budget.
+MillMage-IDs werden ohne belegte Referenzgrammatik weiterhin nicht als solche
+LightBurn-Verweise interpretiert; direkte MillMage-Listen bleiben lesbar.
+Gruppen mit nur einem importierten Objekt werden ohne zusätzliche Gruppe
+übernommen, bei erhaltener Transformation und Ausgabezuordnung.
+
+Der unabhängige private [TTL-Makerspace-Korpus](https://code.ttlmakerspace.com/TTL/DesignForLasers/src/commit/e0e266b0d0cd3eb0c6270afac166253f65a81225/week5/files/BeaverBox_complete.lbrn2)
+enthält sechs ausgelagerte Punktlisten, 17 ausgelagerte Primitivlisten und zwölf
+`LineClosed`-Kurzformen. Das vollständige Original wird als **39 Objekte mit 5475
+Pfadelementen und 21 T1-Hilfsformen** gelesen. Eine unabhängige Python-Aufbereitung
+schrieb sämtliche Listen und Linienzüge aus. Ein eingefrorener bisheriger Leser
+mit getrennt angepassten Kontrollpunktbezeichnern und lokaler Textachse lieferte dieselben Geometrie-
+und GCode-Prüfsummen wie der neue Leser am unveränderten Original. Die
+[c0-/c1-Zuordnung ist zusätzlich unabhängig beschrieben](https://github.com/tscircuit/laser-deformation-fix/blob/main/README.md#coordinates-and-bézier-handles)
+und mit asymmetrischen eigenen Kontrollpunkten für beide nativen Formate geprüft.
+
+Nur eine ausdrücklich auf das M3-Bett verkleinerte private Prüfansicht wurde zur
+GCode- und Ansichtsprüfung verwendet. Die Originalgeometrie wurde nicht verändert.
+Die Kontrolle lieferte 4599 Bewegungen; T1 blieb von der Ausgabe ausgeschlossen.
+Eine nach der Verkleinerung schmaler als 0,1 mm gewordene Hilfsform erhielt einen
+größeren Objektkasten mit entsprechend neu normierten Pfadkoordinaten. Alle
+physischen Kontrollpunkte blieben dabei gleich. Der Dateirundlauf dieser Prüfansicht
+ist getrennt vom Originalimport zu bewerten. Die MillMage-Australia-Probe mit vier
+Objekten und 408 Pfadelementen stimmt nach derselben unabhängigen
+Kontrollpunktanpassung ebenfalls überein.
+
+Diese Fälle belegen die genannten Kodierungen und Referenzen, keine allgemeine
+verlustfreie LightBurn-Migration. Schriftabweichungen, nicht übernommene
+Bearbeitungsparameter, weitere Formate und Varianten bleiben ausdrücklich offen.
+Keine fremden Grafikdaten sind im Repository enthalten.
 
 ## RDWorks-Jobs als Geometrie
 

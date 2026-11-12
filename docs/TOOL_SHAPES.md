@@ -66,11 +66,7 @@ nicht aus fremden Projekten übernommen.
 Ein unabhängiges öffentliches [LightBurn-Projekt von TTL Makerspace](https://code.ttlmakerspace.com/TTL/DesignForLasers/src/commit/e0e266b0d0cd3eb0c6270afac166253f65a81225/week5/files/BeaverBox_complete.lbrn2) lieferte 21 T1-Formen als
 privaten Referenzkorpus. 14 einzeln gespeicherte Formen ohne externe
 Geometrieverweise blieben ohne Ausgabe; zusammen mit einer Kontrollkontur
-entstand bytegleicher GCode wie für die Kontrollkontur allein. Sieben weitere
-Formen benötigen geteilte VertList-/PrimList-Geometrie, die der begrenzte Leser
-noch nicht auflöst; das ganze ursprüngliche Projekt ist deshalb kein bestandener
-Vollimport. Solche Dateien werden atomar abgewiesen. Keine fremden Grafikdaten
-wurden in das Repository übernommen.
+entstand bytegleicher GCode wie für die Kontrollkontur allein. Nach Ergänzung der [geteilten Geometriedaten und kompakten Linienzüge](VECTOR_IMPORTS.md) wird auch das vollständige Original mit 39 Objekten, darunter 21 T1-Hilfsformen, gelesen. Geometrie und Kontrollausgabe wurden unabhängig verglichen. Weitere native Varianten bleiben offen; dies ist keine verlustfreie Projektmigration. Keine fremden Grafikdaten wurden in das Repository übernommen.
 
 Weitere native Varianten, Werkzeug-Framing, Eingabevarianten und die tatsächliche
 Desktop-/Fremdprogramm-Abnahme bleiben in F04/F07/T08 offen.

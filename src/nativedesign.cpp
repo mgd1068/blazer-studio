@@ -98,6 +98,7 @@ class Reader {
     NativeDesign::Result result;
     QHash<int, bool> visibleLayers;
     QSet<int> toolCuts;
+    QHash<QString, QDomElement> sharedVertices, sharedPrimitives;
     int shapes = 0, vertices = 0, elements = 0;
     qint64 pixels = 0, embedded = 0;
     bool millmageMode = false;
@@ -119,6 +120,57 @@ class Reader {
         return child.isNull() || child.nextSiblingElement(tag).isNull() ||
                fail("Doppeltes Element " + tag);
     }
+    bool referenceId(const QDomElement &node, const QString &attribute, QString &id) {
+        id = node.attribute(attribute).trimmed();
+        if (id.isEmpty() || id.size() > 32 ||
+            std::any_of(id.cbegin(), id.cend(), [](QChar c) { return c < '0' || c > '9'; }))
+            return fail("Ungültige Geometriereferenz " + attribute);
+        while (id.size() > 1 && id.front() == '0')
+            id.remove(0, 1);
+        return true;
+    }
+    bool indexGeometry(const QDomElement &root) {
+        const auto nodes = root.elementsByTagName("Shape");
+        if (nodes.size() > Geometry::objectLimit)
+            return fail("Zu viele Formen/Gruppen");
+        for (int i = 0; i < nodes.size(); ++i) {
+            const auto node = nodes.at(i).toElement();
+            if (node.attribute("Type") != "Path")
+                continue;
+            for (const auto &entry :
+                 QList<QPair<QString, QString>>{{"VertID", "VertList"}, {"PrimID", "PrimList"}}) {
+                QDomElement list;
+                if (!unique(node, entry.second, list))
+                    return false;
+                if (!node.hasAttribute(entry.first))
+                    continue;
+                QString id;
+                if (!referenceId(node, entry.first, id))
+                    return false;
+                if (list.isNull())
+                    continue;
+                auto &table = entry.first == "VertID" ? sharedVertices : sharedPrimitives;
+                if (table.contains(id) && table[id].text().simplified() != list.text().simplified())
+                    return fail("Widersprüchliche Geometriedefinition " + entry.first + "=" + id);
+                table.insert(id, list);
+            }
+        }
+        return true;
+    }
+    bool geometryList(const QDomElement &node, const QString &tag, const QString &attribute,
+                      const QHash<QString, QDomElement> &table, QDomElement &list) {
+        if (!unique(node, tag, list))
+            return false;
+        if (!millmageMode && list.isNull() && node.hasAttribute(attribute)) {
+            QString id;
+            if (!referenceId(node, attribute, id))
+                return false;
+            if (!table.contains(id))
+                return fail("Fehlende Geometriedefinition " + attribute + "=" + id);
+            list = table.value(id);
+        }
+        return true;
+    }
     bool matrix(const QDomElement &node, QTransform &out) {
         QDomElement child;
         if (!unique(node, "XForm", child))
@@ -137,12 +189,13 @@ class Reader {
     }
     bool path(const QDomElement &node, QPainterPath &out) {
         QDomElement vert, prim;
-        if (!unique(node, "VertList", vert) || !unique(node, "PrimList", prim))
+        if (!geometryList(node, "VertList", "VertID", sharedVertices, vert) ||
+            !geometryList(node, "PrimList", "PrimID", sharedPrimitives, prim))
             return false;
         if (vert.isNull() || prim.isNull())
             return fail("Pfad benötigt VertList und PrimList");
         struct Vertex {
-            QPointF p, left, right;
+            QPointF p, outgoing, incoming;
         };
         QList<Vertex> points;
         Numbers input(vert.text());
@@ -164,7 +217,7 @@ class Reader {
             for (int side = 0; side < 2; ++side) {
                 const int x = side * 2, y = x + 1;
                 if (seen[x] && seen[y]) {
-                    (side == 0 ? v.left : v.right) = QPointF(controls[x], controls[y]);
+                    (side == 0 ? v.outgoing : v.incoming) = QPointF(controls[x], controls[y]);
                 } else if (seen[x] || seen[y]) {
                     // The native writer's x=1 without y is the disabled-handle
                     // sentinel, not an absolute control point at x=1.
@@ -175,6 +228,23 @@ class Reader {
             if (++vertices > geometryLimit)
                 return fail("Zu viele Pfadpunkte");
             points.append(v);
+        }
+        // The compact topology is evaluated against this instance's vertices.
+        // A single shared LineClosed definition can serve different vertex counts.
+        const auto topology = prim.text().trimmed();
+        if (topology == "LineClosed" || topology == "LineOpen") {
+            if (points.size() < 2)
+                return fail("Linienkette benötigt mindestens zwei Punkte");
+            const bool closed = topology == "LineClosed";
+            elements += points.size() + (closed ? 1 : 0);
+            if (elements > geometryLimit)
+                return fail("Zu viele Pfadelemente");
+            out.moveTo(points.first().p);
+            for (int i = 1; i < points.size(); ++i)
+                out.lineTo(points[i].p);
+            if (closed)
+                out.closeSubpath();
+            return true;
         }
         Numbers commands(prim.text());
         int previous = -1;
@@ -195,7 +265,7 @@ class Reader {
             if (a != previous)
                 out.moveTo(points[a].p);
             if (bezier)
-                out.cubicTo(points[a].right, points[b].left, points[b].p);
+                out.cubicTo(points[a].outgoing, points[b].incoming, points[b].p);
             else
                 out.lineTo(points[b].p);
             previous = b;
@@ -322,9 +392,9 @@ class Reader {
         int toolLayer = inheritedTool;
         if (!millmageMode && node.hasAttribute("CutIndex")) {
             double cut;
-            if(!scalar(node,"CutIndex",cut,0) || cut<0 || cut>255 || std::floor(cut)!=cut)
+            if (!scalar(node, "CutIndex", cut, 0) || cut < 0 || cut > 255 || std::floor(cut) != cut)
                 return fail("Ungültige LightBurn-Layerzuordnung");
-            toolLayer = cut==31 ? 2 : (cut==30 || toolCuts.contains(int(cut))) ? 1 : 0;
+            toolLayer = cut == 31 ? 2 : (cut == 30 || toolCuts.contains(int(cut))) ? 1 : 0;
         }
         const auto type = node.attribute("Type");
         if (type.size() > 64)
@@ -373,8 +443,9 @@ class Reader {
                     text.boundingRect().isEmpty())
                     return fail("Ungültiger LightBurn-Text");
                 QTransform scale;
+                // QFont outlines use canvas Y-down; native artwork uses local Y-up.
                 scale.scale(height / text.boundingRect().height(),
-                            height / text.boundingRect().height());
+                            -height / text.boundingRect().height());
                 text = (scale * combined).map(text);
                 elements += text.elementCount();
                 if (elements > geometryLimit)
@@ -384,9 +455,11 @@ class Reader {
             }
             if (!outline.nextSiblingElement().isNull())
                 return fail("Mehrdeutige Textkonturen");
-            const int first=result.elements.size();
-            if(!shape(outline, combined, group, visible, toolLayer))return false;
-            for(int i=first;i<result.elements.size();++i)result.elements[i].toolLayer=toolLayer;
+            const int first = result.elements.size();
+            if (!shape(outline, combined, group, visible, toolLayer))
+                return false;
+            for (int i = first; i < result.elements.size(); ++i)
+                result.elements[i].toolLayer = toolLayer;
             return true;
         }
         NativeDesign::Element element;
@@ -472,11 +545,15 @@ class Reader {
             visibleLayers[int(index)] = hide == 0;
         }
         if (!millmage)
-            for(auto cut=root.firstChildElement("CutSetting");!cut.isNull();cut=cut.nextSiblingElement("CutSetting"))
-                if(cut.attribute("type").compare("Tool",Qt::CaseInsensitive)==0) {
-                    QDomElement indexNode;double index;
-                    if(!unique(cut,"index",indexNode) || !scalar(indexNode,"Value",index,0,true) || index<0 || index>255 || std::floor(index)!=index)
-                        return {{},"Ungültige LightBurn-Werkzeugebene"};
+            for (auto cut = root.firstChildElement("CutSetting"); !cut.isNull();
+                 cut = cut.nextSiblingElement("CutSetting"))
+                if (cut.attribute("type").compare("Tool", Qt::CaseInsensitive) == 0) {
+                    QDomElement indexNode;
+                    double index;
+                    if (!unique(cut, "index", indexNode) ||
+                        !scalar(indexNode, "Value", index, 0, true) || index < 0 || index > 255 ||
+                        std::floor(index) != index)
+                        return {{}, "Ungültige LightBurn-Werkzeugebene"};
                     toolCuts.insert(int(index));
                 }
         const QStringList metadata{"Layer",        "Thumbnail",  "CNCProjectSetup",
@@ -487,10 +564,21 @@ class Reader {
             if (child.tagName() != "Shape" && !metadata.contains(child.tagName()) &&
                 !child.elementsByTagName("Shape").isEmpty())
                 return {{}, "Geometrie in nicht unterstütztem Projektcontainer"};
+        if (!millmage && !indexGeometry(root))
+            return {{}, result.error};
         for (auto node = root.firstChildElement("Shape"); !node.isNull();
              node = node.nextSiblingElement("Shape"))
             if (!shape(node, {}, {}, true))
                 return {{}, result.error};
+        // Blazer's flat groups contain at least two objects. Native single-child
+        // groups keep their transform and role, without an invalid singleton ID.
+        QHash<QString, int> groupSizes;
+        for (const auto &element : result.elements)
+            if (!element.group.isEmpty())
+                ++groupSizes[element.group];
+        for (auto &element : result.elements)
+            if (groupSizes.value(element.group) < 2)
+                element.group.clear();
         if (result.elements.isEmpty())
             return {{}, "Keine importierbare native Geometrie"};
         return result;

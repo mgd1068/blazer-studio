@@ -40,6 +40,167 @@ class NativeImportTest : public QObject {
         return "<Shape Type=\"Rect\" W=\"10\" H=\"5\"><XForm>1 0 0 1 20 20</XForm></Shape>";
     }
   private slots:
+    void sharedLightBurnListsResolveForwardReferencesInLocalCoordinates() {
+        const QByteArray data = R"(<LightBurnProject>
+<Shape Type="Path" VertID="007" PrimID="9"><XForm>1 0 0 1 10 20</XForm></Shape>
+<Shape Type="Group"><XForm>2 0 0 3 40 50</XForm><Children>
+<Shape Type="Path" VertID="7" PrimID="9" CutIndex="30"><XForm>1 0 0 1 1 2</XForm><VertList>V0 0V6 0V6 4</VertList><PrimList>L0 1L1 2</PrimList></Shape>
+</Children></Shape>
+<Shape Type="Path" VertID="7" PrimID="8"><XForm>1 0 0 1 100 30</XForm><PrimList>L2 1L1 0</PrimList></Shape>
+</LightBurnProject>)";
+        const auto result = NativeDesign::read(data, false);
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.elements.size(), 3);
+        const QList<QList<QPointF>> expected{{{10, 20}, {16, 20}, {16, 24}},
+                                             {{42, 56}, {54, 56}, {54, 68}},
+                                             {{106, 34}, {106, 30}, {100, 30}}};
+        for (int i = 0; i < 3; ++i) {
+            QCOMPARE(result.elements[i].path.elementCount(), 3);
+            for (int j = 0; j < 3; ++j)
+                QCOMPARE(QPointF(result.elements[i].path.elementAt(j)), expected[i][j]);
+        }
+        QCOMPARE(result.elements[0].toolLayer, 0);
+        QCOMPARE(result.elements[1].toolLayer, 1);
+        Document d;
+        d.newProject();
+        QVERIFY2(d.importFile(write("shared.lbrn2", data)), qPrintable(d.message()));
+        QCOMPARE(d.count(), 3);
+        QVERIFY(d.job().valid());
+        const auto before = d.projectBytes();
+        Document restored;
+        QVERIFY(restored.restoreBytes(before));
+        QCOMPARE(restored.job().gcode(), d.job().gcode());
+        QCOMPARE(restored.items()[1].toolLayer, 1);
+        d.undo();
+        QCOMPARE(d.count(), 0);
+        d.redo();
+        QCOMPARE(d.projectBytes(), before);
+    }
+    void sharedCurvesAndIndependentPrimitiveListsKeepControls() {
+        const QByteArray data = R"(<LightBurnProject>
+<Shape Type="Path" VertID="0" PrimID="0"><XForm>1 0 0 1 10 20</XForm></Shape>
+<Shape Type="Path" VertID="0" PrimID="0"><VertList>V0 0c0x2c0y3V6 4c1x5c1y1</VertList><PrimList>B0 1</PrimList></Shape>
+<Shape Type="Path" VertID="0" PrimID="1"><PrimList>L0 1</PrimList></Shape>
+</LightBurnProject>)";
+        const auto result = NativeDesign::read(data, false);
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.elements.size(), 3);
+        const QList<QPointF> expected{{10, 20}, {12, 23}, {15, 21}, {16, 24}};
+        QCOMPARE(result.elements[0].path.elementCount(), 4);
+        for (int i = 0; i < 4; ++i)
+            QCOMPARE(QPointF(result.elements[0].path.elementAt(i)), expected[i]);
+        QCOMPARE(result.elements[2].path.elementCount(), 2);
+        QCOMPARE(QPointF(result.elements[2].path.elementAt(1)), QPointF(6, 4));
+    }
+    void ambiguousMissingAndMalformedSharedListsAreAtomic() {
+        const QByteArray definition =
+            R"(<Shape Type="Path" VertID="0" PrimID="0"><VertList>V0 0 V1 1</VertList><PrimList>L0 1</PrimList></Shape>)";
+        auto document = [&](const QByteArray &extra) {
+            return "<LightBurnProject>" + definition + extra + "</LightBurnProject>";
+        };
+        const QList<QByteArray> invalid{
+            R"(<Shape Type="Path" VertID="0" PrimID="0"><VertList>V0 0 V1 2</VertList></Shape>)",
+            R"(<Shape Type="Path" VertID="0" PrimID="0"><PrimList>L1 0</PrimList></Shape>)",
+            R"(<Shape Type="Path" VertID="77" PrimID="0"/>)",
+            R"(<Shape Type="Path" VertID="0" PrimID="77"/>)",
+            R"(<Shape Type="Path" VertID="-1" PrimID="0"/>)",
+            R"(<Shape Type="Path" VertID="1.5" PrimID="0"/>)",
+            R"(<Shape Type="Path" VertID="1e0" PrimID="0"/>)",
+            R"(<Shape Type="Path" VertID="" PrimID="0"/>)",
+            R"(<Shape Type="Path" VertID="123456789012345678901234567890123" PrimID="0"/>)"};
+        Document target;
+        target.newProject();
+        target.addShape("rect");
+        const auto before = target.projectBytes();
+        const auto revision = target.historyRevision();
+        for (const auto &extra : invalid) {
+            const auto result = NativeDesign::read(document(extra), false);
+            QVERIFY(!result.error.isEmpty());
+            QVERIFY(result.elements.isEmpty());
+            QVERIFY(!target.importFile(write("bad-reference.lbrn2", document(extra))));
+            QCOMPARE(target.projectBytes(), before);
+            QCOMPARE(target.historyRevision(), revision);
+        }
+        const auto duplicate = NativeDesign::read(
+            document(
+                R"(<Shape Type="Path" VertID="00" PrimID="00"><VertList> V0 0  V1 1 </VertList><PrimList> L0 1 </PrimList></Shape>)"),
+            false);
+        QVERIFY2(duplicate.error.isEmpty(), qPrintable(duplicate.error));
+        QCOMPARE(duplicate.elements.size(), 2);
+    }
+    void repeatedSharedGeometryStillCountsEveryInstanceAgainstBudget() {
+        QByteArray vertices, primitives;
+        for (int i = 0; i < 100; ++i) {
+            vertices += "V" + QByteArray::number(i) + " " + QByteArray::number(i % 2);
+            if (i)
+                primitives += "L" + QByteArray::number(i - 1) + " " + QByteArray::number(i);
+        }
+        QByteArray data =
+            R"(<LightBurnProject><Shape Type="Path" VertID="0" PrimID="0"><VertList>)" + vertices +
+            "</VertList><PrimList>" + primitives + "</PrimList></Shape>";
+        for (int i = 0; i < 1000; ++i)
+            data += R"(<Shape Type="Path" VertID="0" PrimID="0"/>)";
+        data += "</LightBurnProject>";
+        const auto result = NativeDesign::read(data, false);
+        QVERIFY(result.error.contains("Pfadpunkte"));
+        QVERIFY(result.elements.isEmpty());
+    }
+    void millMageInlineIdsKeepTheirExistingInterpretation() {
+        const auto data = project(
+            R"(<Shape Type="Path" VertID="0" PrimID="0"><VertList>V0 0 V1 1</VertList><PrimList>L0 1</PrimList></Shape><Shape Type="Path" VertID="0" PrimID="0"><VertList>V0 0 V2 3</VertList><PrimList>L0 1</PrimList></Shape>)");
+        const auto result = NativeDesign::read(data, true);
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.elements.size(), 2);
+        QCOMPARE(QPointF(result.elements[1].path.elementAt(1)), QPointF(2, 3));
+    }
+    void compactLineTopologyUsesEachInstancesVertexCount() {
+        const QByteArray data = R"(<LightBurnProject>
+<Shape Type="Path" VertID="0" PrimID="0"><VertList>V0 0V10 0V10 5V0 5</VertList><PrimList>LineClosed</PrimList></Shape>
+<Shape Type="Path" VertID="1" PrimID="0"><VertList>V20 0V25 5V30 0</VertList></Shape>
+<Shape Type="Path" VertID="2" PrimID="1"><VertList>V0 10V4 14V8 10</VertList><PrimList>LineOpen</PrimList></Shape>
+</LightBurnProject>)";
+        const auto result = NativeDesign::read(data, false);
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.elements.size(), 3);
+        QCOMPARE(result.elements[0].path.elementCount(), 5);
+        QCOMPARE(result.elements[0].path.length(), 30.);
+        QCOMPARE(result.elements[1].path.elementCount(), 4);
+        QCOMPARE(QPointF(result.elements[1].path.elementAt(3)), QPointF(20, 0));
+        QCOMPARE(result.elements[2].path.elementCount(), 3);
+        QCOMPARE(QPointF(result.elements[2].path.elementAt(2)), QPointF(8, 10));
+        const auto invalid = NativeDesign::read(
+            R"(<LightBurnProject><Shape Type="Path"><VertList>V1 1</VertList><PrimList>LineClosed</PrimList></Shape></LightBurnProject>)",
+            false);
+        QVERIFY(!invalid.error.isEmpty());
+        QVERIFY(invalid.elements.isEmpty());
+    }
+    void cubicC0LeavesStartAndC1EntersEndInBothNativeDialects() {
+        const QByteArray shape =
+            R"(<Shape Type="Path"><VertList>V0 0c0x2c0y3c1x-7c1y-8V6 4c0x18c0y19c1x5c1y1</VertList><PrimList>B0 1</PrimList></Shape>)";
+        for (bool millmage : {false, true}) {
+            const auto result = NativeDesign::read(
+                millmage ? project(shape) : "<LightBurnProject>" + shape + "</LightBurnProject>",
+                millmage);
+            QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+            QCOMPARE(result.elements.size(), 1);
+            const QList<QPointF> expected{{0, 0}, {2, 3}, {5, 1}, {6, 4}};
+            QCOMPARE(result.elements[0].path.elementCount(), 4);
+            for (int i = 0; i < 4; ++i)
+                QCOMPARE(QPointF(result.elements[0].path.elementAt(i)), expected[i]);
+        }
+    }
+    void fallbackTextUsesLocalYUpAndKeepsExplicitParentReflection() {
+        const QByteArray text=R"(<Shape Type="Text" Str="H" Font="DejaVu Sans" H="10"><XForm>1 0 0 1 20 30</XForm></Shape>)";
+        const auto upright=NativeDesign::read("<LightBurnProject>"+text+"</LightBurnProject>",false);
+        QVERIFY2(upright.error.isEmpty(),qPrintable(upright.error));QCOMPARE(upright.elements.size(),1);
+        auto bounds=upright.elements[0].path.boundingRect();
+        QVERIFY(qAbs(bounds.top()-30.)<1e-9);QVERIFY(qAbs(bounds.bottom()-40.)<1e-9);
+        const auto reflected=NativeDesign::read(R"(<LightBurnProject><Shape Type="Group"><XForm>1 0 0 -1 0 100</XForm><Children>)"+text+"</Children></Shape></LightBurnProject>",false);
+        QVERIFY2(reflected.error.isEmpty(),qPrintable(reflected.error));QCOMPARE(reflected.elements.size(),1);
+        bounds=reflected.elements[0].path.boundingRect();
+        QVERIFY(qAbs(bounds.top()-60.)<1e-9);QVERIFY(qAbs(bounds.bottom()-70.)<1e-9);
+        QVERIFY(reflected.elements[0].group.isEmpty());
+    }
     void vectorsGroupsVisibilityAndDisabledControls() {
         const auto data = project("<Shape Type=\"Group\"><XForm>2 0 0 3 10 20</XForm><Children>"
                                   "<Shape Type=\"Path\"><XForm>1 0 .5 1 2 4</XForm><VertList>V0 "
@@ -66,12 +227,12 @@ class NativeImportTest : public QObject {
                 "<VertList>V0 0c1x3c1y0V10 5c0x10c0y2</VertList><PrimList>B0 1</PrimList></Shape>"),
             true);
         QVERIFY2(curve.error.isEmpty(), qPrintable(curve.error));
-        QCOMPARE(QPointF(curve.elements[0].path.elementAt(1)), QPointF(8, 6));
-        QCOMPARE(QPointF(curve.elements[0].path.elementAt(2)), QPointF(15, 8));
+        QCOMPARE(QPointF(curve.elements[0].path.elementAt(1)), QPointF(5, 6));
+        QCOMPARE(QPointF(curve.elements[0].path.elementAt(2)), QPointF(15, 11));
         QCOMPARE(QPointF(curve.elements[0].path.elementAt(3)), QPointF(15, 11));
         const auto disabled =
-            NativeDesign::read(project("<Shape Type=\"Path\"><VertList>V10 5c1x1V20 "
-                                       "9c0x1</VertList><PrimList>B0 1</PrimList></Shape>"),
+            NativeDesign::read(project("<Shape Type=\"Path\"><VertList>V10 5c0x1V20 "
+                                       "9c1x1</VertList><PrimList>B0 1</PrimList></Shape>"),
                                true);
         QVERIFY2(disabled.error.isEmpty(), qPrintable(disabled.error));
         QCOMPARE(QPointF(disabled.elements[0].path.elementAt(1)), QPointF(10, 5));
@@ -156,7 +317,8 @@ class NativeImportTest : public QObject {
     void malformedAndUnsupportedAreAtomic() {
         const QList<QByteArray> badShapes = {
             "<Shape Type=\"Unknown\"/>",
-            "<Shape Type=\"Path\"><VertList>V0 0c1x2V1 1</VertList><PrimList>B0 1</PrimList></Shape>",
+            "<Shape Type=\"Path\"><VertList>V0 0c1x2V1 1</VertList><PrimList>B0 "
+            "1</PrimList></Shape>",
             "<Shape Type=\"Rect\" W=\"no\" H=\"5\"/>",
             "<Shape Type=\"Rect\" W=\"5\" H=\"-1\"/>",
             "<Shape Type=\"Rect\" W=\"5\" H=\"5\"><XForm>1 0 0 1 0 0 7</XForm></Shape>",
