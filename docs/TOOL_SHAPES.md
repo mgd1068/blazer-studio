@@ -33,10 +33,10 @@ aktiviert eine Hilfsform nicht. Bei gemischten booleschen Pfadoperationen
 ## Ausgabe, Zwischenablage und Speicherung
 
 Hilfsformen gehen niemals in Laserwege, die Auftragsvorschau, Auftragsgrenzen,
-Frame oder CSV-Ausgaben ein. Auch Formen außerhalb des Arbeitsraums vergrößern
+die normale Auftragsrahmenfahrt oder CSV-Ausgaben ein. Auch Formen außerhalb des Arbeitsraums vergrößern
 den Auftrag nicht. Ein Blatt ausschließlich aus Hilfsformen besitzt keinen
 ausführbaren Laserauftrag. Der SVG-Export lässt Hilfsformen ebenfalls aus.
-Ein eigenes Framing ausschließlich anhand von Hilfsformen ist noch nicht vorhanden.
+Eine [ausdrücklich gewählte Rahmenfahrt](FRAMING.md) kann T1/T2 oder die sichtbare Auswahl einrahmen, weiterhin ausschließlich mit Laser-Aus.
 
 Die [Blazer-Systemzwischenablage](CLIPBOARD.md) bewahrt die Zuordnung auch beim
 Ausschneiden und beim Einfügen in ein anderes Projekt. Sobald eine Auswahl

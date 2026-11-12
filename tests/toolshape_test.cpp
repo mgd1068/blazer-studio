@@ -21,6 +21,116 @@ class ToolShapeTest : public QObject {
         return QUrl::fromLocalFile(f.fileName());
     }
   private slots:
+    void frameTargetsSeparateVisibleHelpersSelectionAndPlannedOutput() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        d.setProperty("x", 10.);
+        d.setProperty("y", 20.);
+        d.setProperty("width", 30.);
+        d.setProperty("height", 10.);
+        d.addShape("rect");
+        d.setToolLayer(1);
+        d.setProperty("x", 50.);
+        d.setProperty("y", 60.);
+        d.setProperty("width", 20.);
+        d.setProperty("height", 15.);
+        d.addShape("rect");
+        d.setToolLayer(2);
+        d.setProperty("x", 90.);
+        d.setProperty("y", 100.);
+        d.setProperty("width", 10.);
+        d.setProperty("height", 10.);
+        const auto bytes = d.projectBytes();
+        const auto revision = d.historyRevision();
+        const auto code = d.job().gcode();
+        auto check = [](const QVariantMap &b, QRectF expected) {
+            return b["valid"].toBool() &&
+                   QRectF(b["x"].toDouble(), b["y"].toDouble(), b["width"].toDouble(),
+                          b["height"].toDouble()) == expected;
+        };
+        QVERIFY(check(d.framingBounds("job"), {10, 20, 30, 10}));
+        QVERIFY(check(d.framingBounds("t1"), {50, 60, 20, 15}));
+        QVERIFY(check(d.framingBounds("t2"), {90, 100, 10, 10}));
+        QVERIFY(check(d.framingBounds("tools"), {50, 60, 50, 50}));
+        QVERIFY(check(d.framingBounds("selection"), {90, 100, 10, 10}));
+        QVERIFY(!d.framingBounds("unknown")["valid"].toBool());
+        QCOMPARE(d.projectBytes(), bytes);
+        QCOMPARE(d.historyRevision(), revision);
+        QCOMPARE(d.job().gcode(), code);
+        d.toggleVisible(1);
+        QVERIFY(!d.framingBounds("t1")["valid"].toBool());
+        QVERIFY(check(d.framingBounds("tools"), {90, 100, 10, 10}));
+        d.select(2);
+        d.setProperty("x", 199.);
+        QVERIFY(!d.framingBounds("t2")["valid"].toBool());
+        QVERIFY(d.framingBounds("job")["valid"].toBool());
+        QCOMPARE(d.job().gcode(), code);
+        QVERIFY(d.addPage("Zwei"));
+        d.activatePage(1);
+        d.addShape("rect");
+        d.setToolLayer(1);
+        QVERIFY(d.framingBounds("t1")["valid"].toBool());
+        QVERIFY(!d.framingBounds("t2")["valid"].toBool());
+        d.activatePage(0);
+        QVERIFY(!d.framingBounds("t1")["valid"].toBool());
+        d.select(-1);
+        d.toggleSelection(3);
+        QVERIFY(!d.framingBounds("selection")["valid"].toBool());
+    }
+    void jobFrameIncludesOverscanAndHandlesStraightBedEdgePaths() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        d.setLayer(0);
+        d.setProperty("x", 20.);
+        d.setProperty("y", 30.);
+        d.setProperty("width", 40.);
+        d.setProperty("height", 10.);
+        d.setLayerSetting(0, "interval", 1.);
+        d.setLayerSetting(0, "overscan", 2.);
+        QVERIFY(d.job().valid());
+        const auto region = d.framingBounds("job");
+        QVERIFY(region["valid"].toBool());
+        QCOMPARE(region["x"].toDouble(), 18.);
+        QCOMPARE(region["width"].toDouble(), 44.);
+        const QRectF frame(region["x"].toDouble(), region["y"].toDouble(),
+                           region["width"].toDouble(), region["height"].toDouble());
+        QVERIFY(!frame.contains(QPointF(0, 0)));
+        for (const auto &move : d.job().moves)
+            if (!move.rapid) {
+                QVERIFY(frame.contains(move.from));
+                QVERIFY(frame.contains(move.to));
+            }
+        Document line;
+        line.newProject();
+        QVERIFY(line.importFile(write("edge.gc", "G0 X0 Y0\nG1 X20 Y0\n")));
+        QVERIFY(line.job().valid());
+        const auto narrow = line.framingBounds("job");
+        QVERIFY(narrow["valid"].toBool());
+        QCOMPARE(narrow["x"].toDouble(), 0.);
+        QCOMPARE(narrow["y"].toDouble(), 0.);
+        QCOMPARE(narrow["width"].toDouble(), 20.);
+        QCOMPARE(narrow["height"].toDouble(), .1);
+    }
+    void bedEdgePathBoxesPreservePhysicalEndpointsAndRejectOutsideGeometry() {
+        const QList<QPair<QPointF,QPointF>> lines{{{10,0},{30,0}},{{10,150},{30,150}},{{0,10},{0,30}},{{200,10},{200,30}}};
+        for(const auto &ends:lines) {
+            const QByteArray vertices="V"+QByteArray::number(ends.first.x())+" "+QByteArray::number(ends.first.y())+"V"+QByteArray::number(ends.second.x())+" "+QByteArray::number(ends.second.y());
+            const auto bytes=QByteArray(R"(<LightBurnProject><Shape Type="Path"><VertList>)")+vertices+"</VertList><PrimList>LineOpen</PrimList></Shape></LightBurnProject>";
+            Document d;d.newProject();QVERIFY(d.importFile(write("edge.lbrn2",bytes)));QVERIFY(d.job().valid());
+            QString error;const auto path=JobPlanner::geometry(d.items()[0],error,true);QVERIFY(error.isEmpty());
+            QVERIFY(QLineF(QPointF(path.elementAt(0)),ends.first).length()<1e-9);
+            QVERIFY(QLineF(QPointF(path.elementAt(1)),ends.second).length()<1e-9);
+            const auto frame=d.framingBounds("job");QVERIFY(frame["valid"].toBool());
+            const QRectF bounds(frame["x"].toDouble(),frame["y"].toDouble(),frame["width"].toDouble(),frame["height"].toDouble());
+            QVERIFY(bounds.left()>=0 && bounds.top()>=0 && bounds.right()<=200 && bounds.bottom()<=150);
+            QVERIFY(bounds.contains(ends.first));QVERIFY(bounds.contains(ends.second));
+        }
+        Document outside;outside.newProject();QVERIFY(outside.importFile(write("outside-edge.lbrn2",R"(<LightBurnProject><Shape Type="Path"><VertList>V-1 10V-1 30</VertList><PrimList>LineOpen</PrimList></Shape></LightBurnProject>)")));
+        QVERIFY(!outside.job().valid());QVERIFY(!outside.framingBounds("job")["valid"].toBool());
+        QVERIFY(!outside.framingBounds("selection")["valid"].toBool());
+    }
     void helpersNeverEnterJobBoundsFrameOrSvgEvenOutsideBed() {
         Document d;
         d.newProject();

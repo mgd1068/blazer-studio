@@ -22,6 +22,10 @@ ApplicationWindow {
     property bool night: false
     property int page: 0
     property int operation: 1
+    property string frameScope: "job"
+    property var frameRegion: ({valid:false,reason:"Rahmenziel wird berechnet."})
+    function refreshFraming() { frameRegion=project.framingBounds(frameScope) }
+    onFrameScopeChanged: refreshFraming()
     property real step: 10
     property real selectedModuleW: deviceProfile.modulePowerW || 5
     readonly property real appliedModuleW: project.material.moduleW || deviceProfile.modulePowerW || 5
@@ -247,8 +251,9 @@ ApplicationWindow {
     onPageChanged: { machine.focus(false); if(basic && page>2)basic=false }
     Connections {
         target: project
-        function onChanged() { if(win.operation>=project.layers.length)win.operation=0 }
+        function onChanged() { if(win.operation>=project.layers.length)win.operation=0;win.refreshFraming() }
         function onSelectionChanged() {
+            win.refreshFraming()
             if (project.selected >= 0) {
                 if (project.selection.layer >= 0) win.operation = project.selection.layer
                 Qt.callLater(win.revealObjectSelection)
@@ -317,7 +322,7 @@ ApplicationWindow {
             ActionButton { objectName: "keepRecovery"; text: "Beenden und behalten"; dark: win.night; hint: "Beendet das Programm. Die Sicherung bleibt für den nächsten Start erhalten."; onClicked: win.close() }
         }
     }
-    Component.onCompleted: { saveDialog=saveDialogFactory.createObject(win); if(typeof recovery!=="undefined" && recovery.available)recoveryDialog.open(); else win.offerFirstRun() }
+    Component.onCompleted: { win.refreshFraming(); saveDialog=saveDialogFactory.createObject(win); if(typeof recovery!=="undefined" && recovery.available)recoveryDialog.open(); else win.offerFirstRun() }
     Dialog {
         id: materialTestDialog
         objectName: "materialTestDialog"
@@ -878,9 +883,26 @@ ApplicationWindow {
                                         ActionButton { objectName: "focusHold"; text: "◎  Halten für 2 %"; primary: true; implicitHeight: 44; enabled: machine.ready || machine.firing; onPressedChanged: machine.focus(pressed) }
                                     }
                                 }
+                                ColumnLayout {
+                                    Layout.fillWidth: true; spacing: 6
+                                    SectionLabel { text: "RAHMENFAHRT · LASER AUS"; dark: win.night }
+                                    ToolCombo {
+                                        id: frameTargetChoice; objectName: "frameTargetChoice"; dark: win.night; Layout.fillWidth: true
+                                        textRole: "label"; valueRole: "scope"
+                                        model: [{label:"Laserauftrag",scope:"job"},{label:"Sichtbare Auswahl",scope:"selection"},{label:"Hilfsformen T1 + T2",scope:"tools"},{label:"Nur Hilfsformen T1",scope:"t1"},{label:"Nur Hilfsformen T2",scope:"t2"}]
+                                        currentIndex: model.findIndex(row=>row.scope===win.frameScope)
+                                        enabled: !machine.busy && !machine.firing
+                                        onActivated: index=>win.frameScope=currentValue
+                                    }
+                                    Text {
+                                        objectName: "frameRegionSummary"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: win.muted; font.pixelSize: 11
+                                        text: {let r=win.frameRegion;if(!r.valid)return r.reason;let f=win.lengthUnit==="in" ? 25.4 : 1;let digits=win.lengthUnit==="in" ? 4 : 2;return "X "+(r.x/f).toFixed(digits)+" · Y "+(r.y/f).toFixed(digits)+" · "+(r.width/f).toFixed(digits)+" × "+(r.height/f).toFixed(digits)+" "+win.lengthUnit}
+                                    }
+                                    Text { text: win.frameScope==="job" ? "Geplante Bearbeitungswege einschließlich Überlauf. Hilfsformen bleiben außerhalb des Laserauftrags." : "Sichtbare Objektgrenzen des aktiven Blatts. Die Rahmenwahl aktiviert keine Laserausgabe."; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 8
-                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.frame(project.activeBounds) }
+                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.ready && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
                                     ActionButton { objectName: "pauseJobButton"; text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
                                     ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }

@@ -147,6 +147,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE bool exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
                                         double minPower, double maxPower, int steps);
     QVariantMap activeBounds() const;
+    Q_INVOKABLE QVariantMap framingBounds(const QString &scope = "job") const;
     QStringList issues() const;
     QVariantMap material() const { return m_material; }
     bool materialModified() const;

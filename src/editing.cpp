@@ -55,11 +55,18 @@ Artwork pageCopy(const Artwork &source, int page, QMap<QString, QString> &groups
 bool Document::bakePath(Artwork &a, const QPainterPath &path) {
     if (path.isEmpty() || path.elementCount() > 100000)
         return false;
-    auto b = path.boundingRect();
-    if (b.width() < .1)
-        b.adjust(-.05, 0, .05, 0);
-    if (b.height() < .1)
-        b.adjust(0, -.05, 0, .05);
+    const auto physical = path.boundingRect();
+    auto b = physical;
+    if (b.width() < Geometry::minimumSize) {
+        b.adjust(-Geometry::minimumSize/2,0,Geometry::minimumSize/2,0);
+        if(physical.left()>=0 && physical.right()<=Geometry::bedWidth)
+            b.moveLeft(std::clamp(b.left(),0.,Geometry::bedWidth-b.width()));
+    }
+    if (b.height() < Geometry::minimumSize) {
+        b.adjust(0,-Geometry::minimumSize/2,0,Geometry::minimumSize/2);
+        if(physical.top()>=0 && physical.bottom()<=Geometry::bedHeight)
+            b.moveTop(std::clamp(b.top(),0.,Geometry::bedHeight-b.height()));
+    }
     if (!Geometry::validBounds(b))
         return false;
     for (int i = 0; i < path.elementCount(); ++i) {

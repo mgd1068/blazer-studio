@@ -200,6 +200,50 @@ class GrblTest : public QObject {
         }
         s.close();
     }
+    void helperFrameUsesOnlyLaserOffAbsoluteMovesAndKeepsPhysicalGates() {
+        for (bool shifted : {false, true}) {
+            Controller c;
+            c.machinePosition = {10, 10};
+            c.workOffset = shifted ? QPointF(190, 0) : QPointF(0, 0);
+            GrblSession session;
+            QVERIFY(session.open(c.port));
+            QTRY_VERIFY(session.ready());
+            Document d;
+            d.newProject();
+            d.addShape("rect");
+            d.setToolLayer(1);
+            d.setProperty("x", 20.);
+            d.setProperty("y", 30.);
+            d.setProperty("width", 40.);
+            d.setProperty("height", 10.);
+            QVERIFY(d.job().moves.isEmpty());
+            const auto bounds = d.framingBounds("t1");
+            QVERIFY(bounds["valid"].toBool());
+            const auto before = c.commands.size();
+            session.frame(bounds);
+            if (shifted) {
+                QVERIFY(!session.busy());
+                QTest::qWait(30);
+                QCOMPARE(c.commands.size(), before);
+            } else {
+                const QStringList expected{"M5",
+                                           "G21",
+                                           "G90",
+                                           "G54",
+                                           "G0 X20.000 Y30.000",
+                                           "G0 X60.000 Y30.000",
+                                           "G0 X60.000 Y40.000",
+                                           "G0 X20.000 Y40.000",
+                                           "G0 X20.000 Y30.000"};
+                QTRY_COMPARE(c.commands.mid(before), expected);
+                for (const auto &command : c.commands.mid(before))
+                    QVERIFY(!command.startsWith("M3") && !command.startsWith("M4"));
+                QTRY_VERIFY(session.ready());
+                QVERIFY(!session.firing);
+            }
+            session.close();
+        }
+    }
     void jogAndFrameRespectPhysicalBed() {
         Controller c;
         c.machinePosition = {199, 75};

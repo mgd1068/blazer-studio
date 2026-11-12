@@ -252,6 +252,22 @@ class WorkflowTest : public QObject {
         QVERIFY(item("toolShapeStatus")->isVisible());
         QVERIFY(item("toolShapeStatus")->property("text").toString().contains("keine Laserausgabe"));
         QVERIFY(screenshot("tool-shapes"));
+        const auto beforeHelperFrame=project.projectBytes();
+        window->setProperty("page",2);
+        auto *frameTarget=item("frameTargetChoice");QVERIFY(frameTarget);
+        QVERIFY(click(window,frameTarget));QTest::keyClick(window,Qt::Key_End);QTest::keyClick(window,Qt::Key_Return);
+        QTRY_COMPARE(window->property("frameScope").toString(),QString("t2"));
+        QTRY_VERIFY(item("frameJobButton")->isEnabled());
+        QVERIFY(click(window,item("frameJobButton")));QTRY_VERIFY(machine.busy());QVERIFY(!machine.firing());
+        QVERIFY(click(window,item("stopJobButton")));QTRY_VERIFY(machine.ready());
+        QCOMPARE(project.projectBytes(),beforeHelperFrame);
+        QVERIFY(screenshot("helper-framing"));
+        QVERIFY(click(window,frameTarget));QTest::keyClick(window,Qt::Key_Home);QTest::keyClick(window,Qt::Key_Return);
+        QTRY_COMPARE(window->property("frameScope").toString(),QString("job"));
+        QTRY_VERIFY(!item("frameJobButton")->isEnabled());
+        QVERIFY(item("frameRegionSummary")->property("text").toString().contains("Kein gültiger Laserauftrag"));
+        window->setProperty("page",0);
+
         project.newProject();
         project.addShape("rect");
         const auto clipboardBounds=project.items()[0].bounds;
