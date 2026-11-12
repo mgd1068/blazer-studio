@@ -355,7 +355,7 @@ bool Document::importFile(const QUrl &url) {
         notify("Keine importierbare Geometrie oder zu viele Objekte.");
         return false;
     }
-    checkpoint();
+    checkpoint("Geometrie importieren");
     beginResetModel();
     m_items.append(imported);
     normalizeGroups();
@@ -403,7 +403,7 @@ bool Document::importProject(const QUrl &url) {
         notify("Kombiniertes Projekt überschreitet Grenzen.");
         return false;
     }
-    checkpoint();
+    checkpoint("Projekt importieren");
     applySnapshot(*combined);
     notify("Projektinhalt mit eigenen Operationen eingefügt; Name und Notizen des geöffneten "
            "Projekts bleiben erhalten.");

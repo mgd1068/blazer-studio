@@ -142,6 +142,19 @@ class WorkflowTest : public QObject {
                 return false;
             return click(window, item(name));
         };
+        auto openHistory = [&] {
+            if (!click(window, item("openHistoryButton")))return false;
+            auto *dialog=window->findChild<QObject *>("historyDialog");
+            return dialog && QTest::qWaitFor([&]{return dialog->property("opened").toBool();},1000);
+        };
+        auto chooseHistory = [&](int position) {
+            auto *list=item("historyList");
+            if(!list)return false;
+            list->setProperty("contentY",position==0 ? 0. : std::max(0.,list->property("contentHeight").toDouble()-list->height()));
+            const auto name="historyRow"+QString::number(position);
+            if(!QTest::qWaitFor([&]{return item(name) && item(name)->isVisible();},1000))return false;
+            return click(window,item(name)) && click(window,item("historyApply"));
+        };
         project.addShape("rect");
         QVERIFY(item("objectCheck0"));
         QVERIFY(project.addPage("Rückseite"));
@@ -468,6 +481,20 @@ class WorkflowTest : public QObject {
         QCOMPARE(project.activePage(), 1);
         QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy() && project.job().valid(), 5000);
         QCOMPARE(project.job().moves.last().to.x(), originalEnd.x() + 20);
+        const int pausedHistoryPosition=project.historyPosition();
+        const auto pausedDocument=project.projectBytes();
+        QVERIFY(openHistory());
+        QVERIFY(chooseHistory(0));
+        QCOMPARE(project.count(),0);
+        QVERIFY(machine.paused());
+        QVERIFY(click(window,item("historyClose")));
+        QTRY_VERIFY(!window->findChild<QObject *>("historyDialog")->property("visible").toBool());
+        QVERIFY(openHistory());
+        QVERIFY(chooseHistory(pausedHistoryPosition));
+        QCOMPARE(project.projectBytes(),pausedDocument);
+        QVERIFY(machine.paused());
+        QVERIFY(click(window,item("historyClose")));
+        QTRY_VERIFY(!window->findChild<QObject *>("historyDialog")->property("visible").toBool());
         QVERIFY(click(window, item("pauseJobButton")));
         QTRY_VERIFY_WITH_TIMEOUT(machine.ready(), 18000);
         QCOMPARE(machine.progress(), 1.);
@@ -654,6 +681,57 @@ class WorkflowTest : public QObject {
         // Multiple save operations may retain only the current wrapper and
         // its fallback chooser, rather than one hidden chooser per operation.
         QTRY_VERIFY(saveResourceCount() <= 2);
+        // The history is a deliberate modal list, with a saved-content marker,
+        // local undo/redo keys and stale-target rejection.
+        project.newProject();
+        project.addShape("rect");
+        QVERIFY(project.setMetadata("Verlauf","Private Notizen"));
+        QVERIFY(project.addPage("Rueckseite"));
+        project.addShape("ellipse");
+        const auto historyFile=storage.filePath("history-ui.blazer");
+        QVERIFY(project.save(QUrl::fromLocalFile(historyFile)));
+        const auto fileBytes=read(historyFile);
+        QVERIFY(project.setMetadata("Geaendert","Neue private Notizen"));
+        QVERIFY(openHistory());
+        auto *historyDialog=window->findChild<QObject *>("historyDialog");
+        QVERIFY(historyDialog);
+        QCOMPARE(historyDialog->property("currentPosition").toInt(),5);
+        const auto entries=historyDialog->property("entries").toList();
+        QVERIFY(entries[4].toMap()["saved"].toBool());
+        QVERIFY(chooseHistory(1));
+        QCOMPARE(project.count(),1);
+        QCOMPARE(project.pages().size(),1);
+        QCOMPARE(project.title(),QString("Unbenannt"));
+        QCOMPARE(read(historyFile),fileBytes);
+        QTest::keyClick(window,Qt::Key_Z,Qt::ControlModifier);
+        QTRY_COMPARE(project.historyPosition(),0);
+        QTest::keyClick(window,Qt::Key_Z,Qt::ControlModifier|Qt::ShiftModifier);
+        QTRY_COMPARE(project.historyPosition(),1);
+        QVERIFY(screenshot("history"));
+        auto *historyList=item("historyList");
+        QVERIFY(historyList);
+        historyList->setProperty("contentY",0.);
+        QTRY_VERIFY(item("historyRow4") && item("historyRow4")->isVisible());
+        QVERIFY(click(window,item("historyRow4")));
+        const int chosen=historyDialog->property("selectedPosition").toInt();
+        QVERIFY(QMetaObject::invokeMethod(&project,"changed"));
+        QCOMPARE(historyDialog->property("selectedPosition").toInt(),chosen);
+        QVERIFY(project.setMetadata("Extern geaendert",""));
+        const auto staleBytes=project.projectBytes();
+        QVERIFY(click(window,item("historyApply")));
+        QVERIFY(item("historyStaleMessage")->isVisible());
+        QCOMPARE(project.projectBytes(),staleBytes);
+        QCOMPARE(read(historyFile),fileBytes);
+        const int selected=project.selected();
+        QTest::keyClick(window,Qt::Key_Escape);
+        QTRY_VERIFY(!historyDialog->property("visible").toBool());
+        QCOMPARE(project.projectBytes(),staleBytes);
+        QCOMPARE(project.selected(),selected);
+        QVERIFY(projectMenuAction("historyMenuItem"));
+        QTRY_VERIFY(historyDialog->property("visible").toBool());
+        QVERIFY(click(window,item("historyClose")));
+        QTRY_VERIFY(!historyDialog->property("visible").toBool());
+        project.newProject();
         QVERIFY(machine.simulation());
         QVERIFY(!machine.log().join('\n').contains("Baud geöffnet"));
         QVERIFY(window->close());

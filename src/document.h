@@ -20,6 +20,9 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QVariantMap jobSummary READ jobSummary NOTIFY changed)
     Q_PROPERTY(QStringList pages READ pages NOTIFY changed)
     Q_PROPERTY(int activePage READ activePage NOTIFY changed)
+    Q_PROPERTY(QVariantList history READ history NOTIFY changed)
+    Q_PROPERTY(int historyPosition READ historyPosition NOTIFY changed)
+    Q_PROPERTY(quint64 historyRevision READ historyRevision NOTIFY changed)
     Q_PROPERTY(QVariantList nodes READ nodes NOTIFY selectionChanged)
     Q_PROPERTY(int count READ count NOTIFY changed)
     Q_PROPERTY(int selected READ selected WRITE select NOTIFY selectionChanged)
@@ -106,6 +109,10 @@ class Document : public QAbstractListModel {
     bool dirty() const { return m_dirty; }
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
+    QVariantList history() const;
+    int historyPosition() const { return m_undo.size(); }
+    quint64 historyRevision() const { return m_historyRevision; }
+    Q_INVOKABLE bool restoreHistory(int position, quint64 revision);
     double pathLength() const;
     const JobPlan &job() const;
     QVariantMap jobSummary() const;
@@ -146,7 +153,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE bool newFromTemplate(const QUrl &url);
     void beginMove();
     void moveSelection(QPointF position);
-    void finishMove();
+    Q_INVOKABLE void finishMove();
     void notify(const QString &message);
   signals:
     void changed();
@@ -172,7 +179,8 @@ class Document : public QAbstractListModel {
     void applySnapshot(const Snapshot &state);
     QByteArray serialize() const;
     std::optional<Snapshot> parse(const QByteArray &json) const;
-    void checkpoint();
+    void checkpoint(const QString &label = QStringLiteral("Bearbeitung"));
+    void clearHistory();
     void refresh(int row = -1);
     void markClean();
     void setFileUrl(const QUrl &url);
@@ -193,7 +201,12 @@ class Document : public QAbstractListModel {
     QUrl m_fileUrl;
     bool m_dirty = false;
     Snapshot m_saved;
-    QList<Snapshot> m_undo, m_redo;
+    struct HistoryEntry {
+        Snapshot state;
+        QString label;
+    };
+    QList<HistoryEntry> m_undo, m_redo;
+    quint64 m_historyRevision = 0;
     std::optional<Snapshot> m_beforeMove;
     mutable std::optional<JobPlan> m_job;
     JobPreparation m_preparation;

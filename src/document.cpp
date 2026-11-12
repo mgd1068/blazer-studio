@@ -224,7 +224,7 @@ void Document::groupSelection() {
         return;
     if (selection()["grouped"].toBool())
         return;
-    checkpoint();
+    checkpoint("Gruppieren");
     beginResetModel();
     const QString group = id(), name = QString("Gruppe %1").arg(m_items.size());
     QList<Artwork> grouped, others;
@@ -261,7 +261,7 @@ void Document::ungroupSelection() {
             groups.insert(m_items[row].groupId);
     if (groups.isEmpty())
         return;
-    checkpoint();
+    checkpoint("Gruppen auflösen");
     for (auto &a : m_items)
         if (groups.contains(a.groupId)) {
             a.groupId.clear();
@@ -291,7 +291,7 @@ bool Document::transformSelection(const QRectF &target, bool history) {
         result.append(r);
     }
     if (history)
-        checkpoint();
+        checkpoint("Position / Größe");
     for (int i = 0; i < m_selection.size(); ++i)
         m_items[m_selection[i]].bounds = result[i];
     refresh();
@@ -329,6 +329,7 @@ void Document::refresh(int row) {
 void Document::markClean() {
     m_saved = snapshot();
     m_dirty = false;
+    ++m_historyRevision;
 }
 void Document::setFileUrl(const QUrl &url) {
     if (m_fileUrl == url)
@@ -369,8 +370,7 @@ void Document::demo() {
         {id(), "Unterzeile", "text", "ZEIT FÜR GUTE IDEEN", QRectF(55, 48, 90, 7), 0, true, {}}};
     m_selected = 0;
     m_selection = {0};
-    m_undo.clear();
-    m_redo.clear();
+    clearHistory();
     m_beforeMove.reset();
     markClean();
     endResetModel();
@@ -389,12 +389,59 @@ void Document::newProject() {
     refresh();
     notify("Neues Projekt · SVG importieren oder Formen hinzufügen.");
 }
-void Document::checkpoint() {
+void Document::clearHistory() {
+    m_undo.clear();
+    m_redo.clear();
+    ++m_historyRevision;
+}
+void Document::checkpoint(const QString &label) {
     finishMove();
-    m_undo.append(snapshot());
+    m_undo.append({snapshot(), label});
     while (m_undo.size() > 50)
         m_undo.removeFirst();
     m_redo.clear();
+    ++m_historyRevision;
+}
+QVariantList Document::history() const {
+    QVariantList result;
+    const auto current = snapshot();
+    auto append = [&](const Snapshot &state, const QString &label, int position) {
+        result.append(QVariantMap{{"position", position}, {"label", label},
+                                  {"current", position == m_undo.size()},
+                                  {"saved", !m_fileUrl.isEmpty() && sameContent(state, m_saved)},
+                                  {"objects", state.items.size()}, {"pages", state.pages.size()},
+                                  {"activePage", state.activePage}});
+    };
+    const QString oldest = "Ältester verfügbarer Stand";
+    for (int i = 0; i < m_undo.size(); ++i)
+        append(m_undo[i].state, i ? m_undo[i - 1].label : oldest, i);
+    append(current, m_undo.isEmpty() ? oldest : m_undo.last().label, m_undo.size());
+    for (int i = m_redo.size() - 1; i >= 0; --i)
+        append(m_redo[i].state, m_redo[i].label, result.size());
+    return result;
+}
+bool Document::restoreHistory(int position, quint64 revision) {
+    if (m_beforeMove || revision != m_historyRevision || position < 0 ||
+        position > m_undo.size() + m_redo.size()) {
+        notify("Der Verlauf hat sich geändert oder die Bearbeitung läuft noch. Bitte neu wählen.");
+        return false;
+    }
+    if (position == m_undo.size())
+        return true;
+    auto current = snapshot();
+    while (m_undo.size() > position) {
+        auto previous = m_undo.takeLast();
+        m_redo.append({std::move(current), previous.label});
+        current = std::move(previous.state);
+    }
+    while (m_undo.size() < position) {
+        auto next = m_redo.takeLast();
+        m_undo.append({std::move(current), next.label});
+        current = std::move(next.state);
+    }
+    ++m_historyRevision;
+    applySnapshot(current); // One model reset and one new plan for the whole jump.
+    return true;
 }
 bool Document::setMetadata(const QString &title, const QString &notes) {
     if (!validMetadata(title, notes)) {
@@ -405,7 +452,7 @@ bool Document::setMetadata(const QString &title, const QString &notes) {
     const auto name = title.trimmed();
     if (m_title == name && m_notes == notes)
         return true;
-    checkpoint();
+    checkpoint("Projektangaben");
     m_title = name;
     m_notes = notes;
     // Metadata is saved/recovered and undoable, but does not change toolpaths.
@@ -418,15 +465,13 @@ void Document::undo() {
     finishMove();
     if (m_undo.isEmpty())
         return;
-    m_redo.append(snapshot());
-    applySnapshot(m_undo.takeLast());
+    restoreHistory(m_undo.size() - 1, m_historyRevision);
 }
 void Document::redo() {
     finishMove();
     if (m_redo.isEmpty())
         return;
-    m_undo.append(snapshot());
-    applySnapshot(m_redo.takeLast());
+    restoreHistory(m_undo.size() + 1, m_historyRevision);
 }
 bool Document::canAppend(const Artwork &a) {
     if (m_items.size() >= Geometry::objectLimit) {
@@ -458,7 +503,12 @@ bool Document::canAppend(const Artwork &a) {
 void Document::appendArtwork(const Artwork &a) {
     if (!canAppend(a))
         return;
-    checkpoint();
+    static const QMap<QString, QString> labels{{"rect", "Rechteck hinzufügen"},
+        {"ellipse", "Ellipse hinzufügen"}, {"text", "Text hinzufügen"},
+        {"svg", "Vektor importieren"}, {"image", "Bild importieren"},
+        {"relief", "Relief importieren"}, {"path", "Pfad hinzufügen"}};
+    checkpoint(a.style.value("qr", false).toBool() ? QString("QR-Code hinzufügen")
+                                                   : labels.value(a.kind, "Objekt hinzufügen"));
     const int row = m_items.size();
     beginInsertRows({}, row, row);
     auto item = a;
@@ -486,7 +536,7 @@ void Document::addShape(const QString &kind) {
 void Document::removeSelected() {
     if (m_selection.isEmpty())
         return;
-    checkpoint();
+    checkpoint("Objekte löschen");
     beginResetModel();
     int next = m_selection.first();
     for (auto it = m_selection.crbegin(); it != m_selection.crend(); ++it)
@@ -534,7 +584,7 @@ void Document::duplicateSelected() {
     }
     if (bytes > maxEmbeddedBytes || pixels > maxReliefPixels)
         return;
-    checkpoint();
+    checkpoint("Objekte kopieren");
     beginResetModel();
     int first = m_items.size();
     m_items.append(copies);
@@ -549,7 +599,7 @@ void Document::duplicateSelected() {
 void Document::toggleVisible(int row) {
     if (row < 0 || row >= m_items.size())
         return;
-    checkpoint();
+    checkpoint("Sichtbarkeit");
     m_items[row].visible = !m_items[row].visible;
     refresh(row);
 }
@@ -565,7 +615,7 @@ void Document::setProperty(const QString &key, const QVariant &value) {
                 return;
             if (m_items[m_selected].groupName == value.toString())
                 return;
-            checkpoint();
+            checkpoint("Gruppenname");
             for (int row : m_selection)
                 m_items[row].groupName = value.toString();
             emit dataChanged(index(0), index(m_items.size() - 1));
@@ -575,7 +625,7 @@ void Document::setProperty(const QString &key, const QVariant &value) {
         const auto &a = m_items[m_selected];
         if ((key == "name" ? a.name : a.text) == value.toString())
             return;
-        checkpoint();
+        checkpoint(key == "name" ? "Objektname" : "Text");
         if (key == "name")
             m_items[m_selected].name = value.toString();
         else
@@ -614,7 +664,7 @@ void Document::setLayer(int layerIndex) {
         change |= m_items[row].layer != layerIndex;
     if (!change)
         return;
-    checkpoint();
+    checkpoint("Bearbeitung zuweisen");
     for (int row : m_selection)
         m_items[row].layer = layerIndex;
     emit dataChanged(index(0), index(m_items.size() - 1));
@@ -669,7 +719,7 @@ void Document::setLayerSetting(int layerIndex, const QString &key, const QVarian
     }
     if (map[key] == canonical)
         return;
-    checkpoint();
+    checkpoint("Operationswerte");
     map[key] = canonical;
     m_layers[layerIndex] = map;
     refresh();
@@ -683,7 +733,7 @@ bool Document::applyMaterial(const QVariantMap &profile) {
     auto updated = materialLayers(m_layers, profile);
     if (m_material == profile && m_layers == updated)
         return true;
-    checkpoint();
+    checkpoint("Materialprofil");
     m_layers = updated;
     m_material = profile;
     for (auto &item : m_items)
@@ -726,10 +776,11 @@ void Document::finishMove() {
     if (!m_beforeMove)
         return;
     if (!sameContent(*m_beforeMove, snapshot())) {
-        m_undo.append(*m_beforeMove);
+        m_undo.append({*m_beforeMove, "Ziehen"});
         while (m_undo.size() > 50)
             m_undo.removeFirst();
         m_redo.clear();
+        ++m_historyRevision;
     }
     m_beforeMove.reset();
     emit changed();
@@ -1158,9 +1209,8 @@ bool Document::open(const QUrl &url) {
         notify("Keine gültige Blazer-Studio-Projektdatei; aktuelles Projekt bleibt erhalten.");
         return false;
     }
+    clearHistory();
     applySnapshot(*state);
-    m_undo.clear();
-    m_redo.clear();
     markClean();
     setFileUrl(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     emit changed();
@@ -1215,8 +1265,7 @@ bool Document::newFromTemplate(const QUrl &url) {
     }
     // A template starts an independent, unsaved document with fresh history.
     // Its source is never treated as the project's ordinary save destination.
-    m_undo.clear();
-    m_redo.clear();
+    clearHistory();
     m_saved = Snapshot{};
     setFileUrl({});
     applySnapshot(*state);
@@ -1330,7 +1379,7 @@ void Document::setObjectSetting(const QString &key, double value) {
         changed |= m_items[row].settings.value(key) != value;
     if (!changed)
         return;
-    checkpoint();
+    checkpoint("Objektwerte");
     for (int row : m_selection) {
         if (m_items[row].settings.value(key) != value)
             m_items[row].relief.depthPerPass = 0;
@@ -1346,7 +1395,7 @@ bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPo
         return false;
     }
     newProject();
-    checkpoint();
+    checkpoint("Materialtest");
     beginResetModel();
     m_title = "Materialtest";
     m_material = MaterialLibrary::example();
@@ -1447,7 +1496,7 @@ void Document::setReliefSetting(const QString &key, const QVariant &value) {
         result.cleanupEvery != m_items[m_selected].relief.cleanupEvery ||
         result.cleanupPower != m_items[m_selected].relief.cleanupPower)
         result.depthPerPass = 0;
-    checkpoint();
+    checkpoint("Reliefwerte");
     m_items[m_selected].relief = result;
     refresh();
 }
@@ -1544,7 +1593,7 @@ bool Document::applyBasicMaterial(const QVariantMap &profile) {
             change |= !a.settings.isEmpty() || (engrave != cut && a.layer != (engrave ? 0 : 1));
     if (change) {
         if (!profileChanges)
-            checkpoint();
+            checkpoint("Profilwerte übernehmen");
         for (auto &a : m_items)
             if (a.page == m_activePage) {
                 a.settings.clear();

@@ -703,13 +703,19 @@ class UiTest : public QObject {
         QVERIFY(!discard->property("visible").toBool());
         QVERIFY(!machine.busy());
     }
-    void recoveryDialogEscapeKeepsOldRecovery_data() {
+    void recoveryDialogExplicitDecisions_data() {
         QTest::addColumn<bool>("incomingDirty");
-        QTest::newRow("clean-start") << false;
-        QTest::newRow("new-template-draft") << true;
+        QTest::addColumn<QString>("decision");
+        QTest::newRow("clean-keep") << false << QString("keep");
+        QTest::newRow("draft-keep") << true << QString("keep");
+        QTest::newRow("clean-restore") << false << QString("restore");
+        QTest::newRow("draft-restore") << true << QString("restore");
+        QTest::newRow("clean-discard") << false << QString("discard");
+        QTest::newRow("draft-discard") << true << QString("discard");
     }
-    void recoveryDialogEscapeKeepsOldRecovery() {
+    void recoveryDialogExplicitDecisions() {
         QFETCH(bool, incomingDirty);
+        QFETCH(QString, decision);
         Document project;
         QTemporaryDir storage;
         QString recoveryPath;
@@ -727,9 +733,11 @@ class UiTest : public QObject {
         Recovery recovery(&project, storage.filePath("recovery"));
         if (incomingDirty)
             project.addShape("text");
+        const auto incomingBytes=project.projectBytes();
         MaterialLibrary library(storage.filePath("materials.json"));
         UiMachine machine;
         ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        if(decision!="keep")QVERIFY(services.finishOnboarding());
         Registration cameraRegistration;
         QQmlApplicationEngine engine;
         auto *context = engine.rootContext();
@@ -753,6 +761,62 @@ class UiTest : public QObject {
         QVERIFY(!window->findChild<QObject *>("onboardingDialog")->property("visible").toBool());
         QVERIFY(QTest::qWaitForWindowExposed(window));
         QTest::qWait(50);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        auto clickRecovery = [&](const char *name) {
+            auto *button=window->findChild<QQuickItem *>(name);
+            if(!button || !button->isVisible() || !button->isEnabled())return false;
+            window->requestActivate();
+            if(!QTest::qWaitForWindowActive(window))return false;
+            for(int attempt=0;attempt<5;++attempt) {
+                const auto point=button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint();
+                QTest::mouseMove(window,point);
+                QTest::qWait(30);
+                if(button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint()!=point)continue;
+                QTest::mouseClick(window,Qt::LeftButton,{},point);
+                return true;
+            }
+            return false;
+        };
+        if(decision=="restore") {
+            QVERIFY(clickRecovery("restoreRecovery"));
+            QTRY_VERIFY(!dialog->property("visible").toBool());
+            QVERIFY(!recovery.pendingDecision());
+            QCOMPARE(project.projectBytes(),bytes);
+            QVERIFY(project.dirty());
+            QVERIFY(project.fileUrl().isEmpty());
+            QCOMPARE(project.history().last().toMap()["label"].toString(),QString("Wiederherstellung"));
+            const auto restoredFile=QUrl::fromLocalFile(storage.filePath("restored.blazer"));
+            QVERIFY(project.save(restoredFile));
+            QVERIFY(!project.dirty());
+            QVERIFY(!recovery.available());
+            Document check;
+            QVERIFY(check.open(restoredFile));
+            QCOMPARE(check.projectBytes(),bytes);
+            QVERIFY(window->close());
+            QTRY_VERIFY(!window->isVisible());
+            QVERIFY(!QFile::exists(recoveryPath));
+            return;
+        }
+        if(decision=="discard") {
+            QVERIFY(clickRecovery("discardRecovery"));
+            QTRY_VERIFY(!dialog->property("visible").toBool());
+            QVERIFY(!recovery.pendingDecision());
+            QCOMPARE(project.projectBytes(),incomingBytes);
+            QVERIFY(!QFile::exists(recoveryPath));
+            if(incomingDirty) {
+                QTest::qWait(1800);
+                QVERIFY(recovery.available());
+                QVERIFY(original.open(QIODevice::ReadOnly));
+                QCOMPARE(original.readAll(),incomingBytes);
+                original.close();
+                QVERIFY(!window->close());
+                QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+                QVERIFY(clickRecovery("discardChangesButton"));
+            } else QVERIFY(window->close());
+            QTRY_VERIFY(!window->isVisible());
+            QVERIFY(!QFile::exists(recoveryPath));
+            return;
+        }
         QTest::keyClick(window, Qt::Key_Escape);
         if (incomingDirty) {
             auto *discard = window->findChild<QObject *>("discardDialog");

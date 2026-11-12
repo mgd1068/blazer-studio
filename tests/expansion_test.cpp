@@ -595,6 +595,7 @@ class ExpansionTest : public QObject {
             "2L2 0</PrimList></Shape><Shape Type=\"Rect\" W=\"5\" H=\"5\"><XForm>1 0 0 1 20 "
             "20</XForm></Shape></Children></Shape></LightBurnProject>");
         QVERIFY2(d.importFile(lb), qPrintable(d.message()));
+        QCOMPARE(d.history().last().toMap()["label"].toString(),QString("Geometrie importieren"));
         QCOMPARE(d.count(), 2);
         QVERIFY(d.items()[0].bounds.x() >= 10);
         auto group = d.items()[0].groupId;
@@ -632,6 +633,7 @@ class ExpansionTest : public QObject {
         auto dxf = write("line.dxf", "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n10\n20\n10\n11\n20\n21"
                                      "\n20\n0\nENDSEC\n0\nEOF\n");
         QVERIFY(d.importFile(dxf));
+        QCOMPARE(d.history().last().toMap()["label"].toString(),QString("Geometrie importieren"));
         QCOMPARE(d.count(), 1);
         QVERIFY(d.job().valid());
         QVERIFY(d.exportSvg(QUrl::fromLocalFile(temp.filePath("export.svg"))));

@@ -73,4 +73,14 @@ Das Namensfeld gilt für **+ Blatt**, **Blatt kopieren** und **Umbenennen**. Neu
 
 Beim Speichern werden Blattinhalt, Namen und aktives Blatt übernommen und beim Öffnen wiederhergestellt. Hinzufügen, Kopieren, Umbenennen und Löschen gehören zu Undo/Redo; das reine Anzeigen eines anderen Blatts fügt keinen Bearbeitungsschritt hinzu und fordert allein keine Speicherung. Ein bereits gestarteter Simulatorauftrag behält seinen eingefrorenen Plan, wenn danach das aktive Blatt oder dessen Entwurf geändert wird. Die reale Geräteabnahme dieses Ablaufs bleibt offen.
 
+## Sichtbarer Bearbeitungsverlauf – Entwicklung ab beta.4-dev
+
+**Verlauf** neben den Rückgängig-/Wiederholen-Tasten oder **Projektname → Bearbeitungsverlauf** öffnet die benannten Schritte der aktuellen Sitzung. **Aktuell** bezeichnet den geöffneten Stand. **Dateiinhalt** markiert Zustände, deren Inhalt der letzten erfolgreichen Projektspeicherung entspricht; ohne eigene Projektdatei erscheint diese Markierung nicht. Das Wählen einer Zeile verändert zunächst nur die Auswahl. **Zu Stand wechseln** übernimmt den gewählten Stand. **Rückgängig**, **Wiederholen**, Strg+Z und Strg+Umschalt+Z bewegen sich je einen Schritt; **Schließen** oder Escape beendet den Dialog.
+
+Ein Sprung kann mehrere Schritte überspringen und übernimmt direkt den Zielzustand einschließlich Objekten, Operationen, Materialwerten, Namen/Notizen und aktiver Seite. Der Projektpfad bleibt erhalten, und die Projektdatei wird dabei nicht geschrieben. Ein Sprung zum passenden Dateiinhalt kann den Entwurf wieder als unverändert markieren. Wer den zurückgeholten Stand dauerhaft behalten möchte, speichert ihn anschließend ausdrücklich.
+
+Der Verlauf enthält höchstens 50 Bearbeitungsschritte plus den ältesten noch verfügbaren Stand. Änderungen durch Ziehen werden beim Abschluss zusammengefasst. Eine neue Bearbeitung nach Rückgängig verwirft die spätere Redo-Seite; Speichern allein erzeugt keinen Bearbeitungsschritt. Der Verlauf bleibt innerhalb der Sitzung und gehört nicht zum Projektformat oder Diagnosebericht. Öffnen, Neu, Beispiel und Neu aus Vorlage beginnen einen frischen Verlauf. Eine automatische Wiederherstellung übernimmt den gesicherten Projektstand und erzeugt einen lokalen Wiederherstellungsschritt; sie lädt keine frühere Sitzungshistorie.
+
+Die Dialogliste bleibt bei Statusmeldungen der Hintergrundberechnung stabil. Ändert sich die zugrunde liegende Historie anderweitig, wird ein alter Wechselwunsch abgelehnt, die Liste aktualisiert und der Benutzer wählt erneut. Die zwischenzeitlich bearbeiteten Daten bleiben erhalten. Ein pausierter Simulatorauftrag behält seinen eingefrorenen Plan auch bei Verlaufssprüngen des Entwurfs; die reale Geräteprüfung steht weiterhin aus.
+
 Der vollständige [Funktionsstand](FUNCTION_ACCEPTANCE.md) und die [Abnahmekriterien](PRODUCTION_READINESS.md) bleiben maßgeblich.

@@ -36,7 +36,7 @@ ApplicationWindow {
     property url pendingProjectFile
     property var saveDialog: null
     property url lastProjectSaveFolder
-    readonly property bool projectDialogActive: recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
+    readonly property bool projectDialogActive: historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
     property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
     readonly property color panel: night ? "#202e39" : "#ffffff"
@@ -104,6 +104,7 @@ ApplicationWindow {
         dark: win.night
         onAboutToShow: machine.focus(false)
     }
+    HistoryDialog { id: historyDialog; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
     RecentProjectsDialog {
         id: recentProjects
         service: typeof appServices !== "undefined" ? appServices : null
@@ -415,6 +416,7 @@ ApplicationWindow {
                         width: 280
                         onAboutToShow: machine.focus(false)
                         MenuItem { objectName: "projectMetadataMenuItem"; text: "Projektangaben …"; onTriggered: projectDetails.open() }
+                        MenuItem { objectName: "historyMenuItem"; text: "Bearbeitungsverlauf …"; onTriggered: historyDialog.open() }
                         MenuSeparator {}
                         MenuItem { objectName: "newTemplateMenuItem"; text: "Neu aus Vorlage …"; onTriggered: win.requestAction("template") }
                         MenuItem { objectName: "saveTemplateMenuItem"; text: "Als Vorlage speichern …"; onTriggered: saveTemplateDialog.open() }
@@ -721,6 +723,7 @@ ApplicationWindow {
                         Rectangle { width: 1; height: 18; color: win.line; Layout.leftMargin: 3; Layout.rightMargin: 3 }
                         ActionButton { text: "↶"; hint: "Rückgängig · Strg+Z"; compact: true; dark: win.night; enabled: project.canUndo; onClicked: project.undo() }
                         ActionButton { text: "↷"; hint: "Wiederholen · Strg+Umschalt+Z"; compact: true; dark: win.night; enabled: project.canRedo; onClicked: project.redo() }
+                        ActionButton { objectName: "openHistoryButton"; text: "Verlauf"; hint: "Zeigt benannte Bearbeitungsschritte und wechselt zu einem früheren oder späteren Stand."; compact: true; dark: win.night; onClicked: historyDialog.open() }
                         Item { Layout.fillWidth: true }
                         Text { text: win.page === 0 ? "ARBEITSFLÄCHE" : win.page === 1 ? "PFADVORSCHAU" : win.page === 3 ? "RELIEF / TIEFENKARTE" : win.page===4 ? "EDITOR / PRODUKTION" : "GERÄTESTEUERUNG"; color: win.muted; font.pixelSize: 11; font.letterSpacing: 1 }
                     }
