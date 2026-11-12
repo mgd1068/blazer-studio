@@ -1,5 +1,6 @@
 #include "document.h"
 #include "imageprocessing.h"
+#include "plotimport.h"
 #include "recovery.h"
 #include "registration.h"
 #include <QDir>
@@ -34,6 +35,136 @@ class ExpansionTest : public QObject {
         return QUrl::fromLocalFile(path);
     }
   private slots:
+    void hpglMillimetresOrientationAndModalCoordinates() {
+        const auto result = PlotImport::hpgl("IN;SP1;PU400,800;PD1200,800,1200,1200;"
+                                             "PU;PR-800,0;PD800,0;SP0;PD800,800;");
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.paths.size(), 2);
+        // An asymmetric L is not mirrored: HPGL and editor world both use +Y up.
+        const auto &l = result.paths[0];
+        QCOMPARE(l.elementCount(), 3);
+        QCOMPARE(QPointF(l.elementAt(0)), QPointF(0, 0));
+        QCOMPARE(QPointF(l.elementAt(1)), QPointF(20, 0));
+        QCOMPARE(QPointF(l.elementAt(2)), QPointF(20, 10));
+        QCOMPARE(result.paths[1].boundingRect(), QRectF(0, 10, 20, 0));
+        // Separate zero-height strokes must both contribute to the common bounds.
+        const auto lines = PlotImport::hpgl("in sp1 pu400,400 pd800,400 pu400,800 pd800,800");
+        QVERIFY2(lines.error.isEmpty(), qPrintable(lines.error));
+        QCOMPARE(lines.paths.size(), 2);
+        QCOMPARE(QPointF(lines.paths[0].elementAt(0)), QPointF(0, 0));
+        QCOMPARE(QPointF(lines.paths[1].elementAt(0)), QPointF(0, 10));
+    }
+    void hpglCirclesArcsAndBezierState() {
+        const auto circle = PlotImport::hpgl("IN;SP1;PU800,800;CI400,90;PR;PD400,0;");
+        QVERIFY2(circle.error.isEmpty(), qPrintable(circle.error));
+        QCOMPARE(circle.paths.size(), 2);
+        QCOMPARE(circle.paths[0].boundingRect(), QRectF(0, 0, 20, 20));
+        QCOMPARE(QPointF(circle.paths[0].elementAt(0)),
+                 QPointF(circle.paths[0].elementAt(circle.paths[0].elementCount() - 1)));
+        // CI draws while pen-up, restores the centre, and leaves PA/PR untouched.
+        QCOMPARE(QPointF(circle.paths[1].elementAt(0)), QPointF(10, 10));
+        QCOMPARE(QPointF(circle.paths[1].elementAt(1)), QPointF(20, 10));
+        const auto arc = PlotImport::hpgl("INSP1PU400,0PDAA0,0,90,90;AR0,-400,-90,90;");
+        QVERIFY2(arc.error.isEmpty(), qPrintable(arc.error));
+        QCOMPARE(arc.paths.size(), 1);
+        QVERIFY(QLineF(QPointF(arc.paths[0].elementAt(0)), QPointF(10,0)).length() < 1e-10);
+        QVERIFY(QLineF(QPointF(arc.paths[0].elementAt(1)), QPointF(0,10)).length() < 1e-10);
+        QVERIFY(QLineF(QPointF(arc.paths[0].elementAt(2)), QPointF(10,0)).length() < 1e-10);
+        const auto curve = PlotImport::hpgl("IN;SP1;PU400,400;PD;"
+            "BR0,400,400,400,400,0,0,-400,400,-400,400,0;");
+        QVERIFY2(curve.error.isEmpty(), qPrintable(curve.error));
+        QCOMPARE(curve.paths.size(), 1);
+        const auto &p = curve.paths[0];
+        QCOMPARE(p.elementCount(), 7);
+        QCOMPARE(p.elementAt(1).type, QPainterPath::CurveToElement);
+        // Each BR triple is relative to the curve's start, not the prior control point.
+        QCOMPARE(p.elementAt(3).x, 10.);
+        QCOMPARE(p.elementAt(6).x, 20.);
+        QCOMPARE(p.elementAt(0).y, p.elementAt(3).y);
+        QCOMPARE(p.elementAt(3).y, p.elementAt(6).y);
+        QVERIFY(p.elementAt(1).y > p.elementAt(0).y);
+        QVERIFY(p.elementAt(4).y < p.elementAt(3).y);
+        const auto abs = PlotImport::hpgl("IN;SP1;PD;BZ0,400,400,400,400,0;");
+        QVERIFY(abs.error.isEmpty());
+        QCOMPARE(abs.paths[0].elementCount(), 4);
+    }
+    void hpglImportIsAtomicAndUndoable() {
+        Document d;
+        d.newProject();
+        QVERIFY(d.addPage("Import"));
+        const auto source = d.projectBytes();
+        const auto path = write("shape.PLT", "IN;SP1;PU0,0;PD800,0,800,400,0,0;SP0;");
+        QVERIFY2(d.importFile(path), qPrintable(d.message()));
+        QCOMPARE(d.count(), 1);
+        QCOMPARE(d.items()[0].page, 1);
+        QCOMPARE(d.items()[0].bounds, QRectF(0, 0, 20, 10));
+        QCOMPARE(d.history().last().toMap()["label"].toString(), QString("Geometrie importieren"));
+        const auto imported = d.projectBytes();
+        d.undo();
+        QCOMPARE(d.projectBytes(), source);
+        d.redo();
+        QCOMPARE(d.projectBytes(), imported);
+        const QList<QByteArray> invalid = {
+            "SC0,100,0,100;", "IP0,0,100,100;", "RO90;", "PM0;", "LBhello\003;",
+            "PA1;", "PD1,,2;", "PD1,2,;", "PD1.2.3,4;", "PA1e3,0;", "IN1;",
+            "AA0,0,90,0;", "CI-400;", "BZ1,2;", "SP1.5;", "PU80001,0;",
+            QByteArray("\033%0B"), QByteArray("PA1,2\0;", 8)
+        };
+        for (const auto &bad : invalid) {
+            const QByteArray bytes = "IN;SP1;PD400,0;" + bad;
+            const auto parsed = PlotImport::hpgl(bytes);
+            QVERIFY2(!parsed.error.isEmpty(), bytes.constData());
+            QVERIFY(parsed.paths.isEmpty());
+            const auto revision = d.historyRevision();
+            const auto history = d.history();
+            QVERIFY2(!d.importFile(write("invalid.hpgl", bytes)), bytes.constData());
+            QCOMPARE(d.projectBytes(), imported);
+            QCOMPARE(d.historyRevision(), revision);
+            QCOMPARE(d.history(), history);
+        }
+        QVERIFY(!PlotImport::hpgl("IN;PU0,0;PD400,0;").error.isEmpty());
+    }
+    void hpglResourceBudgets() {
+        QVERIFY(!PlotImport::hpgl(QByteArray(16 * 1024 * 1024 + 1, ' ')).error.isEmpty());
+        QByteArray many = "IN;SP1;";
+        for (int i = 0; i < 2001; ++i)
+            many += "PU0,0;PD400,0;";
+        QVERIFY(PlotImport::hpgl(many).error.contains("Zu viele HPGL-Pfade"));
+        // Work is bounded even for pen-up arcs that create no path elements.
+        const auto hidden = PlotImport::hpgl("IN;PU400,0;AA0,0,32767,0.5;"
+            "AA0,0,32767,0.5;AA0,0,32767,0.5;AA0,0,32767,0.5;");
+        QVERIFY2(hidden.error.contains("Elementlimit"), qPrintable(hidden.error));
+        QVERIFY(hidden.paths.isEmpty());
+        many = "IN;SP1;PD;";
+        for (int i = 0; i < 100001; ++i)
+            many += i % 2 ? "PA400,0;" : "PA0,0;";
+        QVERIFY(!PlotImport::hpgl(many).error.isEmpty());
+    }
+    void hpglRealInkscapeExportAndRoundtrip() {
+        const auto fixture = QFINDTESTDATA("fixtures/hpgl/inkscape-l.hpgl");
+        QVERIFY(!fixture.isEmpty());
+        QFile file(fixture);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto result = PlotImport::hpgl(file.readAll());
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.paths.size(), 1);
+        const auto &p = result.paths[0];
+        QCOMPARE(p.boundingRect(), QRectF(0, 0, 20, 10));
+        QCOMPARE(p.elementCount(), 5);
+        QCOMPARE(QPointF(p.elementAt(0)), QPointF(0, 0));
+        QCOMPARE(QPointF(p.elementAt(1)), QPointF(20, 0));
+        QCOMPARE(QPointF(p.elementAt(2)), QPointF(20, 10));
+        QCOMPARE(QPointF(p.elementAt(3)), QPointF(5, 10));
+        Document d;
+        d.newProject();
+        QVERIFY2(d.importFile(QUrl::fromLocalFile(fixture)), qPrintable(d.message()));
+        const auto code = d.job().gcode();
+        QVERIFY2(d.job().valid(), qPrintable(d.job().errors.join(";")));
+        Document restored;
+        QVERIFY(restored.restoreBytes(d.projectBytes()));
+        QCOMPARE(restored.items()[0].path, d.items()[0].path);
+        QCOMPARE(restored.job().gcode(), code);
+    }
     void operationPassesAndPages() {
         Document d;
         d.newProject();

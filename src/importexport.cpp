@@ -1,6 +1,7 @@
 #include "document.h"
 #include "geometry.h"
 #include "imagelimits.h"
+#include "plotimport.h"
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
@@ -59,7 +60,26 @@ bool Document::importFile(const QUrl &url) {
     if (!file.open(QIODevice::ReadOnly) || file.size() > 16 * 1024 * 1024)
         return false;
     QList<Artwork> imported;
-    if (ext == "dxf") {
+    const bool hpgl = ext == "hpgl" || ext == "plt";
+    if (hpgl) {
+        const auto result = PlotImport::hpgl(file.read(16 * 1024 * 1024 + 1));
+        if (!result.error.isEmpty()) {
+            notify(result.error);
+            return false;
+        }
+        for (const auto &path : result.paths) {
+            Artwork a;
+            a.id = uid();
+            a.name = "HPGL " + QString::number(imported.size() + 1);
+            a.layer = 1;
+            a.page = m_activePage;
+            if (!bakePath(a, path)) {
+                notify("HPGL-Geometrie ungültig; kein Teilimport.");
+                return false;
+            }
+            imported.append(a);
+        }
+    } else if (ext == "dxf") {
         auto lines = QString::fromUtf8(file.readAll()).split('\n');
         struct Pair {
             int code;
@@ -363,8 +383,10 @@ bool Document::importFile(const QUrl &url) {
     m_selection = {m_selected};
     endResetModel();
     refresh();
-    notify(QString::number(imported.size()) +
-           " Vektorobjekte importiert; Einheiten und Bearbeitungsparameter prüfen.");
+    notify(QString::number(imported.size()) + (hpgl
+        ? " HPGL-Pfade importiert (40 Einheiten/mm, Y nach oben; gemeinsam links unten platziert). "
+          "Stifte als Geometrie übernommen; Bearbeitungsparameter neu prüfen."
+        : " Vektorobjekte importiert; Einheiten und Bearbeitungsparameter prüfen."));
     return true;
 }
 bool Document::importProject(const QUrl &url) {

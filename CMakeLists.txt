@@ -18,6 +18,7 @@ option(BLAZER_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer
 option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
+    src/plotimport.cpp src/plotimport.h
     src/applicationservices.cpp src/applicationservices.h
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
     src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imagelimits.h src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
