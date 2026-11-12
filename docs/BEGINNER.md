@@ -42,3 +42,6 @@ Das ist eine technische Bedienprüfung. Ob ein völlig unerfahrener Mensch ohne 
 
 
 In Advanced unter **05 Werkzeuge → Bild** kann genau ein ausgewähltes Rasterbild mit oder ohne aktuelle Korrekturen als PNG, JPEG oder BMP exportiert werden. Neue Eingaben vorher übernehmen. PNG erhält Transparenz; JPEG und BMP verwenden einen weißen Hintergrund. [Bildexport und Prüfumfang](RASTER_EXPORTS.md) beschreiben die Details. Diese Funktion gehört zur Entwicklung beta.4-dev, noch nicht zum unveränderten beta.3-Paket.
+
+
+Unter der Objektliste stehen **Kopieren** und **Einfügen** bereit. Auf der Arbeitsfläche gelten Strg+C/X/V, Strg+Umschalt+V fügt Blazer-Objekte an der ursprünglichen Position ein. Native Kopien erhalten ihre zugeordneten Bearbeitungen; diese vor der Ausgabe prüfen. Textfelder behalten ihre eigenen Kürzel. [Zwischenablage und Grenzen](CLIPBOARD.md) gehören zur Entwicklung beta.4-dev, noch nicht zum beta.3-Paket.

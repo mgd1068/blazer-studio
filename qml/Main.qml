@@ -36,6 +36,8 @@ ApplicationWindow {
     property url pendingProjectFile
     property var saveDialog: null
     property url lastProjectSaveFolder
+    readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
+    readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
     readonly property bool projectDialogActive: historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
     property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
@@ -252,6 +254,10 @@ ApplicationWindow {
             }
         }
     }
+    Shortcut { sequences: [StandardKey.Copy]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.copySelectionToClipboard() }
+    Shortcut { sequences: [StandardKey.Cut]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.copySelectionToClipboard(true) }
+    Shortcut { sequences: [StandardKey.Paste]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.pasteFromClipboard() }
+    Shortcut { sequence: "Ctrl+Shift+V"; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.pasteFromClipboard(true) }
     Shortcut { sequences: [StandardKey.Save]; enabled: !projectDialogActive; onActivated: win.showSaveDialog() }
     Shortcut { sequences: [StandardKey.Open]; enabled: !projectDialogActive; onActivated: win.requestAction("open") }
     Shortcut { sequences: [StandardKey.Undo]; enabled: !projectDialogActive; onActivated: project.undo() }
@@ -692,6 +698,11 @@ ApplicationWindow {
                         }
                         ActionButton { objectName: "copyObjectsButton"; text: "Kopie"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.duplicateSelected() }
                         ActionButton { objectName: "deleteObjectsButton"; text: win.basic ? "Löschen" : "−"; hint: "Auswahl löschen"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.removeSelected() }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 5
+                        ActionButton { objectName: "clipboardCopyButton"; text: "Kopieren"; hint: "Auswahl in die Systemzwischenablage kopieren · Strg+C"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: project.selected>=0; onClicked: project.copySelectionToClipboard() }
+                        ActionButton { objectName: "clipboardPasteButton"; text: "Einfügen"; hint: "Blazer-Objekte, SVG, Bild oder Text einfügen · Strg+V; Strg+Umschalt+V erhält die ursprüngliche Lage von Blazer-Objekten."; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: project.pasteFromClipboard() }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     SectionLabel { text: "BEARBEITUNGEN"; dark: win.night }

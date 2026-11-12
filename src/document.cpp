@@ -392,6 +392,9 @@ void Document::newProject() {
     notify("Neues Projekt · SVG importieren oder Formen hinzufügen.");
 }
 void Document::clearHistory() {
+    m_clipboardPasteHash.clear();
+    m_clipboardPastePage=-1;
+    m_clipboardPasteCount=0;
     m_undo.clear();
     m_redo.clear();
     ++m_historyRevision;
@@ -536,9 +539,12 @@ void Document::addShape(const QString &kind) {
                    {}});
 }
 void Document::removeSelected() {
+    removeSelection("Objekte löschen");
+}
+void Document::removeSelection(const QString &label) {
     if (m_selection.isEmpty())
         return;
-    checkpoint("Objekte löschen");
+    checkpoint(label);
     beginResetModel();
     int next = m_selection.first();
     for (auto it = m_selection.crbegin(); it != m_selection.crend(); ++it)

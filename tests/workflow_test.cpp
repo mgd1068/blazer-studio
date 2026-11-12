@@ -7,6 +7,8 @@
 #include "reliefpreview.h"
 #include "workspace.h"
 #include <QFile>
+#include <QClipboard>
+#include <QMimeData>
 #include <QJsonDocument>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -156,6 +158,42 @@ class WorkflowTest : public QObject {
             if(!QTest::qWaitFor([&]{return item(name) && item(name)->isVisible();},1000))return false;
             return click(window,item(name)) && click(window,item("historyApply"));
         };
+        project.addShape("rect");
+        const auto clipboardBounds=project.items()[0].bounds;
+        const auto clipboardBefore=project.projectBytes();
+        QVERIFY(click(window,item("clipboardCopyButton")));
+        QCOMPARE(project.projectBytes(),clipboardBefore);
+        QVERIFY(QGuiApplication::clipboard()->mimeData()->hasFormat("application/x-blazer-objects-v1"));
+        QVERIFY(click(window,item("clipboardPasteButton")));
+        QTRY_COMPARE(project.count(),2);
+        QCOMPARE(project.items()[1].bounds,clipboardBounds.translated(5,5));
+        const auto beforeCut=project.projectBytes();
+        item("workspace")->forceActiveFocus();
+        QTest::keyClick(window,Qt::Key_X,Qt::ControlModifier);
+        QTRY_COMPARE(project.count(),1);
+        QTest::keyClick(window,Qt::Key_V,Qt::ControlModifier|Qt::ShiftModifier);
+        QTRY_COMPARE(project.count(),2);
+        QCOMPARE(project.items()[1].bounds,clipboardBounds.translated(5,5));
+        QTest::keyClick(window,Qt::Key_Z,Qt::ControlModifier);
+        QTRY_COMPARE(project.count(),1);
+        QTest::keyClick(window,Qt::Key_Z,Qt::ControlModifier);
+        QTRY_COMPARE(project.projectBytes(),beforeCut);
+        auto *nameInput=item("objectNameInput");
+        QVERIFY(click(window,nameInput));
+        const auto nameText=nameInput->property("text").toString();
+        QTest::keyClick(window,Qt::Key_A,Qt::ControlModifier);
+        QTest::keyClick(window,Qt::Key_C,Qt::ControlModifier);
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(),nameText);
+        QTest::keyClick(window,Qt::Key_X,Qt::ControlModifier);
+        QTRY_COMPARE(nameInput->property("text").toString(),QString());
+        QCOMPARE(project.count(),2);
+        QTest::keyClick(window,Qt::Key_V,Qt::ControlModifier);
+        QTRY_COMPARE(nameInput->property("text").toString(),nameText);
+        item("workspace")->forceActiveFocus();
+        QCOMPARE(project.projectBytes(),beforeCut);
+        QVERIFY(!machine.running());
+        QVERIFY(screenshot("clipboard"));
+        project.newProject();
         project.addShape("rect");
         QVERIFY(item("objectCheck0"));
         QVERIFY(project.addPage("Rückseite"));

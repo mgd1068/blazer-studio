@@ -140,6 +140,8 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void demo();
     Q_INVOKABLE void newProject();
     Q_INVOKABLE void addShape(const QString &kind);
+    Q_INVOKABLE bool copySelectionToClipboard(bool cut = false);
+    Q_INVOKABLE bool pasteFromClipboard(bool inPlace = false);
     Q_INVOKABLE void removeSelected();
     Q_INVOKABLE void duplicateSelected();
     Q_INVOKABLE void toggleVisible(int row);
@@ -192,6 +194,7 @@ class Document : public QAbstractListModel {
     void setFileUrl(const QUrl &url);
     bool transformSelection(const QRectF &bounds, bool history = true);
     void normalizeGroups();
+    void removeSelection(const QString &label);
     bool canAppend(const Artwork &item);
     static bool validBudget(const QList<Artwork> &items);
     static bool bakePath(Artwork &item, const QPainterPath &path);
@@ -219,4 +222,6 @@ class Document : public QAbstractListModel {
     BatchExport m_batch;
     ImageExport m_imageExport;
     bool m_background = false;
+    QByteArray m_clipboardPasteHash;
+    int m_clipboardPastePage = -1, m_clipboardPasteCount = 0;
 };
