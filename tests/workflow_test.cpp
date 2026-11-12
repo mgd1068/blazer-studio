@@ -134,6 +134,11 @@ class WorkflowTest : public QObject {
             QTest::keyClick(window, Qt::Key_Down);
         QTest::keyClick(window, Qt::Key_Return);
         QTRY_COMPARE(project.material()["id"].toString(), sourceProfile["id"].toString());
+        QTRY_VERIFY(item("basicValues")
+                        ->property("text")
+                        .toString()
+                        .contains("Geschwindigkeit: 5000 mm/min"));
+        QVERIFY(item("basicValues")->property("text").toString().contains("Leistung: 100 %"));
         QVERIFY(click(window, item("manufacturerButton")));
         auto *reference = window->findChild<QObject *>("manufacturerDialog");
         QVERIFY(reference);
@@ -167,6 +172,19 @@ class WorkflowTest : public QObject {
         QCOMPARE(project.layers()[0].toMap()["speed"].toDouble(), 5000.);
         for (const auto &art : project.items())
             QCOMPARE(art.layer, 0);
+        // A cut-only profile cannot be applied to the imported photo. The
+        // rejected choice must not remain visually selected in the combobox.
+        const auto beforeRejectedProfile = project.projectBytes();
+        const int cutRow = filtered.indexOf(library.indexOf("vendor-copy-pro5w-plywood-3"));
+        QVERIFY(cutRow >= 0);
+        QVERIFY(click(window, item("materialChoice")));
+        QTest::keyClick(window, Qt::Key_Home);
+        for (int i = 0; i < cutRow; ++i)
+            QTest::keyClick(window, Qt::Key_Down);
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(project.material()["id"].toString(), sourceProfile["id"].toString());
+        QTRY_COMPARE(item("materialChoice")->property("currentIndex").toInt(), materialRow);
+        QCOMPARE(project.projectBytes(), beforeRejectedProfile);
 
         auto *xField = item("objectXInput");
         QVERIFY(xField);

@@ -39,7 +39,14 @@ ApplicationWindow {
     readonly property color line: night ? "#34434f" : "#e3e9ee"
     readonly property color ink: night ? "#e2eaf0" : "#263b4a"
     readonly property color muted: night ? "#a7bbc9" : "#607583"
-    readonly property var currentLayer: project.layers[operation]
+    readonly property var currentLayer: {
+        let selected = project.layers[operation]
+        if (basic && (!selected || !selected.enabled)) {
+            for (let layer of project.layers)
+                if (layer.enabled) return layer
+        }
+        return selected || project.layers[0]
+    }
     palette.window: panel
     palette.windowText: ink
     palette.text: ink
@@ -451,7 +458,12 @@ ApplicationWindow {
                             enabled: win.materialRows.length > 0
                             currentIndex: win.materialRow
                             displayText: currentIndex >= 0 ? currentText : (win.projectHeadMatches ? (project.material.name || "Material wählen") : "Material für " + win.selectedModuleW + " W wählen")
-                            onActivated: index => win.applyLibraryProfile(win.materialRows[index])
+                            onActivated: index => {
+                                win.applyLibraryProfile(win.materialRows[index])
+                                Qt.callLater(function() {
+                                    materialChoice.currentIndex = Qt.binding(function() { return win.materialRow })
+                                })
+                            }
                         }
                         RowLayout {
                             Layout.fillWidth: true; spacing: 4
