@@ -133,7 +133,8 @@ class BuildTest(unittest.TestCase):
         return data, env
 
     @unittest.skipUnless(shutil.which('gio') and shutil.which('xdg-mime') and
-                         shutil.which('update-mime-database'), 'desktop tools not installed')
+                         shutil.which('mimetype') and shutil.which('update-mime-database'),
+                         'desktop tools or shared MIME query backend not installed')
     def test_local_install_passes_template_path_without_shell_expansion(self):
         self.source = self.source.rename(self.root / 'checkout = % ü $ ` " \\')
         data, env = self.local_install_fixture()
@@ -150,6 +151,8 @@ python3 -c 'import json, os, pathlib, sys; path=pathlib.Path(os.environ["BLAZER_
         self.assertEqual(desktop.read_bytes(), before)
         template = self.root / 'project ü # % with spaces.blazertemplate'
         template.write_text('{}')
+        # The generic xdg-mime backend needs mimetype to consult registered globs;
+        # its file fallback only sniffs contents (and is absent in minimal CI).
         mime = subprocess.check_output(['xdg-mime', 'query', 'filetype', str(template)],
                                        env=env, text=True).strip()
         self.assertEqual(mime, 'application/x-blazer-template')
