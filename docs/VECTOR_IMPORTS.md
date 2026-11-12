@@ -1,4 +1,4 @@
-# Geometrieimporte: HPGL/PLT, GCode und native Projekte
+# Geometrieimporte: HPGL/PLT, GCode, RDWorks und native Projekte
 
 Diese Importe gehören zur Entwicklung **0.9.0-beta.4-dev**. Sie sind noch nicht
 Bestandteil des unveränderten [beta.3-Pakets](beta/CANDIDATE_BETA3.md).
@@ -100,8 +100,9 @@ damit eine nachträgliche Normalisierung fehlerhafte Abstände nicht verdeckt.
 Skalierte Joblänge, Projekt-/Undo-Rundlauf und unveränderte Stiftposition über
 2000 Folgen von Bezugspunkt-/Skalierungswechseln sind zusätzlich geprüft.
 
-Native RDWorks-/SignCut-Formate sind damit noch nicht geliefert. Der begrenzte
-MillMage-Import ist unten beschrieben.
+Native SignCut-Formate sind damit noch nicht geliefert. Die begrenzten
+RDWorks- und
+MillMage-Importe sind unten beschrieben.
 Weitere HPGL-Befehle und ein breiterer Korpus realer Ausgabedateien bleiben
 Teil von F04. Generischer SVG-Austausch ersetzt diese Abnahme nicht.
 
@@ -254,5 +255,68 @@ Die fremden Grafiken bleiben außerhalb des Repositorys. Diese Stichprobe belegt
 keine allgemeine Kompatibilität mit allen MillMage-Versionen.
 
 Die [offizielle MillMage-Dateidokumentation](https://docs.millmagesoftware.com/latest/Reference/FileManagement/)
-beschreibt Grafikimport getrennt von CNC-Operationen. RDWorks, SignCut, weitere
+beschreibt Grafikimport getrennt von CNC-Operationen. RDWorks-Projekte, SignCut, weitere
 MillMage-Varianten und der breitere F04-Korpus bleiben offen.
+
+
+## RDWorks-Jobs als Geometrie
+
+`.rd` wird ab beta.4-dev als begrenzter **binärer Ruida-Auftrag** gelesen. Das
+ist kein `.rld`-Projektimport und keine Übertragung auf einen Ruida-Controller.
+Ein neues editierbares Pfadobjekt enthält alle getrennten Schnittwege auf dem
+aktiven Blatt. Eigene Operationen, Materialwerte, Projektidentität und Notizen
+bleiben erhalten; Basic übernimmt das ausgewählte eigene Profil.
+
+Unterstützt sind die bekannten Bytekodierungen mit Magic `0x88` und `0x11`, ein
+D8/12-Auftragskopf sowie vollständig abgeschlossenes EB-/D7-Ende. Die Befehle
+88–8B sind absolute XY-, relative XY- und einzelne relative X-/Y-Leerfahrten;
+A8–AB zeichnen die entsprechenden Schnittwege. Relative 14-Bit-Werte sind
+vorzeichenbehaftet (−8192 bis 8191 µm), absolute Werte bestehen aus fünf Gruppen
+mit jeweils sieben Nutzbits. Die Basis ist **128**, trotz eines Schreibfehlers
+in der unten verlinkten Forschungsdokumentation. 1000 µm entsprechen 1 mm.
+Zeichnen erfordert eine vorher bekannte absolute Startposition; Leerfahrten
+unterbrechen den Teilpfad auch dann, wenn sie am gleichen Ort enden.
+
+Die native Y-Richtung wird nach oben umgerechnet und die gemeinsame untere linke
+Zeichnungsgrenze nach 0/0 verschoben. Abstände und Maße bleiben erhalten; der
+ursprüngliche Maschinen-/Jobursprung wird nicht übernommen. Es erfolgt kein
+stillschweigendes Einpassen ins Laserbett. Schnittbefehle werden als nominale
+Geometrie übernommen, unabhängig von der ursprünglichen Leistungszuweisung;
+Nullleistung ist hier kein geometrischer Filter. Die neue Ausgabe richtet sich
+nach den eigenen Blazer-Bearbeitungen. Punktzeiten und andere Quellparameter
+werden nicht nachgebildet.
+
+Bekannte begrenzte Kopf-/Layerfelder für Vorschub, Leistung, Farbe, Grenzen und
+Abschlussstatistik werden mit expliziter Unterkennung und Länge validiert, aber
+nicht als neue Bearbeitungswerte übernommen. Begrenzungsfelder erzeugen keine
+Linien. Unbekannte Befehle oder Unterkennungen, falsche Längen, fehlendes Ende,
+Daten nach Dateiende und Bewegung nach Auftragsende brechen den gesamten Import
+ab. Matrixwiederholungen mit Zähler ungleich 1 sowie Materialvorschub und
+Quellenversätze ungleich null werden bis zur weiteren Formatabnahme abgewiesen.
+Andere Kodierungen, `.rld`-Projekte, Achsen-/Sonderbewegungen und nicht unterstützte
+Raster-/Steuerdialekte bleiben offen. Keine Quellbefehle werden ausgeführt.
+
+Grenzen: 16 MiB Eingabe, 100000 Befehle und Pfadelemente, Koordinaten und gesamte
+Ausdehnung höchstens 2000 mm. Tausende getrennte Rasterwege bleiben Teilpfade
+eines einzigen Objekts. Ein Fehler erzeugt keinen Teilimport, Modellreset oder
+Undo-Eintrag. Erfolg ist ein einzelner Schritt **Geometrie importieren**.
+
+**Nachweise:** Fünf `ruida…`-Fälle prüfen beide Kodierungen, alle acht Bewegungsarten,
+relative Grenzwerte, asymmetrische Orientierung, Leerfahrten, Kopf-/Parametertrennung,
+atomare Fehler und Arbeitsgrenzen. Eine eigene unveränderliche 20×10-mm-Probe liegt
+mit Herkunftsbeschreibung unter `tests/fixtures/ruida/`. Der echte QML-Dateihandler
+ist in heller und kompakter dunkler Ansicht geprüft. Ein tatsächlich mit RDWorks
+erstelltes öffentliches Quadrat-/Dreieckbeispiel wurde außerhalb des Repositorys
+gegen einzeln ausgerechnete Punkte und die analytische Gesamtlänge
+304,518605453453 mm verglichen: drei getrennte Wege, 13 Elemente, 50×50 mm.
+Projektwiederherstellung erhält seinen gültigen GCode identisch. Ein zweites
+Beispiel mit vier Wegen wurde eingelesen; seine etwa 661×257 mm liegen außerhalb
+des M3-Betts und ergeben folgerichtig keinen gültigen Job. Das ist keine reale
+Geräte- oder Materialabnahme.
+
+Die Implementierung verwendet Protokollfakten aus der
+[primären RD-Befehlserforschung](https://github.com/kkaempf/ruida/blob/1503ba9cf6fd3d73a8a2b4eb64cd06f331e6a49b/doc/commands.md)
+und den [vom Forscher bereitgestellten RDWorks-Beispielen](https://github.com/jnweiger/ruida-laser/tree/a1e7b9b93b10d5cac79c875bc3efec46f7397a11/example-files).
+Die Byteabbildung wurde für beide Kodierungen mit allen je 256 dokumentierten
+Werten verglichen. Keine fremden Parserquellen oder Beispielgrafiken wurden
+in das Repository übernommen. F04 bleibt mit den genannten Formaten/Dialekten offen.

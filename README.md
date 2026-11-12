@@ -6,7 +6,7 @@ Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX
 
 **Neu seit beta.2:** `0.9.0-beta.3` ergänzt [Projektname, Notizen, Vorlagen und Dateiverlauf](docs/PROJECTS.md) mit Projektformat 8. Der [geprüfte beta.3-Kandidat](docs/beta/CANDIDATE_BETA3.md) stammt aus Revision `4da2e97`. Der unveränderte beta.2-Kandidat bleibt auf Revision `18ce2e6`. Geräte-/Materialabnahme und externe Bedienung bleiben offen.
 
-**Entwicklung nach beta.3:** `0.9.0-beta.4-dev` ergänzt vollständige Blattkopien, eine eindeutige aktive Ausgabe, den sichtbaren Bearbeitungsverlauf und begrenzte [HPGL/PLT-, GCode- und begrenzte MillMage-Geometrieimporte](docs/VECTOR_IMPORTS.md). Diese [Erweiterungen der Projektbedienung](docs/PROJECTS.md) gehören noch nicht zum unveränderten beta.3-Paket.
+**Entwicklung nach beta.3:** `0.9.0-beta.4-dev` ergänzt vollständige Blattkopien, eine eindeutige aktive Ausgabe, den sichtbaren Bearbeitungsverlauf und begrenzte [HPGL/PLT-, GCode-, RDWorks-Job- und begrenzte MillMage-Geometrieimporte](docs/VECTOR_IMPORTS.md). Diese [Erweiterungen der Projektbedienung](docs/PROJECTS.md) gehören noch nicht zum unveränderten beta.3-Paket.
 
 **Lizenz:** [Source Available, Nutzung auch gewerblich erlaubt, Weitergabe nur kostenlos](LICENSE). Bezahlte Laserarbeiten sind erlaubt; das Programm und abgeleitete Versionen dürfen nicht verkauft oder gegen Bezahlung zugänglich gemacht werden. Das Verkaufsverbot entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
 

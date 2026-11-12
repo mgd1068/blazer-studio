@@ -13,6 +13,7 @@
 #include <QPainter>
 #include <QPdfWriter>
 #include <QProcess>
+#include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -36,7 +37,133 @@ class ExpansionTest : public QObject {
         image.save(path);
         return QUrl::fromLocalFile(path);
     }
+    static QByteArray rdNumber(quint64 value, int count = 5) {
+        QByteArray bytes(count, '\0');
+        for (int i = count - 1; i >= 0; --i) { bytes[i] = char(value % 128); value /= 128; }
+        return bytes;
+    }
+    static QByteArray rdRelative(int value) { return rdNumber(value & 16383, 2); }
+    static QByteArray rdCommand(int code, const QByteArray &args = {}) {
+        return QByteArray(1, char(code)) + args;
+    }
+    static QByteArray rdEncode(const QByteArray &decoded, int magic = 0x88) {
+        QByteArray result;
+        for (quint8 byte : decoded) {
+            const int rotated = (byte & 126) + (byte % 2) * 128 + byte / 128;
+            result.append(char(((rotated ^ magic) + 1) & 255));
+        }
+        return result;
+    }
+    static QByteArray rdJob(const QByteArray &body, int magic = 0x88) {
+        return rdEncode(QByteArray::fromHex("d812f0") + body + QByteArray::fromHex("ebe700d7"), magic);
+    }
+    static QByteArray rdRectangle() {
+        return rdCommand(0x88, rdNumber(10000) + rdNumber(20000)) +
+               rdCommand(0xa8, rdNumber(30000) + rdNumber(20000)) +
+               rdCommand(0xa8, rdNumber(30000) + rdNumber(30000)) +
+               rdCommand(0xa8, rdNumber(10000) + rdNumber(30000)) +
+               rdCommand(0xa8, rdNumber(10000) + rdNumber(20000));
+    }
   private slots:
+    void ruidaAbsoluteRelativeAndYOrientation() {
+        QCOMPARE(rdEncode(QByteArray::fromHex("d812f0")),QByteArray::fromHex("d29bfa"));
+        QFile fixture(QFINDTESTDATA("fixtures/ruida/rectangle.rd"));
+        QVERIFY(fixture.open(QIODevice::ReadOnly));
+        const auto fixed=PlotImport::ruida(fixture.readAll());
+        QVERIFY2(fixed.error.isEmpty(),qPrintable(fixed.error));
+        QCOMPARE(fixed.paths[0].boundingRect(),QRectF(0,0,20,10));
+        QCOMPARE(fixed.paths[0].length(),60.);
+        QCOMPARE(QPointF(fixed.paths[0].elementAt(0)),QPointF(0,10));
+        const auto body=rdCommand(0x88,rdNumber(10000)+rdNumber(20000))+
+            rdCommand(0xa8,rdNumber(30000)+rdNumber(20000))+
+            rdCommand(0xa9,rdRelative(0)+rdRelative(5000))+
+            rdCommand(0xaa,rdRelative(-6000))+rdCommand(0xab,rdRelative(-2000))+
+            rdCommand(0x89,rdRelative(1000)+rdRelative(-1000))+
+            rdCommand(0xa9,rdRelative(2000)+rdRelative(3000));
+        const QList<QPointF> expected{{0,5},{20,5},{20,0},{14,0},{14,2},{15,3},{17,0}};
+        for(int magic:{0x88,0x11}) {
+            const auto result=PlotImport::ruida(rdJob(body,magic));
+            QVERIFY2(result.error.isEmpty(),qPrintable(result.error));
+            QCOMPARE(result.paths.size(),1);
+            const auto &path=result.paths[0];
+            QCOMPARE(path.elementCount(),expected.size());
+            for(int i=0;i<expected.size();++i)QCOMPARE(QPointF(path.elementAt(i)),expected[i]);
+            QVERIFY(path.elementAt(5).isMoveTo());
+            QCOMPARE(result.interpretation,QString("2 getrennte Schnittwege"));
+        }
+        const auto extremes=PlotImport::ruida(rdJob(rdCommand(0x88,rdNumber(100000)+rdNumber(100000))+
+            rdCommand(0x8a,rdRelative(1000))+rdCommand(0x8b,rdRelative(2000))+
+            rdCommand(0xa9,rdRelative(8191)+rdRelative(-8192))));
+        QVERIFY2(extremes.error.isEmpty(),qPrintable(extremes.error));
+        QCOMPARE(extremes.paths[0].boundingRect(),QRectF(0,0,8.191,8.192));
+        QCOMPARE(QPointF(extremes.paths[0].elementAt(0)),QPointF(0,0));
+    }
+    void ruidaMetadataNeverBecomesMotionOrParameters() {
+        const QByteArray zero(5,'\0');
+        const auto metadata=rdCommand(0xf1,QByteArray::fromHex("0200"))+
+            rdCommand(0xe7,QByteArray(1,char(3))+rdNumber(1000000)+rdNumber(1000000))+
+            rdCommand(0xe7,QByteArray(1,char(4))+rdNumber(1,2)+rdNumber(1,2)+zero+zero)+
+            rdCommand(0xc9,QByteArray(1,char(2))+rdNumber(33333000))+
+            rdCommand(0xc6,QByteArray::fromHex("027f7f"));
+        const auto plain=PlotImport::ruida(rdJob(rdRectangle()));
+        const auto result=PlotImport::ruida(rdJob(metadata+rdRectangle()));
+        QVERIFY2(result.error.isEmpty(),qPrintable(result.error));
+        QCOMPARE(result.paths,plain.paths);
+        QCOMPARE(result.paths[0].boundingRect(),QRectF(0,0,20,10));
+        QCOMPARE(result.paths[0].length(),60.);
+    }
+    void ruidaMalformedAndUnsupportedAreAtomic() {
+        const QList<QByteArray> bad{
+            {},QByteArray(".RDFILEVER8.0.01"),rdEncode(QByteArray::fromHex("d812f0")),
+            rdJob(rdCommand(0xa8,rdNumber(1)+rdNumber(1))),
+            rdJob(rdCommand(0x89,rdRelative(1)+rdRelative(1))),
+            rdJob(rdRectangle()+rdCommand(0xa9,QByteArray(3,'\0'))),
+            rdJob(rdRectangle()+rdCommand(0x90,QByteArray(4,'\0'))),
+            rdJob(rdRectangle()+rdCommand(0xc9,QByteArray::fromHex("02"))),
+            rdJob(rdCommand(0xe7,QByteArray(1,char(6))+rdNumber(1)+rdNumber(0))+rdRectangle()),
+            rdJob(rdCommand(0xf1,QByteArray(1,char(3))+rdNumber(0)+rdNumber(1))+rdRectangle()),
+            rdJob(rdCommand(0xe7,QByteArray(1,char(0x55))+QByteArray(1,'\0')+rdNumber(1))+rdRectangle()),
+            rdJob(rdCommand(0xe7,QByteArray(1,char(4))+rdNumber(2,2)+rdNumber(1,2)+QByteArray(10,'\0'))+rdRectangle()),
+            rdJob(rdRectangle()+rdCommand(0x88,rdNumber(2000001)+rdNumber(0))),
+            rdJob(rdRectangle()+rdCommand(0xe7,QByteArray(1,'\0'))+rdCommand(0xaa,rdRelative(1))),
+            rdJob(rdRectangle()+rdCommand(0xf0)),
+            rdEncode(QByteArray::fromHex("d812f0")+rdRectangle()+QByteArray::fromHex("eb")+rdCommand(0xaa,rdRelative(1))+QByteArray::fromHex("d7")),
+            rdJob(rdRectangle())+rdEncode(rdCommand(0xf0)),
+            rdEncode(QByteArray::fromHex("d812f0")+rdRectangle()+QByteArray::fromHex("ebe700d700"))};
+        Document d;d.newProject();d.addShape("ellipse");const auto before=d.projectBytes();
+        const auto revision=d.historyRevision();QSignalSpy resets(&d,&QAbstractItemModel::modelReset);
+        for(const auto &bytes:bad){
+            const auto result=PlotImport::ruida(bytes);
+            QVERIFY2(!result.error.isEmpty(),bytes.toHex().constData());QVERIFY(result.paths.isEmpty());
+            QVERIFY(!d.importFile(write("bad.rd",bytes)));
+            QCOMPARE(d.projectBytes(),before);QCOMPARE(d.historyRevision(),revision);QCOMPARE(resets.count(),0);
+        }
+    }
+    void ruidaProjectRoundtripPreservesOwnSettings() {
+        Document d;d.newProject();QVERIFY(d.addPage("RD-Ziel"));
+        QVERIFY(d.setMetadata("Mein Projekt","Meine Notizen"));
+        const auto own=QUrl::fromLocalFile(temp.filePath("own-rd.blazer"));QVERIFY(d.save(own));
+        const auto before=d.projectBytes();const auto layers=d.layers();const auto material=d.material();
+        QVERIFY(d.importFile(write("rectangle.rd",rdJob(rdRectangle()))));
+        QCOMPARE(d.count(),1);QCOMPARE(d.items()[0].page,1);QCOMPARE(d.items()[0].bounds,QRectF(0,0,20,10));
+        QCOMPARE(d.layers(),layers);QCOMPARE(d.material(),material);QCOMPARE(d.fileUrl(),own);
+        QCOMPARE(d.title(),QString("Mein Projekt"));QCOMPARE(d.notes(),QString("Meine Notizen"));
+        QVERIFY(d.items()[0].settings.isEmpty());QVERIFY(d.job().valid());
+        const auto saved=d.projectBytes();const auto code=d.job().gcode();Document restored;
+        QVERIFY(restored.restoreBytes(saved));QCOMPARE(restored.job().gcode(),code);
+        d.undo();QCOMPARE(d.projectBytes(),before);d.redo();QCOMPARE(d.projectBytes(),saved);
+    }
+    void ruidaWorkLimitsAndDisconnectedRaster() {
+        QVERIFY(!PlotImport::ruida(QByteArray(16*1024*1024+1,' ')).error.isEmpty());
+        const auto tooMany=rdEncode(QByteArray::fromHex("d812f0")+rdCommand(0xc6,QByteArray::fromHex("010000")).repeated(100001)+QByteArray::fromHex("ebd7"));
+        QVERIFY(PlotImport::ruida(tooMany).error.contains("Befehlsgrenze"));
+        const auto segment=rdCommand(0x88,rdNumber(0)+rdNumber(0))+rdCommand(0xa8,rdNumber(10000)+rdNumber(5000));
+        const auto raster=PlotImport::ruida(rdJob(segment.repeated(3000)));
+        QVERIFY2(raster.error.isEmpty(),qPrintable(raster.error));QCOMPARE(raster.paths.size(),1);
+        QCOMPARE(raster.paths[0].elementCount(),6000);
+        QVERIFY(PlotImport::ruida(rdJob(segment.repeated(50001))).error.contains("Befehlsgrenze"));
+    }
+
     void hpglScaledProjectRoundtripAndJob() {
         Document d;
         d.newProject();

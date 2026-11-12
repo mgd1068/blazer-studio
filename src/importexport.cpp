@@ -60,17 +60,18 @@ bool Document::importFile(const QUrl &url) {
     QList<Artwork> imported;
     const bool hpgl = ext == "hpgl" || ext == "plt";
     const bool gcode = ext == "gc" || ext == "gcode" || ext == "nc";
+    const bool ruida = ext == "rd";
     const bool native = ext == "mage" || ext == "lbrn" || ext == "lbrn2";
     QString plotInterpretation;
-    if (hpgl || gcode) {
+    if (hpgl || gcode || ruida) {
         const auto bytes = file.read(16 * 1024 * 1024 + 1);
-        const auto result = hpgl ? PlotImport::hpgl(bytes) : PlotImport::gcode(bytes);
+        const auto result = hpgl ? PlotImport::hpgl(bytes) : ruida ? PlotImport::ruida(bytes) : PlotImport::gcode(bytes);
         if (!result.error.isEmpty()) {
             notify(result.error);
             return false;
         }
         auto paths = result.paths;
-        if (gcode) {
+        if (gcode || ruida) {
             // A raster job can contain thousands of disconnected strokes.
             // Keep them as subpaths of one editable artwork, without bridges.
             QPainterPath compound;
@@ -81,7 +82,7 @@ bool Document::importFile(const QUrl &url) {
         for (const auto &path : paths) {
             Artwork a;
             a.id = uid();
-            a.name = (hpgl ? "HPGL " : "GCode ") + QString::number(imported.size() + 1);
+            a.name = (hpgl ? "HPGL " : ruida ? "RDWorks " : "GCode ") + QString::number(imported.size() + 1);
             a.layer = 1;
             a.page = m_activePage;
             if (!bakePath(a, path)) {
@@ -282,6 +283,7 @@ bool Document::importFile(const QUrl &url) {
            (native ? (ext=="mage"
                         ? " MillMage-Grafikobjekte importiert; Fräsoperationen, Maschinenparameter und Projektursprung nicht übernommen."
                         : " LightBurn-Grafikobjekte importiert; Schnittparameter und Ursprung/Spiegelung nicht übernommen. Text ohne Konturen verwendet Systemschriften.")
+            : ruida ? " RDWorks-Pfadobjekt importiert (" + plotInterpretation + "). Gemeinsam links unten platziert, Y nach oben; Leistung, Vorschub, Quellen- und Geräteparameter nicht übernommen."
             : gcode ? " GCode-Pfadobjekt importiert (" + plotInterpretation +
                         "). Gemeinsam links unten platziert; "
                         "Leistung, Vorschub, Pausen und Schaltbefehle werden nicht übernommen."

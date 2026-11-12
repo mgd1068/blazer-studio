@@ -16,4 +16,6 @@ Result hpgl(const QByteArray &bytes);
 // Standalone nominal XY paths, never executable commands. M/S words select
 // spindle-aware filtering; otherwise non-rapid feed paths are imported.
 Result gcode(const QByteArray &bytes);
+// RDWorks binary job geometry only; never sends or executes source commands.
+Result ruida(const QByteArray &bytes);
 } // namespace PlotImport
