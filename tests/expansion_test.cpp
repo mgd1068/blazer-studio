@@ -5,6 +5,7 @@
 #include "registration.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -36,6 +37,185 @@ class ExpansionTest : public QObject {
         return QUrl::fromLocalFile(path);
     }
   private slots:
+    void hpglScaledProjectRoundtripAndJob() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        QVERIFY(d.addPage("Skaliert"));
+        const auto before = d.projectBytes();
+        const auto file = write("scaled-closed.plt", "IN;SP1;IP400,800,1200,1200;SC0,10,0,10;"
+                                                     "PU0,0;PD10,0,10,10,0,10,0,0;SP0;");
+        QVERIFY2(d.importFile(file), qPrintable(d.message()));
+        QCOMPARE(d.count(), 2);
+        QCOMPARE(d.items().last().page, 1);
+        QCOMPARE(d.items().last().bounds, QRectF(0, 0, 20, 10));
+        QVERIFY2(d.job().valid(), qPrintable(d.job().errors.join(";")));
+        QCOMPARE(d.job().workLength, 60.);
+        const auto code = d.job().gcode();
+        const auto imported = d.projectBytes();
+        const auto own = QUrl::fromLocalFile(temp.filePath("scaled.blazer"));
+        QVERIFY(d.save(own));
+        Document restored;
+        QVERIFY(restored.open(own));
+        QCOMPARE(restored.job().gcode(), code);
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        QCOMPARE(d.fileUrl(), own);
+        d.redo();
+        QCOMPARE(d.projectBytes(), imported);
+        QCOMPARE(d.job().gcode(), code);
+    }
+    void hpglIndependentScaledReferenceCorpus() {
+        const auto file = QFINDTESTDATA("fixtures/hpgl/scaling-expectations.json");
+        QVERIFY(!file.isEmpty());
+        QFile reference(file);
+        QVERIFY(reference.open(QIODevice::ReadOnly));
+        const auto cases = QJsonDocument::fromJson(reference.readAll()).object()["cases"].toArray();
+        QCOMPARE(cases.size(), 3);
+        for (const auto &entry : cases) {
+            const auto object = entry.toObject();
+            QFile input(QFileInfo(file).dir().filePath(object["file"].toString()));
+            QVERIFY(input.open(QIODevice::ReadOnly));
+            const auto result = PlotImport::hpgl(input.readAll());
+            QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+            const auto expectedPaths = object["paths"].toArray();
+            QCOMPARE(result.paths.size(), expectedPaths.size());
+            for (int p = 0; p < expectedPaths.size(); ++p) {
+                const auto points = expectedPaths[p].toArray();
+                QCOMPARE(result.paths[p].elementCount(), points.size());
+                for (int i = 0; i < points.size(); ++i) {
+                    const auto point = points[i].toArray();
+                    const auto actual = QPointF(result.paths[p].elementAt(i));
+                    QVERIFY(
+                        QLineF(actual, QPointF(point[0].toDouble(), point[1].toDouble())).length() <
+                        1e-9);
+                }
+            }
+        }
+    }
+    void hpglExplicitScalesAndReflections() {
+        const auto anisotropic =
+            PlotImport::hpgl("IN;SP1;IP400.4,800.4,1199.6,1199.6;SC0,10,0,10;PU0,0;PD10,0,10,10;");
+        QVERIFY2(anisotropic.error.isEmpty(), qPrintable(anisotropic.error));
+        QCOMPARE(anisotropic.paths.size(), 1);
+        const auto &p = anisotropic.paths[0];
+        QCOMPARE(p.boundingRect(), QRectF(0, 0, 20, 10));
+        QCOMPARE(QPointF(p.elementAt(0)), QPointF(0, 0));
+        QCOMPARE(QPointF(p.elementAt(1)), QPointF(20, 0));
+        QCOMPARE(QPointF(p.elementAt(2)), QPointF(20, 10));
+        const auto mm = PlotImport::hpgl("IN;SP1;SC0,40,0,40,2;PU0,0;PD10,0,10,5;");
+        QVERIFY2(mm.error.isEmpty(), qPrintable(mm.error));
+        QCOMPARE(mm.paths[0].boundingRect(), QRectF(0, 0, 10, 5));
+        const auto mirror = PlotImport::hpgl("IN;SP1;SC0,40,0,-40,2;PU0,0;PD10,0,10,5;");
+        QVERIFY2(mirror.error.isEmpty(), qPrintable(mirror.error));
+        QCOMPARE(QPointF(mirror.paths[0].elementAt(0)), QPointF(0, 5));
+        QCOMPARE(QPointF(mirror.paths[0].elementAt(2)), QPointF(10, 0));
+        const auto corrected = PlotImport::hpgl("IN;SP1;IP0,0,0,400;SC0,1,0,1;PU0,0;PD1,0,1,1;");
+        QVERIFY2(corrected.error.isEmpty(), qPrintable(corrected.error));
+        QCOMPARE(corrected.paths[0].boundingRect(), QRectF(0, 0, .025, 10));
+    }
+    void hpglIsotropicPlacementAndReversedReferences() {
+        const QByteArray frame = "IN;SP1;PU0,0;PD800,0,800,400,0,400,0,0;PU;";
+        for (const auto &row : QList<QPair<QByteArray, QRectF>>{
+                 {"IP0,0,800,400;SC0,10,0,10,1;", {5, 0, 10, 10}},
+                 {"IP0,0,800,400;SC0,10,0,10,1,0,100;", {0, 0, 10, 10}},
+                 {"IP0,0,800,400;SC0,10,0,10,1,100,0;", {10, 0, 10, 10}},
+                 {"IP800,400,0,0;SC0,10,0,10,1,0,100;", {10, 0, 10, 10}},
+                 {"IP800,400,0,0;SC0,10,0,10,1,100,0;", {0, 0, 10, 10}}}) {
+            const auto result = PlotImport::hpgl(frame + row.first + "PU0,0;PD10,0,10,10;");
+            QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+            QCOMPARE(result.paths.size(), 2);
+            QCOMPARE(result.paths[1].boundingRect(), row.second);
+        }
+        const auto tall = PlotImport::hpgl("IN;SP1;PU0,0;PD400,0,400,800,0,800,0,0;PU;"
+                                           "IP0,0,400,800;SC0,10,0,10,1,50,25;PU0,0;PD10,0,10,10;");
+        QVERIFY2(tall.error.isEmpty(), qPrintable(tall.error));
+        QCOMPARE(tall.paths[1].boundingRect(), QRectF(0, 2.5, 10, 10));
+        const auto flipped =
+            PlotImport::hpgl(frame + "IP0,0,800,400;SC10,0,0,10,1;PU0,0;PD10,0,10,10;");
+        QVERIFY2(flipped.error.isEmpty(), qPrintable(flipped.error));
+        QCOMPARE(QPointF(flipped.paths[1].elementAt(0)), QPointF(15, 0));
+        QCOMPARE(QPointF(flipped.paths[1].elementAt(1)), QPointF(5, 0));
+    }
+    void hpglScaleChangesPreservePhysicalPenAndModes() {
+        const auto result =
+            PlotImport::hpgl("IN;SP1;PU400,400;PD800,400;"
+                             "IP0,0,800,400;SC0,20,0,10;PR5,0;IP0,0,1600,400;PR5,0;SC;PR200,0;");
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.paths.size(), 1);
+        const auto &p = result.paths[0];
+        QCOMPARE(p.elementCount(), 5);
+        const QList<double> expected{0, 10, 15, 25, 30};
+        for (int i = 0; i < p.elementCount(); ++i) {
+            QCOMPARE(p.elementAt(i).x, expected[i]);
+            QCOMPARE(p.elementAt(i).y, 0.);
+        }
+        QByteArray repeated = "INSP1PU400,400PD800,400;";
+        for (int i = 0; i < 2000; ++i)
+            repeated += "IP7,11,997,683;SC0,17,0,23;IP-13,19,1451,937;SC-5,40,9,31;SC;";
+        repeated += "PR200,0;";
+        const auto stable = PlotImport::hpgl(repeated);
+        QVERIFY2(stable.error.isEmpty(), qPrintable(stable.error));
+        QCOMPARE(stable.paths.size(), 1);
+        QCOMPARE(stable.paths[0].elementCount(), 3);
+        QCOMPARE(stable.paths[0].elementAt(2).x, 15.);
+        const auto tracking = PlotImport::hpgl("IN;SP1;IP0,0,800,400;SC0,20,0,10;PU0,0;PD10,0;"
+                                               "IP400,400;PR5,0;PA0,0;");
+        QVERIFY2(tracking.error.isEmpty(), qPrintable(tracking.error));
+        QCOMPARE(tracking.paths.size(), 1);
+        QCOMPARE(tracking.paths[0].elementAt(2).x, 15.);
+        QCOMPARE(QPointF(tracking.paths[0].elementAt(3)), QPointF(10, 10));
+        const auto reset = PlotImport::hpgl("IN;SP1;SC0,40,0,40,2;PU0,0;PD10,0;"
+                                            "IN;SP1;PU0,400;PD400,400;");
+        QVERIFY2(reset.error.isEmpty(), qPrintable(reset.error));
+        QCOMPARE(reset.paths.size(), 2);
+        QCOMPARE(reset.paths[1].boundingRect(), QRectF(0, 10, 10, 0));
+        const auto signs = PlotImport::hpgl("INSP1PU-400-800PD+400-800+400-400;");
+        QVERIFY2(signs.error.isEmpty(), qPrintable(signs.error));
+        QCOMPARE(signs.paths[0].boundingRect(), QRectF(0, 0, 20, 10));
+    }
+    void hpglScaledCurvesAndStatefulErrors() {
+        const auto ellipse = PlotImport::hpgl("IN;SP1;IP0,0,800,400;SC0,10,0,10;PU5,5;CI5,90;"
+                                              "PR;PD5,0;");
+        QVERIFY2(ellipse.error.isEmpty(), qPrintable(ellipse.error));
+        QCOMPARE(ellipse.paths.size(), 2);
+        QCOMPARE(ellipse.paths[0].boundingRect(), QRectF(0, 0, 20, 10));
+        QCOMPARE(QPointF(ellipse.paths[1].elementAt(0)), QPointF(10, 5));
+        QCOMPARE(QPointF(ellipse.paths[1].elementAt(1)), QPointF(20, 5));
+        const auto curve = PlotImport::hpgl("IN;SP1;IP0,0,800,400;SC0,10,0,10;PU0,0;PD;"
+                                            "BZ0,10,10,10,10,0;");
+        QVERIFY2(curve.error.isEmpty(), qPrintable(curve.error));
+        QCOMPARE(curve.paths[0].elementAt(1).type, QPainterPath::CurveToElement);
+        QCOMPARE(QPointF(curve.paths[0].elementAt(1)), QPointF(0, 10));
+        QCOMPARE(QPointF(curve.paths[0].elementAt(2)), QPointF(20, 10));
+        QCOMPARE(QPointF(curve.paths[0].elementAt(3)), QPointF(20, 0));
+        const QList<QByteArray> invalid = {"IP0,0,100;",
+                                           "IP80001,0,90000,100;",
+                                           "SC0,10,0,10;",
+                                           "SC0,0,0,40,2;",
+                                           "SC0,40,0,40,2,50,50;",
+                                           "SC0,10,0,10,3;",
+                                           "IP0,0,800,400;SC0,0,0,10;",
+                                           "IP0,0,800,400;SC0,10,0,10,1,50;",
+                                           "IP0,0,800,400;SC0,10,0,10,1,101,50;",
+                                           "SC0,400000,0,40,2;PA1,0;",
+                                           "IP0,0,800,400;SC0,20,0,10;IP;",
+                                           "SC1000000000,1000000000,0,40,2;"};
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        const auto before = d.projectBytes();
+        const auto revision = d.historyRevision();
+        for (const auto &bad : invalid) {
+            const auto input = "IN;SP1;PU400,400;PD800,400;" + bad;
+            const auto parsed = PlotImport::hpgl(input);
+            QVERIFY2(!parsed.error.isEmpty(), input.constData());
+            QVERIFY(parsed.paths.isEmpty());
+            QVERIFY2(!d.importFile(write("scale-invalid.plt", input)), input.constData());
+            QCOMPARE(d.projectBytes(), before);
+            QCOMPARE(d.historyRevision(), revision);
+        }
+    }
     void gcodeLaserFilteringAndBlockOrder() {
         const auto result =
             PlotImport::gcode("G21 G90 G17 G54 G94\nG0 X10 Y20\nM4 S0\nG1 X11 Y20 F1000\n"
@@ -308,7 +488,7 @@ class ExpansionTest : public QObject {
         d.redo();
         QCOMPARE(d.projectBytes(), imported);
         const QList<QByteArray> invalid = {
-            "SC0,100,0,100;", "IP0,0,100,100;", "RO90;", "PM0;", "LBhello\003;",
+            "SC0,100,0,100;", "IP0,0,100;", "RO90;", "PM0;", "LBhello\003;",
             "PA1;", "PD1,,2;", "PD1,2,;", "PD1.2.3,4;", "PA1e3,0;", "IN1;",
             "AA0,0,90,0;", "CI-400;", "BZ1,2;", "SP1.5;", "PU80001,0;",
             QByteArray("\033%0B"), QByteArray("PA1,2\0;", 8)

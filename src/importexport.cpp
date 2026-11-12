@@ -400,8 +400,8 @@ bool Document::importFile(const QUrl &url) {
            (gcode ? " GCode-Pfadobjekt importiert (" + plotInterpretation +
                         "). Gemeinsam links unten platziert; "
                         "Leistung, Vorschub, Pausen und Schaltbefehle werden nicht übernommen."
-            : hpgl ? " HPGL-Pfade importiert (40 Einheiten/mm, Y nach oben; gemeinsam links unten "
-                     "platziert). "
+            : hpgl ? " HPGL-Pfade importiert (Plottereinheit 0,025 mm; IP/SC berücksichtigt). "
+                     "Gemeinsam links unten platziert. "
                      "Stifte als Geometrie übernommen; Bearbeitungsparameter neu prüfen."
                    : " Vektorobjekte importiert; Einheiten und Bearbeitungsparameter prüfen."));
     return true;

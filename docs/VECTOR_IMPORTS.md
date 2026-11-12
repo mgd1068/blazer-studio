@@ -16,6 +16,7 @@ Geschwindigkeit und weitere Bearbeitungsparameter sind im Projekt neu zu prüfen
 | Befehle | Verhalten |
 |---|---|
 | `IN` | Initialisiert Position 0/0, absolute Koordinaten, Stift oben und keine Stiftauswahl; bereits gelesene Pfade bleiben erhalten |
+| `IP`, `SC` | Explizite Bezugspunkte und anisotrope, isotrope oder Punkt-Faktor-Skalierung; siehe unten |
 | `PA`, `PR` | Absolute beziehungsweise relative Koordinaten; der Modus bleibt für nachfolgende `PU`/`PD` erhalten |
 | `PU`, `PD` | Stift heben/senken und optionale Koordinatenpaare; Fahrbewegungen werden nicht zu Schnittlinien |
 | `SP` | Positive Stiftnummer 1–255 zeichnet; 0 oder fehlende Nummer deaktiviert Zeichnen. Nummern/Farben werden nicht als Operationen übernommen |
@@ -25,7 +26,7 @@ Geschwindigkeit und weitere Bearbeitungsparameter sind im Projekt neu zu prüfen
 
 Die Datei wird als eigenständige Zeichnung mit dem oben beschriebenen
 Initialzustand gelesen. Üblich ist ein Beginn mit `IN;SP1;`.
-Groß-/Kleinschreibung, Komma/Leerraum zwischen Zahlen und fehlende Semikolons
+Groß-/Kleinschreibung, Komma/Leerraum oder ein vorangestelltes Plus/Minus zwischen Zahlen und fehlende Semikolons
 vor dem nächsten Befehlsnamen sind zulässig. Unterstützt werden Dezimalzahlen
 ohne Exponenten.
 
@@ -35,6 +36,30 @@ so verschoben, dass die untere linke Grenze bei 0/0 liegt; Abstände und Orienti
 bleiben erhalten. Die ursprüngliche Lage zum Plotterursprung wird nicht erhalten.
 Danach das gesamte Motiv an der gewünschten Stelle platzieren.
 
+**Dateieigene Skalierung:** `IP x1,y1,x2,y2` definiert P1/P2 in Plottereinheiten.
+Die Koordinaten werden auf ganze Einheiten gerundet. Bei gleicher X- oder
+Y-Koordinate wird die entsprechende P2-Koordinate um eine Einheit erhöht.
+`IP x1,y1` verschiebt ein vorhandenes P2 um dieselbe Differenz; ohne bekanntes P2
+bleibt dessen Abstand unbekannt. `IP` ohne Parameter setzt P1 auf 0/0 und löscht
+das bekannte P2. Eine Drucker-Seitengröße wird nicht aus dem Laserbett geraten.
+
+- `SC xmin,xmax,ymin,ymax[,0]` skaliert beide Achsen unabhängig.
+- Typ `1` verwendet auf beiden Achsen den kleineren Absolutfaktor; optionale
+  Randanteile `left,bottom` von 0 bis 100 bestimmen die Lage, Standard je 50.
+  Die Anteile folgen der P1→P2-Richtung, auch bei umgedrehten Bezugspunkten.
+- `SC xmin,xfaktor,ymin,yfaktor,2` ordnet xmin/ymin P1 zu und gibt die Zahl
+  der Plottereinheiten pro Benutzereinheit direkt an. `SC0,40,0,40,2` bedeutet
+  daher Benutzereinheiten in Millimetern und benötigt kein bekanntes P2.
+
+Typ 0/1 benötigt ein explizit bekanntes P2 aus IP. Typ 2 verwendet anfangs P1=0/0.
+Negative Faktoren oder umgekehrte Bereiche spiegeln entsprechend. Kreise und
+Bézierkurven werden mittransformiert; anisotrope Kreise werden Ellipsen.
+`SC` ohne Parameter schaltet auf unskalierte Plottereinheiten zurück. Die
+gespeicherte Stiftposition bleibt bei IP/SC unverändert; es entsteht keine Linie
+durch den bloßen Wechsel. IN verwirft die Skalierung und Bezugspunkte wieder.
+Ungültige Bereiche, Nullfaktoren, unvollständige Ränder, unbekannte Seitengrößen
+oder numerisch unzuverlässige Rückrechnungen werden vollständig abgewiesen.
+
 Bögen und Kreise werden entsprechend dem HPGL-Sehnenwinkel als Linienzüge
 übernommen: Standard 5°, explizit 0,5° bis 180°. Bézierkurven bleiben Kurven.
 Ein großer Sehnenwinkel kann eine sichtbar eckige Kontur ergeben.
@@ -42,7 +67,7 @@ Ein großer Sehnenwinkel kann eine sichtbar eckige Kontur ergeben.
 ## Grenzen und Fehler
 
 Unbekannte Befehle brechen **den gesamten Import ohne Projektänderung** ab.
-Insbesondere sind Skalierung/Bezugspunkte (`SC`, `IP`, `IR`), Drehung (`RO`),
+Insbesondere sind seitenrelative Bezugspunkte (`IR`), Drehung (`RO`),
 Clipping, Polygon-/Füllmodi, Text, Linienattribute, Rechteck-/Keilbefehle und
 komprimierte `PE`-Daten noch nicht implementiert. PCL-Druckerhüllen mit Escape-
 Befehlen werden ebenfalls abgewiesen. Negative Kreisradien werden abgewiesen.
@@ -51,7 +76,7 @@ Eine Endung `.plt` allein garantiert daher keine Kompatibilität.
 Grenzen: 16 MiB Eingabe, 2000 Pfade beziehungsweise die verbleibende
 Projektkapazität, 100000 Pfadelemente und Befehle, insgesamt 200000 Zahlen und
 Bogen-Unterteilungsschritte. Die Arbeit für unsichtbare Stift-oben-Bögen zählt mit.
-Rohkoordinaten und Kontrollpunkte müssen innerhalb ±2000 mm liegen, die gemeinsame
+Plotter-Bezugspunkte sowie transformierte Koordinaten und Kontrollpunkte müssen innerhalb ±2000 mm liegen, die gemeinsame
 Ausdehnung darf 2000 mm pro Achse nicht überschreiten. Der Arbeitsraum des
 Geräteprofils bleibt eine zusätzliche Bedingung für einen späteren Auftrag.
 
@@ -67,7 +92,13 @@ getrennte horizontale Linien, relative Modi, Stiftwechsel, Kreiszustand,
 Bogenrichtungen, Bézierkontrollpunkte, atomare Fehler und Ressourcenlimits ab.
 Ein tatsächlich durch Inkscape 1.4.3 exportierter eigener 20×10-mm-Umriss wird
 eingelesen; Projektwiederherstellung erhält Pfade und erzeugten GCode identisch.
-Referenz und Erzeugungsbefehl liegen unter `tests/fixtures/hpgl/`.
+Referenz und Erzeugungsbefehl liegen unter `tests/fixtures/hpgl/`. Drei weitere
+eigene Eingaben wurden durch den unabhängigen Inkscape-HPGL2-Importer gelesen;
+dessen gebackene SVG-Koordinaten belegen isotrope Zentrierung und die Randlage
+bei gespiegeltem P1/P2. Der äußere Rahmen fixiert den gemeinsamen Ursprung,
+damit eine nachträgliche Normalisierung fehlerhafte Abstände nicht verdeckt.
+Skalierte Joblänge, Projekt-/Undo-Rundlauf und unveränderte Stiftposition über
+2000 Folgen von Bezugspunkt-/Skalierungswechseln sind zusätzlich geprüft.
 
 Native RDWorks-/SignCut-/MillMage-Formate sind damit noch nicht geliefert.
 Weitere HPGL-Befehle und ein breiterer Korpus realer Ausgabedateien bleiben

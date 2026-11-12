@@ -1,12 +1,24 @@
 #include "plotimport.h"
 #include "geometry.h"
 #include <QTransform>
+#include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <optional>
 
 namespace {
 constexpr int elementLimit = 100000;
 constexpr double unit = 0.025; // HP plotter unit, in millimetres.
+struct Mapping {
+    QPointF anchor, origin;
+    double x = 1, y = 1;
+    QPointF map(QPointF p) const {
+        return {anchor.x() + (p.x() - origin.x()) * x, anchor.y() + (p.y() - origin.y()) * y};
+    }
+    QPointF inverse(QPointF p) const {
+        return {origin.x() + (p.x() - anchor.x()) / x, origin.y() + (p.y() - anchor.y()) / y};
+    }
+};
 
 class Hpgl {
     QString text;
@@ -14,6 +26,11 @@ class Hpgl {
     QList<QPainterPath> paths;
     QPainterPath stroke;
     QPointF position;
+    QPointF physicalPosition;
+    QPointF p1;
+    std::optional<QPointF> p2;
+    QList<double> scaling;
+    Mapping mapping;
     bool absolute = true, down = false, selected = false;
     int elements = 0, commands = 0, work = 0;
     QString error;
@@ -22,11 +39,53 @@ class Hpgl {
         error = message;
         return false;
     }
-    bool point(QPointF p) {
+    bool plotterPoint(QPointF p) {
         return (std::isfinite(p.x()) && std::isfinite(p.y()) &&
                 std::abs(p.x() * unit) <= Geometry::coordinateLimit &&
                 std::abs(p.y() * unit) <= Geometry::coordinateLimit) ||
                fail("Koordinate außerhalb des unterstützten Bereichs (±2000 mm).");
+    }
+    bool point(QPointF p) { return plotterPoint(mapping.map(p)); }
+    bool updateMapping() {
+        Mapping next;
+        if (!scaling.isEmpty()) {
+            const int type = scaling.size() == 4 ? 0 : int(scaling[4]);
+            next.anchor = p1;
+            next.origin = {scaling[0], scaling[2]};
+            if (type == 2) {
+                next.x = scaling[1];
+                next.y = scaling[3];
+            } else {
+                if (!p2)
+                    return fail(
+                        "SC-Typ 0/1 benötigt explizite P1/P2 aus IP; Seitengröße unbekannt.");
+                next.x = (p2->x() - p1.x()) / (scaling[1] - scaling[0]);
+                next.y = (p2->y() - p1.y()) / (scaling[3] - scaling[2]);
+                if (type == 1) {
+                    const double magnitude = std::min(std::abs(next.x), std::abs(next.y));
+                    next.x = std::copysign(magnitude, next.x);
+                    next.y = std::copysign(magnitude, next.y);
+                    const double left = scaling.size() == 7 ? scaling[5] / 100 : .5;
+                    const double bottom = scaling.size() == 7 ? scaling[6] / 100 : .5;
+                    // Unused margins follow the P1-to-P2 direction. Reversing
+                    // the reference points also reverses margin placement.
+                    next.anchor +=
+                        QPointF((p2->x() - p1.x() - (scaling[1] - scaling[0]) * next.x) * left,
+                                (p2->y() - p1.y() - (scaling[3] - scaling[2]) * next.y) * bottom);
+                }
+            }
+        }
+        if (!std::isfinite(next.x) || !std::isfinite(next.y) || next.x == 0 || next.y == 0)
+            return fail("Entartete HPGL-Skalierung.");
+        const auto physical = physicalPosition;
+        const auto moved = next.inverse(physical);
+        const auto check = next.map(moved) - physical;
+        if (!std::isfinite(moved.x()) || !std::isfinite(moved.y()) || !std::isfinite(check.x()) ||
+            !std::isfinite(check.y()) || std::hypot(check.x(), check.y()) * unit > .000001)
+            return fail("HPGL-Skalierung kann die Stiftposition nicht genau erhalten.");
+        mapping = next;
+        position = moved; // Coordinate changes never move the physical pen.
+        return true;
     }
     bool flush() {
         if (stroke.elementCount() > 1) {
@@ -39,7 +98,7 @@ class Hpgl {
     }
     void beginStroke() {
         if (stroke.isEmpty()) {
-            stroke.moveTo(position * unit);
+            stroke.moveTo(physicalPosition * unit);
             ++elements;
         }
     }
@@ -50,9 +109,10 @@ class Hpgl {
             beginStroke();
             if (++elements > elementLimit)
                 return fail("Zu viele HPGL-Pfadelemente.");
-            stroke.lineTo(target * unit);
+            stroke.lineTo(mapping.map(target) * unit);
         }
         position = target;
+        physicalPosition = mapping.map(target);
         return true;
     }
     bool numbers(QList<double> &values) {
@@ -104,7 +164,7 @@ class Hpgl {
                 comma = true;
                 ++offset;
             } else if (offset < text.size() && text[offset] != ';' && !text[offset].isLetter() &&
-                       !space) {
+                       !space && text[offset] != '+' && text[offset] != '-') {
                 return fail("Fehlendes Trennzeichen zwischen HPGL-Zahlen.");
             }
         }
@@ -138,9 +198,55 @@ class Hpgl {
             if (!v.isEmpty() || !flush())
                 return false;
             position = {};
+            physicalPosition = {};
+            p1 = {};
+            p2.reset();
+            scaling.clear();
+            mapping = {};
             absolute = true;
             down = selected = false;
             return true;
+        }
+        if (op == "IP") {
+            if (v.size() != 0 && v.size() != 2 && v.size() != 4)
+                return fail("IP benötigt null, zwei oder vier Koordinaten.");
+            const QPointF nextP1 =
+                v.isEmpty() ? QPointF() : QPointF(std::round(v[0]), std::round(v[1]));
+            if (!plotterPoint(nextP1))
+                return false;
+            if (v.isEmpty())
+                p2.reset(); // The default frame size is not encoded in this file.
+            else if (v.size() == 4) {
+                p2 = QPointF(std::round(v[2]), std::round(v[3]));
+                if (p2->x() == nextP1.x())
+                    p2->rx() += 1;
+                if (p2->y() == nextP1.y())
+                    p2->ry() += 1;
+            } else if (p2)
+                *p2 += nextP1 - p1; // P2 tracks a P1-only change.
+            if (p2 && !plotterPoint(*p2))
+                return false;
+            p1 = nextP1;
+            return updateMapping();
+        }
+        if (op == "SC") {
+            if (!v.isEmpty()) {
+                if (v.size() != 4 && v.size() != 5 && v.size() != 7)
+                    return fail("Ungültige SC-Parameterzahl.");
+                const double type = v.size() == 4 ? 0 : std::round(v[4]);
+                if (type < 0 || type > 2 || (type == 2 && v.size() != 5))
+                    return fail("SC-Typ muss 0, 1 oder 2 sein.");
+                if ((type < 2 && (v[0] == v[1] || v[2] == v[3])) ||
+                    (type == 2 && (v[1] == 0 || v[3] == 0)))
+                    return fail("Entarteter SC-Bereich oder Faktor null.");
+                if (type == 1 && v.size() == 7 &&
+                    (v[5] < 0 || v[5] > 100 || v[6] < 0 || v[6] > 100))
+                    return fail("SC-Ränder müssen zwischen 0 und 100 Prozent liegen.");
+            }
+            scaling = v;
+            if (scaling.size() > 4)
+                scaling[4] = std::round(scaling[4]);
+            return updateMapping();
         }
         if (op == "SP") {
             if (v.size() > 1 ||
@@ -179,6 +285,7 @@ class Hpgl {
             if (!flush())
                 return false;
             const QPointF center = position;
+            const QPointF centerPhysical = physicalPosition;
             const bool previousDown = down;
             down = false;
             if (!line(center + QPointF(v[0], 0)))
@@ -196,6 +303,7 @@ class Hpgl {
             if (!flush())
                 return false;
             position = center;
+            physicalPosition = centerPhysical;
             down = previousDown;
             return true;
         }
@@ -214,9 +322,11 @@ class Hpgl {
                     elements += 3;
                     if (elements > elementLimit)
                         return fail("Zu viele HPGL-Pfadelemente.");
-                    stroke.cubicTo(a * unit, b * unit, end * unit);
+                    stroke.cubicTo(mapping.map(a) * unit, mapping.map(b) * unit,
+                                   mapping.map(end) * unit);
                 }
                 position = end;
+                physicalPosition = mapping.map(end);
             }
             return true;
         }

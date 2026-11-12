@@ -10,7 +10,7 @@ struct Result {
     QString error;
     QString interpretation{};
 };
-// Standalone, unscaled HP-GL geometry. No device access or machine settings.
+// Standalone HP-GL geometry, including explicit IP/SC scales. No device access.
 // Returned paths use millimetres, world Y-up, with a shared lower-left at (0,0).
 Result hpgl(const QByteArray &bytes);
 // Standalone nominal XY paths, never executable commands. M/S words select
