@@ -176,9 +176,21 @@ bool Document::copyPage(int page, const QString &name) {
         notify("Blattkopie überschreitet die Objekt- oder Einbettungsgrenzen des Projekts.");
         return false;
     }
+    auto guides = m_guides;
+    for (auto guide : m_guides)
+        if (guide.page == page) {
+            guide.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            guide.page = m_pages.size();
+            guides.append(guide);
+        }
+    if (guides.size() > 1000) {
+        notify("Blattkopie überschreitet die Hilfsliniengrenze.");
+        return false;
+    }
     checkpoint("Blatt kopieren");
     beginResetModel();
     m_items = std::move(result);
+    m_guides = std::move(guides);
     m_pages.append(name.trimmed());
     m_activePage = m_pages.size() - 1;
     m_selection.clear();
@@ -977,6 +989,10 @@ bool Document::removePage(int page) {
         else if (m_items[i].page > page)
             --m_items[i].page;
     }
+    m_guides.removeIf([page](const Guide &g) { return g.page == page; });
+    for (auto &guide : m_guides)
+        if (guide.page > page)
+            --guide.page;
     m_pages.removeAt(page);
     if (m_activePage > page)
         --m_activePage;

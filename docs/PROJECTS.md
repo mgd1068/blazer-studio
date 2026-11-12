@@ -16,7 +16,7 @@ Erfolgreiches Öffnen und Speichern merken den zugehörigen Projektpfad für den
 
 ## Dateiformat
 
-Neu gespeicherte Projekte verwenden **Format 8** mit einem eigenen Klartextfeld `notes`. Formate 1–7 bleiben lesbar und erhalten leere Notizen. Frühere Titel werden beim Lesen nicht stillschweigend normalisiert. Ältere Blazer-Versionen einschließlich beta.2 unterstützen Format 8 nicht und müssen solche Dateien ablehnen. Ein Rückspeichern als Format 7 würde Notizen verlieren und wird daher nicht angeboten.
+Neu gespeicherte Projekte verwenden **Format 8** mit einem eigenen Klartextfeld `notes`. Projekte mit [Hilfslinien](GUIDES.md) oder abweichenden Hilfslinienschaltern verwenden ab beta.4-dev **Format 9**; Format 8 bleibt ohne diese Daten erhalten. Format 9 ergänzt `guides` (Kennung, Achse, Position in mm, Blatt und Sperre), `guidesVisible` und `guideSnapping`. Leser bis einschließlich beta.3 lehnen Format 9 ab. Formate 1–7 bleiben lesbar und erhalten leere Notizen. Frühere Titel werden beim Lesen nicht stillschweigend normalisiert. Ältere Blazer-Versionen einschließlich beta.2 unterstützen Format 8 nicht und müssen solche Dateien ablehnen. Ein Rückspeichern als Format 7 würde Notizen verlieren und wird daher nicht angeboten.
 
 ## Zuletzt verwendete Projekte
 
@@ -38,7 +38,7 @@ Die Vorlage wird beim Laden, Bearbeiten und normalen Projektspeichern nicht ver�
 
 Vorlagen übernehmen keine Maschinenverbindung oder Startfreigabe. Beim neuen Projekt werden Materialbestätigung und der Sonderstatus einer früheren Probe zurückgesetzt. Vor einem echten Start bleiben Material, Lage, Fokus und die gerätespezifischen Bedingungen zu prüfen. Eine Vorlage startet weder Bewegung noch Laser.
 
-Das eigene Vorlagenformat hat die Kennung `blazer-studio-template`, `templateVersion: 1` und enthält das Projektformat 8. Die Dateigrenze bleibt 64 MiB; Projekt-, Bild- und Geometriegrenzen werden beim Laden vollständig geprüft. Es wurde kein Import fremder Vorlagenformate abgenommen.
+Das eigene Vorlagenformat hat die Kennung `blazer-studio-template`, `templateVersion: 1` und enthält das jeweils benötigte Projektformat 8 oder 9. Die Dateigrenze bleibt 64 MiB; Projekt-, Bild- und Geometriegrenzen werden beim Laden vollständig geprüft. Es wurde kein Import fremder Vorlagenformate abgenommen.
 
 Das Linux-Paket und der lokale Quellstarter registrieren `.blazertemplate` als eigenen Dateityp. Ein entsprechender Dateistart erzeugt ein neues Projekt. Die Prüfung am tatsächlichen Desktop einschließlich seiner Dateizuordnung bleibt ein eigener T08-Fall.
 

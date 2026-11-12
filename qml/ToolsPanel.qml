@@ -18,6 +18,19 @@ ScrollView {
     signal csvRequested()
     signal nodesRequested()
     signal operationSelected(int index)
+    property string selectedGuideId: ""
+    signal guideSelected(string id)
+    readonly property var activeGuide: project.guides.find(g=>g.id===selectedGuideId) || ({})
+    property string guideModelKey: ""
+    function refreshGuides() {
+        let key=JSON.stringify(project.guides)
+        if (key!==guideModelKey) {
+            guideModelKey=key
+            guideChoice.model=project.guides.map(g=>(g.axis==="vertical" ? "X = " : "Y = ")+g.position.toFixed(3)+" mm"+(g.locked ? " · gesperrt" : ""))
+        }
+        guideChoice.currentIndex=project.guides.findIndex(g=>g.id===selectedGuideId)
+    }
+    onSelectedGuideIdChanged: refreshGuides()
     property int section: 0
     property int nextCorner: 0
     property string imageDraftKey: ""
@@ -53,8 +66,8 @@ ScrollView {
         imageMode.currentIndex=Math.max(0,["dither","atkinson","threshold","grayscale"].indexOf(style.imageMode || "dither"))
         cropX.value=style.cropX ?? 0;cropY.value=style.cropY ?? 0;cropW.value=style.cropW ?? (project.selection.imageWidth || 1);cropH.value=style.cropH ?? (project.selection.imageHeight || 1)
     }
-    Connections {target: project; function onSelectionChanged(){tools.refreshImage()} }
-    Component.onCompleted: {refreshImage();sheetsReady=true;refreshSheets()}
+    Connections {target: project; function onSelectionChanged(){tools.refreshImage()} function onChanged(){tools.refreshGuides()} }
+    Component.onCompleted: {refreshImage();sheetsReady=true;refreshSheets();refreshGuides()}
     clip: true; contentWidth: availableWidth
     function apply(action,args) { project.command(action,args || ({})) }
     FontDialog { id: fonts; onAccepted: project.command("textStyle",{font:selectedFont.family,bold:selectedFont.bold,spacing:textSpacing.value}) }
@@ -69,6 +82,7 @@ ScrollView {
             TabButton { HelpBubble { target: parent } id: toolsOperationsTab; objectName: "toolsOperations"; text: "Operationen"; background: Rectangle { radius: 4; color: toolsOperationsTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsOperationsTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
             TabButton { HelpBubble { target: parent } id: toolsImageTab; objectName: "toolsImage"; text: "Bild"; background: Rectangle { radius: 4; color: toolsImageTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsImageTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
             TabButton { HelpBubble { target: parent } id: toolsProductionTab; objectName: "toolsProduction"; text: "Produktion"; background: Rectangle { radius: 4; color: toolsProductionTab.checked ? (tools.dark ? "#3b5361" : "#ffffff") : (tools.dark ? "#22323e" : "#e8eff3") } contentItem: Text { text: toolsProductionTab.text; color: tools.ink; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 } }
+            TabButton { id: guidesTab; objectName: "toolsGuides"; text: "Hilfslinien"; contentItem: Text { text: guidesTab.text; color: tools.ink; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter } }
         }
         ColumnLayout {
             visible: tools.section===0
@@ -277,6 +291,26 @@ ScrollView {
                 CheckBox { HelpBubble { target: parent } text: "Foto einblenden"; enabled: typeof cameraRegistration!=="undefined" && cameraRegistration.calibrated; checked: typeof cameraRegistration!=="undefined" && cameraRegistration.visible; onClicked: cameraRegistration.visible=checked }
             }
             ActionButton { text: "Letzte Sicherung wiederherstellen"; dark: tools.dark; enabled: typeof recovery!=="undefined" && recovery.available; onClicked: recovery.restore() }
+        }
+        ColumnLayout {
+            visible: tools.section===4
+            Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20; spacing: 12
+            Text { text: "Hilfslinien auf diesem Blatt"; color: tools.ink; font.pixelSize: 16 }
+            Text { text: "Vom oberen Lineal waagerechte, vom linken senkrechte Linien ziehen. Hilfslinien werden gespeichert und niemals gelasert."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            RowLayout {
+                Layout.fillWidth: true
+                ToolCombo { id: guideAxis; objectName: "guideAxis"; dark: tools.dark; model: ["Waagerecht (Y)","Senkrecht (X)"]; Layout.fillWidth: true }
+                NumberField { id: newGuidePosition; objectName: "newGuidePosition"; value: 75; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
+            }
+            ActionButton { objectName: "addGuide"; text: "Hilfslinie hinzufügen"; dark: tools.dark; onClicked: {let id=project.addGuide(guideAxis.currentIndex===0 ? "horizontal" : "vertical",newGuidePosition.value);if(id)tools.guideSelected(id)} }
+            ToolCombo { id: guideChoice; objectName: "guideChoice"; dark: tools.dark; Layout.fillWidth: true; onActivated: index=>tools.guideSelected(project.guides[index].id) }
+            NumberField { objectName: "guidePosition"; label: tools.activeGuide.axis==="vertical" ? "X" : "Y"; value: tools.activeGuide.position ?? 0; unit: "mm"; dark: tools.dark; enabled: !!tools.activeGuide.id && !tools.activeGuide.locked; Layout.fillWidth: true; onEdited: n=>project.setGuidePosition(tools.selectedGuideId,n) }
+            CheckBox { objectName: "guideLocked"; text: "Ausgewählte Linie sperren"; checked: tools.activeGuide.locked ?? false; enabled: !!tools.activeGuide.id; onClicked: project.setGuideLocked(tools.selectedGuideId,checked) }
+            CheckBox { objectName: "guidesVisible"; text: "Hilfslinien anzeigen"; checked: project.guidesVisible; onClicked: project.setGuidesVisible(checked) }
+            CheckBox { objectName: "guideSnapping"; text: "Objekte an Hilfslinien einrasten"; checked: project.guideSnapping; onClicked: project.setGuideSnapping(checked) }
+            ActionButton { objectName: "removeGuide"; text: "Ausgewählte Linie löschen"; dark: tools.dark; enabled: !!tools.activeGuide.id && !tools.activeGuide.locked; onClicked: project.removeGuide(tools.selectedGuideId) }
+            ActionButton { objectName: "clearGuides"; text: "Alle Linien dieses Blatts löschen (auch gesperrte)"; dark: tools.dark; enabled: project.guides.length>0; onClicked: project.clearGuides() }
+            Text { text: "Alt beim Verschieben unterdrückt das Einrasten an Objekten und Hilfslinien. Das Raster bleibt aktiv. Escape verwirft eine laufende Hilfslinienbewegung."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 11 }
         }
         Item { height: 20 }
     }

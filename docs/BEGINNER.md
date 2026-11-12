@@ -48,3 +48,5 @@ Unter der Objektliste stehen **Kopieren** und **Einfügen** bereit. Auf der Arbe
 
 
 Unten rechts im Editor kann die Längeneinheit zwischen **mm** und **in** wechseln. Längenfelder akzeptieren auch ausdrückliche Angaben wie `1,25 in` oder `25.4 mm`. Reines Umschalten ändert das Motiv und die Laserparameter nicht. [Einheiten, Raster und Genauigkeit](EDITOR_UNITS.md) gehören zur Entwicklung beta.4-dev; Geschwindigkeiten und Herstellerreferenzen behalten ihre ausgewiesenen Einheiten.
+
+Hilfslinien für die Platzierung findest du unter [Werkzeuge → Hilfslinien](GUIDES.md). Sie werden gespeichert und niemals gelasert.

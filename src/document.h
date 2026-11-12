@@ -1,7 +1,8 @@
 #pragma once
 #include "batchexport.h"
-#include "job.h"
+#include "guide.h"
 #include "imageexport.h"
+#include "job.h"
 #include "jobpreparation.h"
 #include "relief.h"
 #include "svgasset.h"
@@ -20,6 +21,9 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QString planningState READ planningState NOTIFY changed)
     Q_PROPERTY(bool planningBusy READ planningBusy NOTIFY changed)
     Q_PROPERTY(QVariantMap jobSummary READ jobSummary NOTIFY changed)
+    Q_PROPERTY(QVariantList guides READ guides NOTIFY changed)
+    Q_PROPERTY(bool guidesVisible READ guidesVisible NOTIFY changed)
+    Q_PROPERTY(bool guideSnapping READ guideSnapping NOTIFY changed)
     Q_PROPERTY(QStringList pages READ pages NOTIFY changed)
     Q_PROPERTY(int activePage READ activePage NOTIFY changed)
     Q_PROPERTY(QVariantList history READ history NOTIFY changed)
@@ -68,6 +72,17 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void cancelImageExport() { m_imageExport.cancel(); }
     bool batchBusy() const { return m_batch.busy(); }
     QImage imagePreview(const Artwork &item) const;
+    QVariantList guides() const;
+    const QList<Guide> &allGuides() const { return m_guides; }
+    bool guidesVisible() const { return m_guidesVisible; }
+    bool guideSnapping() const { return m_guideSnapping; }
+    Q_INVOKABLE QString addGuide(const QString &axis, double position);
+    Q_INVOKABLE bool setGuidePosition(const QString &id, double position);
+    Q_INVOKABLE bool setGuideLocked(const QString &id, bool locked);
+    Q_INVOKABLE bool removeGuide(const QString &id);
+    Q_INVOKABLE void clearGuides();
+    Q_INVOKABLE void setGuidesVisible(bool visible);
+    Q_INVOKABLE void setGuideSnapping(bool enabled);
     QStringList pages() const { return m_pages; }
     int activePage() const { return m_activePage; }
     QVariantList nodes() const;
@@ -180,6 +195,8 @@ class Document : public QAbstractListModel {
         QStringList pages;
         int activePage = 0;
         QString notes;
+        QList<Guide> guides;
+        bool guidesVisible = true, guideSnapping = true;
     };
     Snapshot snapshot() const;
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
@@ -190,6 +207,7 @@ class Document : public QAbstractListModel {
     void checkpoint(const QString &label = QStringLiteral("Bearbeitung"));
     void clearHistory();
     void refresh(int row = -1);
+    void refreshGuides();
     void markClean();
     void setFileUrl(const QUrl &url);
     bool transformSelection(const QRectF &bounds, bool history = true);
@@ -204,6 +222,8 @@ class Document : public QAbstractListModel {
     QVariantMap m_material;
     int m_selected = -1;
     QList<int> m_selection;
+    QList<Guide> m_guides;
+    bool m_guidesVisible = true, m_guideSnapping = true;
     QStringList m_pages{"Blatt 01"};
     int m_activePage = 0;
     QString m_title = "Werkstattschild", m_notes, m_message;

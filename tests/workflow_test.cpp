@@ -6,10 +6,10 @@
 #include "registration.h"
 #include "reliefpreview.h"
 #include "workspace.h"
-#include <QFile>
 #include <QClipboard>
-#include <QMimeData>
+#include <QFile>
 #include <QJsonDocument>
+#include <QMimeData>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -181,11 +181,58 @@ class WorkflowTest : public QObject {
         QTRY_COMPARE(project.items()[0].bounds.x(),31.75);QCOMPARE(unitX->property("shownUnit").toString(),QString("in"));
         QVERIFY(item("editorBedSize")->property("text").toString().contains("7.874"));
         QVERIFY(screenshot("inch-editor"));
-        QVERIFY(click(window,unitEditor));QTest::keyClick(window,Qt::Key_A,Qt::ControlModifier);typeText(window,"25,4 mm");QTest::keyClick(window,Qt::Key_Return);
-        QTRY_COMPARE(project.items()[0].bounds.x(),25.4);
-        const auto unitEdited=project.projectBytes();
-        QVERIFY(click(window,item("editorUnitChoice")));QTest::keyClick(window,Qt::Key_Home);QTest::keyClick(window,Qt::Key_Return);
-        QTRY_COMPARE(services.lengthUnit(),QString("mm"));QCOMPARE(project.projectBytes(),unitEdited);
+        QVERIFY(click(window, unitEditor));
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        typeText(window, "25,4 mm");
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(project.items()[0].bounds.x(), 25.4);
+        const auto unitEdited = project.projectBytes();
+        QVERIFY(click(window, item("editorUnitChoice")));
+        QTest::keyClick(window, Qt::Key_Home);
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(services.lengthUnit(), QString("mm"));
+        QCOMPARE(project.projectBytes(), unitEdited);
+        auto *guideTools = window->findChild<QObject *>("toolsPanel");
+        QVERIFY(guideTools);
+        window->setProperty("basic", false);
+        window->setProperty("page", 4);
+        guideTools->setProperty("section", 4);
+        QTest::qWait(50);
+        QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy(),5000);
+        const auto guideCode = project.job().gcode();
+        QVERIFY(click(window, item("addGuide")));
+        QTRY_COMPARE(project.guides().size(), 1);
+        auto *canvas = qobject_cast<Workspace *>(item("workspace"));
+        QVERIFY(canvas);
+        QTRY_COMPARE(canvas->selectedGuideId(), project.allGuides()[0].id);
+        QVERIFY(click(window, item("guideLocked")));
+        QVERIFY(project.allGuides()[0].locked);
+        QVERIFY(!item("guidePosition")->isEnabled());
+        QVERIFY(!item("removeGuide")->isEnabled());
+        QVERIFY(click(window, item("guidesVisible")));
+        QVERIFY(!project.guidesVisible());
+        QVERIFY(click(window, item("guidesVisible")));
+        QVERIFY(project.guidesVisible());
+        QVERIFY(click(window, item("guideSnapping")));
+        QVERIFY(!project.guideSnapping());
+        QVERIFY(click(window, item("guideLocked")));
+        QVERIFY(!project.allGuides()[0].locked);
+        QVERIFY(services.setLengthUnit("in"));
+        auto *guidePosition = item("guidePosition");
+        auto *guideEditor = guidePosition->findChild<QQuickItem *>("numericEditor");
+        QVERIFY(guideEditor);
+        QVERIFY(click(window, guideEditor));
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        typeText(window, "2 in");
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(project.allGuides()[0].position, 50.8);
+        QCOMPARE(project.job().gcode(), guideCode);
+        QVERIFY(screenshot("guides"));
+        QVERIFY(click(window, item("removeGuide")));
+        QTRY_VERIFY(project.guides().isEmpty());
+        QVERIFY(services.setLengthUnit("mm"));
+        guideTools->setProperty("section", 0);
+        window->setProperty("page", 0);
         project.newProject();
         project.addShape("rect");
         const auto clipboardBounds=project.items()[0].bounds;
@@ -860,7 +907,8 @@ class WorkflowTest : public QObject {
         QVERIFY(mage.open(QIODevice::WriteOnly));
         mage.write("<MillMageProject FormatVersion=\"1\"><Shape Type=\"Rect\" W=\"10\" H=\"5\">"
                    "<XForm>1 0 0 1 20 20</XForm></Shape>"
-                   "<Operation><Feed Value=\"33333\"/><Spindle Value=\"25000\"/></Operation></MillMageProject>");
+                   "<Operation><Feed Value=\"33333\"/><Spindle "
+                   "Value=\"25000\"/></Operation></MillMageProject>");
         mage.close();
         QVERIFY(click(window,item("importMotifButton")));
         QTRY_VERIFY(importPicker->property("visible").toBool());

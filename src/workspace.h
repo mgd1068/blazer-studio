@@ -14,6 +14,9 @@ class Workspace : public QQuickPaintedItem {
     Q_PROPERTY(bool preview READ preview WRITE setPreview NOTIFY previewChanged)
     Q_PROPERTY(bool dark READ dark WRITE setDark NOTIFY darkChanged)
     Q_PROPERTY(bool nodes READ nodeMode WRITE setNodeMode NOTIFY nodeModeChanged)
+    Q_PROPERTY(QString selectedGuideId READ selectedGuideId WRITE setSelectedGuideId NOTIFY
+                   selectedGuideChanged)
+    Q_PROPERTY(bool guideDragging READ guideDragging NOTIFY selectedGuideChanged)
     Q_PROPERTY(bool imperial READ imperial WRITE setImperial NOTIFY imperialChanged)
     Q_PROPERTY(double snapStep READ snapStep NOTIFY imperialChanged)
     Q_PROPERTY(double zoom READ zoom NOTIFY zoomChanged)
@@ -35,6 +38,8 @@ class Workspace : public QQuickPaintedItem {
     void setSimulator(Simulator *s);
     bool preview() const { return m_preview; }
     void setPreview(bool p) {
+        if (p)
+            cancelGuideDrag();
         m_preview = p;
         update();
         emit previewChanged();
@@ -60,6 +65,10 @@ class Workspace : public QQuickPaintedItem {
         emit imperialChanged();
         update();
     }
+    QString selectedGuideId() const { return m_selectedGuide; }
+    void setSelectedGuideId(const QString &id);
+    bool guideDragging() const { return m_guideDraft.has_value(); }
+    Q_INVOKABLE void cancelGuideDrag();
     double zoom() const { return m_zoom; }
     Q_INVOKABLE void fit() {
         m_zoom = 1;
@@ -79,6 +88,7 @@ class Workspace : public QQuickPaintedItem {
     void darkChanged();
     void zoomChanged();
     void imperialChanged();
+    void selectedGuideChanged();
     void nodeModeChanged();
 
   protected:
@@ -102,4 +112,13 @@ class Workspace : public QQuickPaintedItem {
     double m_zoom = 1;
     QPointF m_pan, m_last, m_offset;
     QCache<QString, QPainterPath> m_textPaths{128};
+    QString m_selectedGuide;
+    struct GuideDraft {
+        QString id, axis;
+        double position = 0;
+        int page = 0;
+    };
+    std::optional<GuideDraft> m_guideDraft;
+    std::optional<double> m_alignmentX, m_alignmentY;
+    void paintGuides(QPainter *p);
 };

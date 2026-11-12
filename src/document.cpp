@@ -311,12 +311,14 @@ void Document::notify(const QString &s) {
     emit messageChanged();
 }
 Document::Snapshot Document::snapshot() const {
-    return {m_items, m_layers, m_title, m_selected, m_material, m_selection, m_pages, m_activePage,
-            m_notes};
+    return {m_items, m_layers,     m_title, m_selected, m_material,      m_selection,
+            m_pages, m_activePage, m_notes, m_guides,   m_guidesVisible, m_guideSnapping};
 }
 bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
     return a.items == b.items && a.layers == b.layers && a.title == b.title &&
-           a.material == b.material && a.pages == b.pages && a.notes == b.notes;
+           a.material == b.material && a.pages == b.pages && a.notes == b.notes &&
+           a.guides == b.guides && a.guidesVisible == b.guidesVisible &&
+           a.guideSnapping == b.guideSnapping;
 }
 void Document::refresh(int row) {
     m_job.reset();
@@ -350,11 +352,16 @@ void Document::applySnapshot(const Snapshot &s) {
     m_material = s.material;
     m_pages = s.pages;
     m_activePage = s.activePage;
+    m_guides = s.guides;
+    m_guidesVisible = s.guidesVisible;
+    m_guideSnapping = s.guideSnapping;
     m_beforeMove.reset();
     endResetModel();
     refresh();
 }
 void Document::demo() {
+    m_guides.clear();
+    m_guidesVisible = m_guideSnapping = true;
     setFileUrl({});
     beginResetModel();
     m_title = "Werkstattschild";
@@ -857,20 +864,39 @@ QByteArray Document::serialize(const Snapshot &state) const {
             {"depthMap",
              a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
-    return QJsonDocument(QJsonObject{{"format", "blazer-studio"},
-                                     {"version", 8},
-                                     {"units", "mm"},
-                                     {"origin", "bottom-left"},
-                                     {"pages", QJsonArray::fromStringList(state.pages)},
-                                     {"activePage", state.activePage},
-                                     {"title", state.title},
-                                     {"notes", state.notes},
-                                     {"selected", state.selected},
-                                     {"selectedRows", [&state] {QJsonArray rows;for(int row:state.selection)rows.append(row);return rows;}()},
-                                     {"objects", objects},
-                                     {"layers", QJsonArray::fromVariantList(state.layers)},
-                                     {"material", QJsonObject::fromVariantMap(state.material)}})
-        .toJson();
+    QJsonObject root{{"format", "blazer-studio"},
+                     {"version", 8},
+                     {"units", "mm"},
+                     {"origin", "bottom-left"},
+                     {"pages", QJsonArray::fromStringList(state.pages)},
+                     {"activePage", state.activePage},
+                     {"title", state.title},
+                     {"notes", state.notes},
+                     {"selected", state.selected},
+                     {"selectedRows",
+                      [&state] {
+                          QJsonArray rows;
+                          for (int row : state.selection)
+                              rows.append(row);
+                          return rows;
+                      }()},
+                     {"objects", objects},
+                     {"layers", QJsonArray::fromVariantList(state.layers)},
+                     {"material", QJsonObject::fromVariantMap(state.material)}};
+    if (!state.guides.isEmpty() || !state.guidesVisible || !state.guideSnapping) {
+        root["version"] = 9;
+        root["guidesVisible"] = state.guidesVisible;
+        root["guideSnapping"] = state.guideSnapping;
+        QJsonArray guides;
+        for (const auto &guide : state.guides)
+            guides.append(QJsonObject{{"id", guide.id},
+                                      {"axis", guide.axis},
+                                      {"position", guide.position},
+                                      {"page", guide.page},
+                                      {"locked", guide.locked}});
+        root["guides"] = guides;
+    }
+    return QJsonDocument(root).toJson();
 }
 std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const {
     if (bytes.size() > maxProjectBytes)
@@ -879,7 +905,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 8) ||
+        !number(root, "version", 1, 9) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -914,6 +940,33 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
             state.activePage >= state.pages.size())
             return {};
     }
+    if (version >= 9) {
+        if (!root["guides"].isArray() || root["guides"].toArray().size() > 1000 ||
+            !root["guidesVisible"].isBool() || !root["guideSnapping"].isBool())
+            return {};
+        state.guidesVisible = root["guidesVisible"].toBool();
+        state.guideSnapping = root["guideSnapping"].toBool();
+        QSet<QString> ids;
+        for (const auto &value : root["guides"].toArray()) {
+            if (!value.isObject())
+                return {};
+            auto guide = value.toObject();
+            if (!text(guide, "id", 100) || guide["id"].toString().isEmpty() ||
+                ids.contains(guide["id"].toString()) ||
+                !QStringList{"vertical", "horizontal"}.contains(guide["axis"].toString()) ||
+                !number(guide, "position", -2000, 2000) ||
+                !number(guide, "page", 0, state.pages.size() - 1) ||
+                std::floor(guide["page"].toDouble()) != guide["page"].toDouble() ||
+                !guide["locked"].isBool())
+                return {};
+            ids.insert(guide["id"].toString());
+            state.guides.append({guide["id"].toString(), guide["axis"].toString(),
+                                 guide["position"].toDouble(), guide["page"].toInt(),
+                                 guide["locked"].toBool()});
+        }
+    } else if (root.contains("guides") || root.contains("guidesVisible") ||
+               root.contains("guideSnapping"))
+        return {};
     for (int i = 0; i < layers.size(); ++i) {
         auto l = layers[i].toObject();
         if (!text(l, "name") || !text(l, "mode") ||

@@ -19,7 +19,7 @@ option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
-    src/clipboard.cpp
+    src/clipboard.cpp src/guides.cpp src/guide.h
     src/nativedesign.cpp src/nativedesign.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h

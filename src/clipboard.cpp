@@ -94,6 +94,8 @@ bool Document::copySelectionToClipboard(bool cut) {
     finishMove();
     auto state = snapshot();
     state.items.clear();
+    state.guides.clear();
+    state.guidesVisible = state.guideSnapping = true;
     state.selection.clear();
     state.pages = {"Zwischenablage"};
     state.activePage = 0;

@@ -264,7 +264,7 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Undo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.undo() }
     Shortcut { sequences: [StandardKey.Redo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; enabled: !projectDialogActive; onActivated: importDialog.open() }
-    Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDialogActive; onActivated: { machine.stop(); project.select(-1) } }
+    Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDialogActive; onActivated: { canvas.cancelGuideDrag(); canvas.selectedGuideId=""; machine.stop(); project.select(-1) } }
     FileDialog { id: importDialog; objectName: "importMotifDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik, GCode oder Modell importieren"; nameFilters: ["Geometrie, Bilder und Modelle (*.svg *.dxf *.hpgl *.plt *.gc *.gcode *.nc *.rd *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2 *.mage)"]; onAccepted: win.importMotif(selectedFile) }
     Component {
         id: saveDialogFactory
@@ -901,7 +901,7 @@ ApplicationWindow {
                         }
                     }
                     ReliefPanel { dark: win.night; onImportRequested: reliefDialog.open(); onPhotoRequested: photoDepth.open() }
-                    ToolsPanel { dark: win.night; operation: win.operation; onOperationSelected: index=>win.operation=index; onNodesRequested: {win.page=0;canvas.nodes=true} onImportRequested: universalImport.open(); onExportRequested: vectorExport.open(); onImageExportRequested: processed=>{imageExport.processed=processed;imageExport.imageId=project.selection.id;imageExport.revision=project.historyRevision;imageExport.open()} onCsvRequested: csvImport.open(); onCameraRequested: cameraPhoto.open() }
+                    ToolsPanel { selectedGuideId: canvas.selectedGuideId; onGuideSelected: id=>canvas.selectedGuideId=id; dark: win.night; operation: win.operation; onOperationSelected: index=>win.operation=index; onNodesRequested: {win.page=0;canvas.nodes=true} onImportRequested: universalImport.open(); onExportRequested: vectorExport.open(); onImageExportRequested: processed=>{imageExport.processed=processed;imageExport.imageId=project.selection.id;imageExport.revision=project.historyRevision;imageExport.open()} onCsvRequested: csvImport.open(); onCameraRequested: cameraPhoto.open() }
                 }
                 Rectangle {
                     Layout.fillWidth: true; Layout.preferredHeight: 39; color: win.panel

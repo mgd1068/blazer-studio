@@ -44,6 +44,7 @@ class ClipboardTest : public QObject {
         source.toggleSelection(0);
         source.groupSelection();
         QVERIFY(source.setMetadata("Privater Titel", "Nicht kopieren"));
+        QVERIFY(!source.addGuide("vertical",42.).isEmpty());
         const auto before = source.projectBytes();
         const auto revision = source.historyRevision();
         QVERIFY(source.copySelectionToClipboard());
@@ -54,6 +55,8 @@ class ClipboardTest : public QObject {
         QVERIFY(data->hasFormat("image/svg+xml"));
         const auto encoded = data->data(mime);
         const auto root = QJsonDocument::fromJson(encoded).object();
+        QVERIFY(!root.contains("guides"));
+        QVERIFY(!root.contains("guidesVisible"));
         QCOMPARE(root["title"].toString(), QString("Zwischenablage"));
         QVERIFY(root["notes"].toString().isEmpty());
         QVERIFY(root["material"].toObject().isEmpty());

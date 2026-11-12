@@ -65,6 +65,126 @@ class ExpansionTest : public QObject {
                rdCommand(0xa8, rdNumber(10000) + rdNumber(20000));
     }
   private slots:
+    void guidesArePersistentUndoableAndExcludedFromOutput() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        const auto code = d.job().gcode();
+        const auto original = d.projectBytes();
+        QCOMPARE(QJsonDocument::fromJson(original).object()["version"].toInt(), 8);
+        const auto id = d.addGuide("vertical", 92.5);
+        QVERIFY(!id.isEmpty());
+        QCOMPARE(d.guides().size(), 1);
+        QCOMPARE(d.job().gcode(), code);
+        const auto added = d.projectBytes();
+        QCOMPARE(QJsonDocument::fromJson(added).object()["version"].toInt(), 9);
+        QVERIFY(d.setGuidePosition(id, 96.));
+        d.undo();
+        QCOMPARE(d.projectBytes(), added);
+        d.redo();
+        QCOMPARE(d.allGuides()[0].position, 96.);
+        QVERIFY(d.setGuideLocked(id, true));
+        const auto locked = d.projectBytes();
+        QVERIFY(!d.setGuidePosition(id, 100.));
+        QVERIFY(!d.removeGuide(id));
+        QCOMPARE(d.projectBytes(), locked);
+        d.undo();
+        QVERIFY(!d.allGuides()[0].locked);
+        d.redo();
+        d.setGuidesVisible(false);
+        d.setGuideSnapping(false);
+        Document restored;
+        QVERIFY(restored.restoreBytes(d.projectBytes()));
+        QCOMPARE(restored.allGuides(), d.allGuides());
+        QVERIFY(!restored.guidesVisible());
+        QVERIFY(!restored.guideSnapping());
+        QCOMPARE(d.job().gcode(), code);
+        d.clearGuides();
+        QVERIFY(d.guides().isEmpty());
+        d.undo();
+        QCOMPARE(d.allGuides().size(), 1);
+        QVERIFY(d.allGuides()[0].locked);
+        QVERIFY(d.addGuide("diagonal", 1).isEmpty());
+        QVERIFY(d.addGuide("horizontal", std::numeric_limits<double>::infinity()).isEmpty());
+        QVERIFY(d.addGuide("horizontal", 2001).isEmpty());
+        Document legacy;
+        QVERIFY(legacy.restoreBytes(original));
+        QVERIFY(legacy.guides().isEmpty());
+        QVERIFY(legacy.guidesVisible());
+    }
+    void guideSchemaRejectsMalformedMetadataAtomically() {
+        Document d;
+        d.newProject();
+        QVERIFY(!d.addGuide("horizontal", 75).isEmpty());
+        const auto before = d.projectBytes();
+        auto root = QJsonDocument::fromJson(before).object();
+        auto guides = root["guides"].toArray();
+        const auto valid = guides[0].toObject();
+        const QList<QPair<QString, QJsonValue>> bad{
+            {"id", ""},   {"axis", "diagonal"}, {"position", 2001}, {"position", "25"},
+            {"page", .5}, {"page", 2},          {"locked", 1}};
+        for (const auto &entry : bad) {
+            auto guide = valid;
+            guide[entry.first] = entry.second;
+            root["guides"] = QJsonArray{guide};
+            QVERIFY(!d.restoreBytes(QJsonDocument(root).toJson()));
+            QCOMPARE(d.projectBytes(), before);
+        }
+        root["guides"] = QJsonArray{valid, valid};
+        QVERIFY(!d.restoreBytes(QJsonDocument(root).toJson()));
+        root["guides"] = guides;
+        root["version"] = 8;
+        QVERIFY(!d.restoreBytes(QJsonDocument(root).toJson()));
+        root["version"] = 9;
+        root.remove("guidesVisible");
+        QVERIFY(!d.restoreBytes(QJsonDocument(root).toJson()));
+        QCOMPARE(d.projectBytes(), before);
+    }
+    void guideLimitIsValidatedBeforeAtomicImport() {
+        Document source; source.newProject(); source.addGuide("vertical",25.);
+        auto root=QJsonDocument::fromJson(source.projectBytes()).object();
+        const auto base=root["guides"].toArray()[0].toObject(); QJsonArray array;
+        for(int i=0;i<1000;++i){auto guide=base; guide["id"]=QString::number(i); array.append(guide);}
+        root["guides"]=array; QVERIFY(source.restoreBytes(QJsonDocument(root).toJson()));
+        const auto before=source.projectBytes();
+        QVERIFY(source.addGuide("vertical",30.).isEmpty()); QCOMPARE(source.projectBytes(),before);
+        QVERIFY(!source.copyPage(0,"Zu viele")); QCOMPARE(source.projectBytes(),before);
+        const auto url=write("too-many-guides.blazer",before);
+        Document dest; dest.newProject(); dest.addGuide("horizontal",5.);
+        const auto destBefore=dest.projectBytes(); QVERIFY(!dest.importProject(url));
+        QCOMPARE(dest.projectBytes(),destBefore);
+        array.append(base);root["guides"]=array;
+        QVERIFY(!source.restoreBytes(QJsonDocument(root).toJson())); QCOMPARE(source.projectBytes(),before);
+    }
+    void guidesFollowPageCopiesRemovalAndProjectImport() {
+        Document d;
+        d.newProject();
+        const auto first = d.addGuide("vertical", 12.);
+        QVERIFY(d.copyPage(0, "Kopie"));
+        QCOMPARE(d.allGuides().size(), 2);
+        const auto second = d.allGuides()[1].id;
+        QVERIFY(first != second);
+        QCOMPARE(d.allGuides()[1].page, 1);
+        d.activatePage(1);
+        QVERIFY(d.setGuidePosition(second, 30.));
+        QCOMPARE(d.allGuides()[0].position, 12.);
+        const auto source = write("guides.blazer", d.projectBytes());
+        Document dest;
+        dest.newProject();
+        dest.addGuide("horizontal", 10.);
+        QVERIFY(dest.importProject(source));
+        QCOMPARE(dest.allGuides().size(), 3);
+        for (const auto &g : dest.allGuides()) {
+            QCOMPARE(g.page, 0);
+            QVERIFY(g.id != first && g.id != second);
+        }
+        QVERIFY(d.removePage(0));
+        QCOMPARE(d.allGuides().size(), 1);
+        QCOMPARE(d.allGuides()[0].page, 0);
+        QCOMPARE(d.allGuides()[0].id, second);
+        d.undo();
+        QCOMPARE(d.allGuides().size(), 2);
+    }
     void ruidaAbsoluteRelativeAndYOrientation() {
         QCOMPARE(rdEncode(QByteArray::fromHex("d812f0")),QByteArray::fromHex("d29bfa"));
         QFile fixture(QFINDTESTDATA("fixtures/ruida/rectangle.rd"));

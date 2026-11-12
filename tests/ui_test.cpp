@@ -7,9 +7,9 @@
 #include "workspace.h"
 #include <QFile>
 #include <QJsonDocument>
+#include <QMouseEvent>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
-#include <QMouseEvent>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -141,6 +141,97 @@ class UiTest : public QObject {
         d.undo();
         QCOMPARE(d.projectBytes(), before);
         QVERIFY(workspace.imperial());
+    }
+    void objectEdgesSnapToVisibleGuidesAndAltDisablesTheTarget() {
+        class TestWorkspace : public Workspace {
+          public:
+            using Workspace::mouseMoveEvent; using Workspace::mousePressEvent;
+            using Workspace::mouseReleaseEvent;
+        };
+        for (int mode=0;mode<4;++mode) {
+            Document d; d.newProject(); d.addShape("rect");
+            d.addGuide("vertical",123.25);
+            if(mode==2)d.setGuidesVisible(false);
+            if(mode==3)d.setGuideSnapping(false);
+            TestWorkspace w; w.setWidth(910); w.setHeight(710); w.setDocument(&d);
+            const auto modifiers=mode==1 ? Qt::AltModifier : Qt::NoModifier;
+            const QPointF start(415,375), end(448.6,375);
+            QMouseEvent press(QEvent::MouseButtonPress,start,start,Qt::LeftButton,Qt::LeftButton,modifiers);
+            QMouseEvent move(QEvent::MouseMove,end,end,Qt::NoButton,Qt::LeftButton,modifiers);
+            QMouseEvent release(QEvent::MouseButtonRelease,end,end,Qt::LeftButton,Qt::NoButton,modifiers);
+            w.mousePressEvent(&press);w.mouseMoveEvent(&move);w.mouseReleaseEvent(&release);
+            QCOMPARE(d.items()[0].bounds.x(),mode==0 ? 73.25 : 73.5);
+            QCOMPARE(d.items()[0].bounds.y(),55.);
+        }
+    }
+    void rulersCreateMoveCancelAndLockGuidesWithoutLaserOutput() {
+        class TestWorkspace : public Workspace {
+          public:
+            using Workspace::mouseMoveEvent;
+            using Workspace::mousePressEvent;
+            using Workspace::mouseReleaseEvent;
+            using Workspace::mouseUngrabEvent;
+        };
+        Document d;
+        d.newProject();
+        TestWorkspace w;
+        w.setWidth(910);
+        w.setHeight(710);
+        w.setDocument(&d);
+        // Scale = 4 pixels/mm; bed origin = (55,55), Y=0 at 655.
+        auto send = [&](QEvent::Type type, QPointF pos) {
+            QMouseEvent e(type, pos, pos, type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton,
+                          type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton,
+                          Qt::NoModifier);
+            if (type == QEvent::MouseButtonPress)
+                w.mousePressEvent(&e);
+            else if (type == QEvent::MouseButtonRelease)
+                w.mouseReleaseEvent(&e);
+            else
+                w.mouseMoveEvent(&e);
+        };
+        const auto code = d.job().gcode();
+        send(QEvent::MouseButtonPress, {300, 40});
+        QVERIFY(w.guideDragging());
+        // Commit uses release position even when no last move event arrives.
+        send(QEvent::MouseButtonRelease, {300, 355});
+        QCOMPARE(d.allGuides().size(), 1);
+        QCOMPARE(d.allGuides()[0].axis, QString("horizontal"));
+        QCOMPARE(d.allGuides()[0].position, 75.);
+        const auto id = d.allGuides()[0].id;
+        const auto before = d.projectBytes();
+        const auto history = d.historyPosition();
+        send(QEvent::MouseButtonPress, {350, 355});
+        send(QEvent::MouseMove, {350, 315});
+        QCOMPARE(d.projectBytes(), before);
+        send(QEvent::MouseButtonRelease, {350, 315});
+        QCOMPARE(d.allGuides()[0].position, 85.);
+        QCOMPARE(d.historyPosition(), history + 1);
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        send(QEvent::MouseButtonPress, {350, 355});
+        send(QEvent::MouseMove, {350, 300});
+        w.cancelGuideDrag();
+        QVERIFY(!w.guideDragging());
+        QCOMPARE(d.projectBytes(), before);
+        QVERIFY(d.setGuideLocked(id, true));
+        send(QEvent::MouseButtonPress, {350, 355});
+        QVERIFY(!w.guideDragging());
+        send(QEvent::MouseButtonRelease, {350, 300});
+        QCOMPARE(d.allGuides()[0].position, 75.);
+        QVERIFY(d.setGuideLocked(id, false));
+        send(QEvent::MouseButtonPress, {350, 355});
+        send(QEvent::MouseButtonRelease, {10, 30});
+        QVERIFY(d.guides().isEmpty());
+        send(QEvent::MouseButtonPress, {30, 300});
+        send(QEvent::MouseButtonRelease, {255, 300});
+        QCOMPARE(d.allGuides()[0].axis, QString("vertical"));
+        QCOMPARE(d.allGuides()[0].position, 50.);
+        const auto vertical = d.projectBytes();
+        send(QEvent::MouseButtonPress, {300, 40});
+        w.mouseUngrabEvent();
+        QCOMPARE(d.projectBytes(), vertical);
+        QCOMPARE(d.job().gcode(), code);
     }
     void editNavigateAndFocus() {
         Document project;

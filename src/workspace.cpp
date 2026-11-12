@@ -16,8 +16,27 @@ void Workspace::setDocument(Document *d) {
         disconnect(m_document, nullptr, this, nullptr);
     m_document = d;
     if (d) {
-        connect(d, &Document::changed, this, [this] { update(); });
+        connect(d, &Document::changed, this, [this] {
+            bool selected = false, draft = m_guideDraft && m_guideDraft->id.isEmpty();
+            for (const auto &g : m_document->allGuides())
+                if (g.page == m_document->activePage()) {
+                    selected |= g.id == m_selectedGuide;
+                    if (m_guideDraft && g.id == m_guideDraft->id && !g.locked)
+                        draft = true;
+                }
+            if (m_guideDraft && (!draft || m_guideDraft->page != m_document->activePage()))
+                cancelGuideDrag();
+            if (!selected && !m_selectedGuide.isEmpty()) {
+                m_selectedGuide.clear();
+                emit selectedGuideChanged();
+            }
+            update();
+        });
         connect(d, &Document::selectionChanged, this, [this] {
+            if (m_document->selected() >= 0 && !m_selectedGuide.isEmpty()) {
+                m_selectedGuide.clear();
+                emit selectedGuideChanged();
+            }
             ensureSelectionVisible();
             update();
         });
@@ -90,6 +109,21 @@ void Workspace::mousePressEvent(QMouseEvent *e) {
     if (!m_document || m_preview)
         return;
     auto pos = toWorld(e->position());
+    const auto o = origin();
+    const auto s = scale();
+    const bool fromTop = QRectF(o.x(), o.y() - 28, 200 * s, 26).contains(e->position());
+    const bool fromLeft = QRectF(o.x() - 40, o.y(), 38, 150 * s).contains(e->position());
+    if (e->button() == Qt::LeftButton && (fromTop || fromLeft)) {
+        m_document->select(-1);
+        m_selectedGuide.clear();
+        m_guideDraft = GuideDraft{{},
+                                  fromTop ? "horizontal" : "vertical",
+                                  fromTop ? pos.y() : pos.x(),
+                                  m_document->activePage()};
+        emit selectedGuideChanged();
+        update();
+        return;
+    }
     if (m_nodes) {
         for (auto node : m_document->nodes()) {
             auto n = node.toMap();
@@ -121,9 +155,34 @@ void Workspace::mousePressEvent(QMouseEvent *e) {
             return;
         }
     }
+    if (m_document->guidesVisible())
+        for (const auto &guide : m_document->allGuides())
+            if (guide.page == m_document->activePage()) {
+                const double distance =
+                    std::abs(guide.position - (guide.axis == "vertical" ? pos.x() : pos.y())) *
+                    scale();
+                if (distance <= 5) {
+                    setSelectedGuideId(guide.id);
+                    if (!guide.locked)
+                        m_guideDraft = GuideDraft{guide.id, guide.axis, guide.position, guide.page};
+                    emit selectedGuideChanged();
+                    update();
+                    return;
+                }
+            }
+    setSelectedGuideId({});
     m_document->select(-1);
 }
 void Workspace::mouseMoveEvent(QMouseEvent *e) {
+    if (m_guideDraft && m_document) {
+        const auto p = toWorld(e->position());
+        m_guideDraft->position = m_guideDraft->axis == "vertical" ? p.x() : p.y();
+        m_guideDraft->position = std::round(m_guideDraft->position / snapStep()) * snapStep();
+        update();
+        return;
+    }
+    m_alignmentX.reset();
+    m_alignmentY.reset();
     if (m_dragNode >= 0 && m_document) {
         auto p = toWorld(e->position());
         m_document->setNode(m_dragNode, p.x(), p.y());
@@ -144,7 +203,12 @@ void Workspace::mouseMoveEvent(QMouseEvent *e) {
                     ys << a.bounds.top() << a.bounds.center().y() << a.bounds.bottom();
                 }
             }
-            auto snap = [&](double value, double extent, const QList<double> &targets) {
+            if (m_document->guidesVisible() && m_document->guideSnapping())
+                for (const auto &g : m_document->allGuides())
+                    if (g.page == m_document->activePage())
+                        (g.axis == "vertical" ? xs : ys).append(g.position);
+            auto snap = [&](double value, double extent, const QList<double> &targets,
+                            std::optional<double> &alignment) {
                 double best = 5 / scale(), result = value;
                 for (double target : targets)
                     for (double anchor : {0., extent / 2, extent}) {
@@ -152,25 +216,54 @@ void Workspace::mouseMoveEvent(QMouseEvent *e) {
                         if (std::abs(delta) < best) {
                             best = std::abs(delta);
                             result = value + delta;
+                            alignment = target;
                         }
                     }
                 return result;
             };
             auto size = m_document->selectionBounds().size();
-            pos.setX(snap(pos.x(), size.width(), xs));
-            pos.setY(snap(pos.y(), size.height(), ys));
+            pos.setX(snap(pos.x(), size.width(), xs, m_alignmentX));
+            pos.setY(snap(pos.y(), size.height(), ys, m_alignmentY));
         }
 
         m_document->moveSelection(pos);
     }
 }
 void Workspace::mouseUngrabEvent() {
+    cancelGuideDrag();
+    m_alignmentX.reset();
+    m_alignmentY.reset();
     if ((m_drag || m_dragNode >= 0) && m_document)
         m_document->finishMove();
     m_dragNode = -1;
     m_drag = m_panning = false;
 }
-void Workspace::mouseReleaseEvent(QMouseEvent *) {
+void Workspace::mouseReleaseEvent(QMouseEvent *event) {
+    if (m_guideDraft && m_document) {
+        auto draft = *m_guideDraft;
+        const auto world = toWorld(event->position());
+        draft.position =
+            std::round((draft.axis == "vertical" ? world.x() : world.y()) / snapStep()) *
+            snapStep();
+        m_guideDraft.reset();
+        emit selectedGuideChanged();
+        const bool outside = !boundingRect().contains(event->position()) ||
+                             event->position().x() < origin().x() - 4 ||
+                             event->position().y() < origin().y() - 4;
+        if (draft.page == m_document->activePage()) {
+            if (outside) {
+                if (!draft.id.isEmpty())
+                    m_document->removeGuide(draft.id);
+            } else if (draft.id.isEmpty())
+                setSelectedGuideId(m_document->addGuide(draft.axis, draft.position));
+            else
+                m_document->setGuidePosition(draft.id, draft.position);
+        }
+        update();
+        return;
+    }
+    m_alignmentX.reset();
+    m_alignmentY.reset();
     if ((m_drag || m_dragNode >= 0) && m_document)
         m_document->finishMove();
     m_dragNode = -1;
@@ -340,6 +433,7 @@ void Workspace::paint(QPainter *p) {
         p->drawText(QRectF(o.x() - 36, py - 7, 25, 14), Qt::AlignRight | Qt::AlignVCenter,
                     QString::number(m_imperial ? qRound(y / 25.4) : qRound(y)));
     }
+    paintGuides(p);
     p->setPen(QPen(QColor("#bc6955"), 2));
     p->drawLine(bed.bottomLeft(), bed.bottomLeft() + QPointF(18, 0));
     p->setPen(QPen(QColor("#378f7b"), 2));
@@ -353,4 +447,67 @@ void Workspace::paint(QPainter *p) {
         p->setBrush(fire ? QColor("#f39d36") : Qt::transparent);
         p->drawEllipse(h, 4, 4);
     }
+}
+
+void Workspace::setSelectedGuideId(const QString &id) {
+    QString next;
+    if (m_document)
+        for (const auto &g : m_document->allGuides())
+            if (g.id == id && g.page == m_document->activePage()) {
+                next = id;
+                break;
+            }
+    if (next == m_selectedGuide)
+        return;
+    m_selectedGuide = next;
+    if (!next.isEmpty())
+        m_document->select(-1);
+    emit selectedGuideChanged();
+    update();
+}
+void Workspace::cancelGuideDrag() {
+    if (!m_guideDraft)
+        return;
+    m_guideDraft.reset();
+    emit selectedGuideChanged();
+    update();
+}
+void Workspace::paintGuides(QPainter *p) {
+    if (!m_document || m_preview)
+        return;
+    p->save();
+    p->setClipRect(boundingRect());
+    const auto o = origin();
+    const auto s = scale();
+    const auto line = [&](const QString &axis, double position, QColor color, Qt::PenStyle style) {
+        p->setPen(QPen(color, 1, style));
+        if (axis == "vertical") {
+            const double x = o.x() + position * s;
+            p->drawLine(QPointF(x, 0), QPointF(x, height() - 45));
+        } else {
+            const double y = o.y() + (150 - position) * s;
+            p->drawLine(QPointF(0, y), QPointF(width(), y));
+        }
+    };
+    if (m_document->guidesVisible())
+        for (const auto &g : m_document->allGuides())
+            if (g.page == m_document->activePage() && (!m_guideDraft || g.id != m_guideDraft->id))
+                line(g.axis, g.position,
+                     g.id == m_selectedGuide ? QColor("#c98720") : QColor("#548fae"),
+                     g.locked ? Qt::DotLine : Qt::DashLine);
+    if (m_guideDraft) {
+        line(m_guideDraft->axis, m_guideDraft->position, QColor("#dc9b38"), Qt::DashLine);
+        const auto label = QString::number(m_guideDraft->position / (m_imperial ? 25.4 : 1), 'f',
+                                           m_imperial ? 4 : 2) +
+                           (m_imperial ? " in" : " mm");
+        p->setPen(m_dark ? Qt::white : Qt::black);
+        p->drawText(QRectF(45, 8, 200, 24), label);
+    }
+    if (m_drag) {
+        if (m_alignmentX)
+            line("vertical", *m_alignmentX, QColor("#be6b9c"), Qt::DashDotLine);
+        if (m_alignmentY)
+            line("horizontal", *m_alignmentY, QColor("#be6b9c"), Qt::DashDotLine);
+    }
+    p->restore();
 }
