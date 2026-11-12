@@ -117,6 +117,10 @@ class WorkflowTest : public QObject {
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
+        auto *startupSafety = window->findChild<QObject *>("startupSafetyDialog");
+        QVERIFY(startupSafety);
+        QTRY_VERIFY(startupSafety->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(startupSafety, "accept"));
         window->setProperty("basic", false);
         if (compactDark) {
             window->resize(1180, 760);
@@ -193,6 +197,10 @@ class WorkflowTest : public QObject {
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
+        auto *startupSafety = window->findChild<QObject *>("startupSafetyDialog");
+        QVERIFY(startupSafety);
+        QTRY_VERIFY(startupSafety->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(startupSafety, "accept"));
         if (compactDark) {
             window->resize(1180, 760);
             window->setProperty("night", true);

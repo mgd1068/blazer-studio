@@ -33,6 +33,8 @@ Die vollständige Liste liegt beim Kandidaten als `SHA256SUMS`. Diese Summen bez
 
 ## Offene Freigaben
 
+**Später gefundene Verbindungslücke:** Eine zusätzliche PTY-Prüfung nach dem Einfrieren zeigt, dass direkte Zerstörung einer aktiven Sitzung bislang nur den Anschluss schließt, ohne die explizite Hold-/Reset-Schließlogik aufzurufen. Normales Fensterschließen ruft bereits Stop auf; das deckt direkte Objektzerstörung nicht ab. Die Korrektur ist in beta.5-dev umgesetzt und gehört nicht zu diesem unveränderten Paket. Vor einer öffentlichen Gerätebeta ist ein neuer Kandidat mit dieser Korrektur und eigenen Auslieferungsnachweisen erforderlich.
+
 Beaufsichtigte aktuelle Geräte-/USB-/KVM-/Schutzkontaktfälle, vollständiger Schnitt, Relief, unabhängige Maß-/Qualitätsabnahme und der beobachtete Einsteigerlauf U01 sind offen. Offscreen-Softwaredarstellung ersetzt keinen tatsächlichen Wayland-/X11-/Monitorbetrieb oder native Dateiauswahl. Frühere Kraftpapierversuche ersetzen diese Abnahmen nicht.
 
 Der volle [Funktionskatalog](../FUNCTION_ACCEPTANCE.md) und die [Mehrgeräteentwicklung](../MULTI_DEVICE_PLAN.md) bleiben Arbeitsumfang für die Produktionsreife. [Produktionsplan](../PRODUCTION_READINESS.md), [Testprotokoll](TEST_PROTOCOL.md), [Geräte-/Materialbefunde](../HARDWARE_ACCEPTANCE.md). Keine Geräteaktion, kein Merge und keine Veröffentlichung durch diesen Paketnachweis.

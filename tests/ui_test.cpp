@@ -39,6 +39,78 @@ class UiTest : public QObject {
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
     }
+    void startupSafetyIsBilingualAndReturnsEveryLaunch_data() {
+        QTest::addColumn<bool>("completed");
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("new-light") << false << false;
+        QTest::newRow("returning-light") << true << false;
+        QTest::newRow("new-compact-dark") << false << true;
+        QTest::newRow("returning-compact-dark") << true << true;
+    }
+    void startupSafetyIsBilingualAndReturnsEveryLaunch() {
+        QFETCH(bool, completed);
+        QFETCH(bool, dark);
+        QTemporaryDir storage;
+        Document project;
+        UiMachine machine;
+        MaterialLibrary library(storage.filePath("materials.json"));
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        Registration registration;
+        if (completed) QVERIFY(services.finishOnboarding());
+        const auto original = project.projectBytes();
+        for (int launch = 0; launch < 2; ++launch) {
+            QQmlApplicationEngine engine;
+            auto *context = engine.rootContext();
+            context->setContextProperty("project", &project);
+            context->setContextProperty("machine", &machine);
+            context->setContextProperty("appServices", &services);
+            context->setContextProperty("materialLibrary", &library);
+            context->setContextProperty("cameraRegistration", &registration);
+            engine.load(QUrl::fromLocalFile(QStringLiteral(BLAZER_SOURCE_DIR "/qml/Main.qml")));
+            QVERIFY(!engine.rootObjects().isEmpty());
+            auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+            QVERIFY(window);
+            if (dark) { window->resize(1180, 760); window->setProperty("night", true); }
+            auto *warning = window->findChild<QObject *>("startupSafetyDialog");
+            QVERIFY(warning);
+            QTRY_VERIFY(warning->property("visible").toBool());
+            QVERIFY(warning->property("modal").toBool());
+            QVERIFY(!window->findChild<QObject *>("onboardingDialog")->property("visible").toBool());
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+            window->requestActivate();
+            QVERIFY(QTest::qWaitForWindowActive(window));
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTest::mouseClick(window, Qt::LeftButton, {}, QPoint(5, 200));
+            QVERIFY(warning->property("visible").toBool());
+            auto *german = window->findChild<QQuickItem *>("startupSafetyGerman");
+            auto *english = window->findChild<QQuickItem *>("startupSafetyEnglish");
+            QVERIFY(german); QVERIFY(english);
+            QVERIFY(german->property("text").toString().contains("hängenden Controller"));
+            QVERIFY(german->property("text").toString().contains("kein Laser-Aus garantieren"));
+            QVERIFY(english->property("text").toString().contains("frozen controller"));
+            QVERIFY(english->property("text").toString().contains("cannot guarantee"));
+            QTest::qWait(80);
+            for (auto *text : {german, english}) {
+                QVERIFY(text->height() >= text->property("contentHeight").toDouble());
+                QVERIFY(text->width() + 1 >= text->property("contentWidth").toDouble());
+            }
+            QVERIFY(warning->property("height").toDouble() < window->height());
+            if (launch == 0 && qEnvironmentVariableIsSet("BLAZER_SAFETY_SCREENSHOT_DIR")) {
+                const auto dir = qEnvironmentVariable("BLAZER_SAFETY_SCREENSHOT_DIR");
+                QVERIFY(QDir().mkpath(dir));
+                QVERIFY(window->grabWindow().save(dir + (dark ? "/safety-dark.png" : "/safety-light.png")));
+            }
+            auto *button = window->findChild<QQuickItem *>("acknowledgeStartupSafety");
+            QVERIFY(button);
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                             button->mapToScene(QPointF(button->width()/2, button->height()/2)).toPoint());
+            QTRY_VERIFY(!warning->property("visible").toBool());
+            if (!completed)
+                QTRY_VERIFY(window->findChild<QObject *>("onboardingDialog")->property("visible").toBool());
+            QCOMPARE(project.projectBytes(), original);
+            QCOMPARE(services.firstRun(), !completed);
+        }
+    }
     void lengthFieldsConvertSuffixesAndPreserveUneditedPrecision() {
         QTemporaryDir storage;
         Document project;
@@ -258,6 +330,10 @@ class UiTest : public QObject {
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(w);
+        auto *startupSafety = w->findChild<QObject *>("startupSafetyDialog");
+        QVERIFY(startupSafety);
+        QTRY_VERIFY(startupSafety->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(startupSafety, "accept"));
         QCOMPARE(w->property("basic").toBool(), true);
         auto originalBytes = project.projectBytes();
         auto *intro = w->findChild<QObject *>("onboardingDialog");
@@ -953,6 +1029,12 @@ class UiTest : public QObject {
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
+        auto *startupSafety = window->findChild<QObject *>("startupSafetyDialog");
+        QVERIFY(startupSafety);
+        QTRY_VERIFY(startupSafety->property("visible").toBool());
+        QVERIFY(!window->findChild<QObject *>("recoveryDialog")->property("visible").toBool());
+        QVERIFY(recovery.pendingDecision());
+        QVERIFY(QMetaObject::invokeMethod(startupSafety, "accept"));
         auto *dialog = window->findChild<QObject *>("recoveryDialog");
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("visible").toBool());

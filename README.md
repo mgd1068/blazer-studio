@@ -14,7 +14,7 @@ Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX
 
 ## Testkandidat installieren
 
-[Installation und erster Auftrag](docs/beta/START.md) · [Bekannte Grenzen](docs/beta/KNOWN_LIMITATIONS.md) · [Testprotokoll](docs/beta/TEST_PROTOCOL.md) · [Paketbau und Prüfung](docs/beta/RELEASE_BUILD.md). Downloadpakete werden vor Geräteabnahme als Kandidaten geführt.
+[Installation und erster Auftrag](docs/beta/START.md) · [Bekannte Grenzen](docs/beta/KNOWN_LIMITATIONS.md) · [Testprotokoll](docs/beta/TEST_PROTOCOL.md) · [Paketbau und Prüfung](docs/beta/RELEASE_BUILD.md). Downloadpakete werden vor Geräteabnahme als Kandidaten geführt. Eine nachträglich gefundene Verbindungslücke bei direkter Objektzerstörung ist in beta.5-dev behoben; vor öffentlicher Gerätebeta ist ein neuer geprüfter Kandidat nötig, siehe [beta.4-Bericht](docs/beta/CANDIDATE_BETA4.md).
 
 ## Aus dem Quellcode starten
 

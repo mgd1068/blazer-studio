@@ -11,6 +11,7 @@ class GrblSession : public ControllerSession {
   public:
     explicit GrblSession(QObject *parent = nullptr,
                          DeviceProfile profile = DeviceProfile::m3Reference());
+    ~GrblSession() override;
     bool open(const QString &port) override;
     ControllerStatus status() const override {
         return {connected(), ready(),  busy(),   executing(), paused,

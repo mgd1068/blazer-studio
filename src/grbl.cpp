@@ -3,6 +3,7 @@
 #include <QMap>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
+#include <QSignalBlocker>
 #include <cmath>
 namespace {
 QString n(double v) {
@@ -39,6 +40,14 @@ GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
     connect(&timeout, &QTimer::timeout, this,
             [this] { fail("GRBL antwortet nicht rechtzeitig; Übertragung abgebrochen."); });
     connect(&focusTimer, &QTimer::timeout, this, [this] { focus(false); });
+}
+GrblSession::~GrblSession() {
+    if (connected()) {
+        // Use the same best-effort shutdown as explicit disconnect, while serial
+        // and timers still exist. Consumers must not re-enter a dying session.
+        const QSignalBlocker notifications(this);
+        close();
+    }
 }
 void GrblSession::append(const QString &s) {
     log.prepend(s);

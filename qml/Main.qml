@@ -42,7 +42,7 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
+    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
@@ -322,7 +322,50 @@ ApplicationWindow {
             ActionButton { objectName: "keepRecovery"; text: "Beenden und behalten"; dark: win.night; hint: "Beendet das Programm. Die Sicherung bleibt für den nächsten Start erhalten."; onClicked: win.close() }
         }
     }
-    Component.onCompleted: { win.refreshFraming(); saveDialog=saveDialogFactory.createObject(win); if(typeof recovery!=="undefined" && recovery.available)recoveryDialog.open(); else win.offerFirstRun() }
+    function continueStartup() {
+        if(typeof recovery!=="undefined" && recovery.available)recoveryDialog.open()
+        else win.offerFirstRun()
+    }
+    Dialog {
+        id: startupSafety
+        objectName: "startupSafetyDialog"
+        title: "Sicherheit / Safety"
+        anchors.centerIn: parent
+        width: Math.min(parent.width-48,700)
+        modal: true; focus: true
+        closePolicy: Popup.NoAutoClose
+        background: Rectangle { radius: 9; color: win.panel; border.color: "#b87529"; border.width: 2 }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Text { text: "Laser niemals unbeaufsichtigt betreiben!"; color: win.ink; font.bold: true; font.pixelSize: 20; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Text {
+                objectName: "startupSafetyGerman"
+                text: "Bei einem Verbindungsabbruch oder einem hängenden Controller kann der Laser eingeschaltet bleiben. Die Software kann dann kein Laser-Aus garantieren. Bleibe während der gesamten Bearbeitung am Gerät und halte dich bereit, die Stromversorgung direkt am Gerät zu unterbrechen."
+                color: win.ink; font.pixelSize: 15; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+            Text { text: "Never operate the laser unattended!"; color: win.ink; font.bold: true; font.pixelSize: 20; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Text {
+                objectName: "startupSafetyEnglish"
+                text: "A lost connection or a frozen controller can leave the laser on. The software cannot guarantee that the laser will switch off. Stay with the machine throughout the entire job and be ready to cut power directly at the machine."
+                color: win.ink; font.pixelSize: 15; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+        }
+        footer: Item {
+            implicitHeight: 64
+            RowLayout {
+                anchors.fill: parent; anchors.margins: 12
+                Item { Layout.fillWidth: true }
+                ActionButton { objectName: "acknowledgeStartupSafety"; text: "Verstanden / I understand"; primary: true; dark: win.night; hint: "Bestätigt den Hinweis für diesen Programmstart. / Acknowledges this notice for this launch."; onClicked: startupSafety.accept() }
+            }
+        }
+        onAccepted: win.continueStartup()
+    }
+    Component.onCompleted: {
+        win.refreshFraming(); saveDialog=saveDialogFactory.createObject(win)
+        // These offline CLI modes cannot access hardware and have no interactive startup.
+        if(Qt.application.arguments.some(arg=>["--screenshot","--export-gcode","--self-test"].indexOf(arg)>=0))win.continueStartup()
+        else startupSafety.open()
+    }
     Dialog {
         id: materialTestDialog
         objectName: "materialTestDialog"

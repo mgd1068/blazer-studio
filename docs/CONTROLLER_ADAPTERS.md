@@ -48,6 +48,8 @@ Einzel-, Materialtest- und CSV-GCode-Export prüfen den vollständigen Ausgabepu
 
 `ControllerSessions::create()` registriert bislang ausschließlich `grbl-serial` über `serial` mit bekanntem validiertem Projektparameterschema. Die Erzeugung öffnet oder durchsucht keine Anschlüsse. Unbekannte Kennungen, andere Transporte und ungültige Parameter erhalten keinen Ersatztreiber. Die getrennte Endpunktabfrage liefert für solche Profile keine Anschlüsse. Offline-Aufrufe unterbinden auch diese Abfrage weiterhin in `Machine`.
 
+Beim Zerstören einer noch offenen GRBL-Sitzung wird vor dem Abbau ihrer seriellen Ressourcen dieselbe Schließlogik wie beim expliziten Trennen ausgeführt: im Leerlauf M5 S0, bei aktivem Auftrag, Pause oder Fokus Feed Hold/Soft-Reset. Dabei werden Änderungsbenachrichtigungen der sterbenden Sitzung unterdrückt. Bereits getrennte Sitzungen senden nichts erneut. Dies ist ein bestmöglicher Sendeversuch; insbesondere nach Kommunikationsverlust ist damit kein physisch bestätigter Laser-Aus-Zustand bewiesen.
+
 Der konkrete GRBL-Adapter behält Handshake, Statusabfragen, Einheiten-/Leistungs-/Arbeitsraumprüfung, G54-Grenzen, gebundene Ausgabe, Fehlerbehandlung und keine automatische Fortsetzung. Die bestehende M3-Laufzeitgrenze gilt weiterhin vor einer echten Verbindung. Ein gemeinsamer Methodensatz liefert keine Fähigkeiten, die das jeweilige Profil und sein Adapter nicht unterstützen.
 
 ## Weitere Arbeit in MD3

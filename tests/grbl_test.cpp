@@ -163,6 +163,76 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void destroyingSessionClosesItsController_data() {
+        QTest::addColumn<QString>("mode");
+        for (const auto &mode : {"idle", "job", "paused", "focus", "unplugged", "closed"})
+            QTest::newRow(mode) << QString(mode);
+    }
+    void destroyingSessionClosesItsController() {
+        QFETCH(QString, mode);
+        Controller controller;
+        QString error;
+        auto session = ControllerSessions::create(DeviceProfile::m3Reference(), error);
+        QVERIFY2(session, qPrintable(error));
+        QVERIFY(session->open(controller.port));
+        QTRY_VERIFY(session->status().ready);
+        if (mode == "job" || mode == "paused") {
+            Document document;
+            document.newProject();
+            document.addShape("rect");
+            controller.status = "Run";
+            session->start(document.job());
+            QTRY_VERIFY(controller.commands.contains("M4 S800"));
+            QVERIFY(session->status().executing);
+            if (mode == "paused") {
+                session->pause();
+                QVERIFY(session->status().paused);
+            }
+        } else if (mode == "focus") {
+            session->focus(true);
+            QVERIFY(session->status().firing);
+        } else if (mode == "unplugged") {
+            controller.disconnectPort();
+            QTRY_VERIFY(!session->status().connected);
+        } else if (mode == "closed") {
+            session->close();
+            QTRY_VERIFY(controller.commands.count("M5 S0") >= 2);
+        }
+        const auto resetCount = controller.realtime.count(char(0x18));
+        const auto offCount = controller.commands.count("M5 S0");
+        QSignalSpy changes(session.get(), &ControllerSession::changed);
+        const auto beforeDestruction = changes.count();
+        session.reset();
+        if (mode == "job" || mode == "paused" || mode == "focus")
+            QTRY_COMPARE_WITH_TIMEOUT(controller.realtime.count(char(0x18)), resetCount + 1, 1000);
+        else if (mode == "idle")
+            QTRY_COMPARE_WITH_TIMEOUT(controller.commands.count("M5 S0"), offCount + 1, 1000);
+        else if (mode == "closed") {
+            QTest::qWait(20);
+            QCOMPARE(controller.commands.count("M5 S0"), offCount);
+            QCOMPARE(controller.realtime.count(char(0x18)), resetCount);
+        }
+        // Destruction must not notify consumers through a partially destroyed session.
+        QCOMPARE(changes.count(), beforeDestruction);
+    }
+    void destroyingMachineStopsItsController() {
+        Controller controller;
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        auto machine = std::make_unique<Machine>(&document);
+        QVERIFY(machine->connectHardware(controller.port));
+        QTRY_VERIFY(machine->ready());
+        controller.status = "Run";
+        machine->start();
+        QTRY_VERIFY(controller.commands.contains("M4 S800"));
+        QVERIFY(machine->running());
+        QSignalSpy changes(machine.get(), &Simulator::changed);
+        const auto resetCount = controller.realtime.count(char(0x18));
+        machine.reset();
+        QTRY_COMPARE_WITH_TIMEOUT(controller.realtime.count(char(0x18)), resetCount + 1, 1000);
+        QCOMPARE(changes.count(), 0);
+    }
     void sessionRegistryRejectsUnknownAndMalformedProfiles() {
         QString error;
         const auto reference = DeviceProfile::m3Reference();
