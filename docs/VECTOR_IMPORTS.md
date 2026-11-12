@@ -1,9 +1,9 @@
-# Vektorimporte: HPGL/PLT und GCode
+# Geometrieimporte: HPGL/PLT, GCode und native Projekte
 
 Diese Importe gehören zur Entwicklung **0.9.0-beta.4-dev**. Sie sind noch nicht
 Bestandteil des unveränderten [beta.3-Pakets](beta/CANDIDATE_BETA3.md).
 Die gesamte Familie F04 bleibt in der [Funktionsabnahme](FUNCTION_ACCEPTANCE.md)
-offen; der folgende Umfang ist eine begrenzte HPGL-Geometrieübernahme.
+offen; die folgenden Abschnitte beschreiben begrenzte Geometrieübernahmen.
 
 Unter **Grafik, GCode oder Modell importieren** können `.hpgl` und `.plt` eingelesen
 werden. Es entstehen editierbare Pfade auf dem aktiven Arbeitsblatt. Der Import
@@ -100,7 +100,8 @@ damit eine nachträgliche Normalisierung fehlerhafte Abstände nicht verdeckt.
 Skalierte Joblänge, Projekt-/Undo-Rundlauf und unveränderte Stiftposition über
 2000 Folgen von Bezugspunkt-/Skalierungswechseln sind zusätzlich geprüft.
 
-Native RDWorks-/SignCut-/MillMage-Formate sind damit noch nicht geliefert.
+Native RDWorks-/SignCut-Formate sind damit noch nicht geliefert. Der begrenzte
+MillMage-Import ist unten beschrieben.
 Weitere HPGL-Befehle und ein breiterer Korpus realer Ausgabedateien bleiben
 Teil von F04. Generischer SVG-Austausch ersetzt diese Abnahme nicht.
 
@@ -192,3 +193,66 @@ erzeugten GCode identisch. Der Korpus umfasst zusätzlich einen vorhandenen
 Rayforge-Prüfexport mit 39030 Zeilen und 7601 getrennten Zeichenwegen.
 Das ist keine Abnahme sämtlicher CNC-/Laserdialekte oder der übrigen
 noch offenen F04-Formate.
+
+
+## MillMage und gemeinsamer LightBurn-Leser
+
+Ab beta.4-dev liest **Motiv laden** `.mage` mit `MillMageProject`, FormatVersion 1.
+Der gemeinsame begrenzte Leser verarbeitet auch `.lbrn`/`.lbrn2` mit
+`LightBurnProject`. Das ist ein Grafikimport auf das aktive Blatt, keine
+Projektmigration: bestehender Projektname, Notizen, Dateipfad, Material und
+Bearbeitungsparameter bleiben erhalten. Basic verwendet das ausgewählte eigene
+Materialprofil. Erfolgreiches Einfügen ist ein Undo-Schritt.
+
+Unterstützt sind Rechtecke mit optionalem Eckenradius, Ellipsen, Linien-/kubische
+Bézierpfade, Gruppen und gespeicherte Textkonturen. Lokale affine Transformationen
+werden über die Gruppen hinweg kombiniert; Grafik-Layer liefern die Sichtbarkeit,
+keine Fräs-/Laseroperationen. Getrennte Pfadkonturen bleiben getrennt. Vollständige
+Kontrollpunktpaare sind absolute Koordinaten; die native Kurzform `c0x1`/`c1x1`
+ohne Y bezeichnet einen deaktivierten Griff. Andere unvollständige Griffe werden
+abgewiesen. MillMage-Text ohne gespeicherte Konturen wird abgewiesen. Der bisherige
+LightBurn-Ersatz über installierte Systemschriften bleibt erhalten und kann vom
+Original abweichen.
+
+**Eingebettete Bilder:** PNG-Daten werden mit physischer Breite/Höhe und ihrer
+Transformation übernommen. Die native Bildzeilenrichtung wird in die gewöhnliche
+Bildausrichtung umgerechnet. Drehung, Spiegelung und Scherung werden in ein neues
+Raster mit transparenten Außenflächen gebacken. Wie andere Blazer-Bilder werden
+sie in Graustufen verarbeitet; das ist keine farbtreue Archivierung. Nichtneutrale
+Gamma-/Kontrast-/Helligkeits-/Schärfekorrekturen, Beschnittoptionen und unbekannte
+Bildattribute brechen den Import ab. Externe Bildpfade werden niemals gelesen;
+ohne gültiges eingebettetes PNG schlägt der gesamte Import fehl. Bilder benötigen
+eine vorhandene Gravuroperation im Zielprojekt.
+
+**Ursprung und Einstellungen:** Rohe Projektkoordinaten bleiben erhalten; große
+CNC-Zeichnungen können außerhalb des Laserbetts liegen und müssen bewusst angepasst
+werden. MillMage-Projekte mit gesetztem `MirrorX`/`MirrorY` werden bis zur weiteren
+Formatabnahme abgewiesen. Für ältere LightBurn-Importe bleibt das bisherige
+Verhalten erhalten: Ursprung und diese Spiegelungsflags werden nicht übernommen,
+worauf die Importmeldung ausdrücklich hinweist. Fräsoperationen, Spindeldrehzahl,
+Vorschub, Laserleistung, Geräte-/Materialdaten und Quellnotizen werden nicht kopiert.
+
+**Grenzen:** 16 MiB Eingabe, XML-Tiefe 64, 100000 XML-Knoten, 2000 Formen/Gruppen
+und 100000 Pfadpunkte beziehungsweise Pfadelemente. Die bestehenden Projektgrenzen
+für Koordinaten und kombinierte Objektkapazität gelten zusätzlich. PNG und daraus
+transformiertes Raster bleiben jeweils bei höchstens 4096 Pixeln pro Seite und
+16 MiPixel; das kombinierte Projekt bleibt bei 32 MiPixel und 40 MiB eingebetteten
+Daten. DTD, unbekannte Formtypen, unvollständige Pfade und mehrdeutige Strukturen
+werden vollständig abgewiesen. Vor dem Einfügen wird der vorgeschlagene gesamte
+Projektzustand validiert; ein Fehler verändert weder Modell noch Undo-Verlauf.
+
+**Prüfung:** Eigene synthetische Testdateien prüfen Gruppen, Scherung, Sichtbarkeit,
+Griffkodierungen, Bildausrichtung/-spiegelung/-drehung, Alpha, unveränderte
+Zielparameter, Speichern/Wiederherstellen, Undo/Redo und atomare Ressourcenfehler.
+Der echte QML-Dateidialog-Handler ist ebenfalls abgedeckt. Zwei vom Autor im
+[MillMage-Herstellerforum bereitgestellte Projekte](https://forum.lightburnsoftware.com/t/error-in-routing/189148)
+mit AppVersion 0.8.01 lieferten jeweils vier Objekte, darunter ein eingebettetes
+1000×500-PNG und einen Pfad mit 408 Elementen. Die Originalausdehnung von etwa
+605×698,5 mm liegt außerhalb des M3-Betts; nur eine ausdrücklich verkleinerte
+Prüfkopie wurde auf gültige GCode-Erzeugung und identischen Projektrundlauf geprüft.
+Die fremden Grafiken bleiben außerhalb des Repositorys. Diese Stichprobe belegt
+keine allgemeine Kompatibilität mit allen MillMage-Versionen.
+
+Die [offizielle MillMage-Dateidokumentation](https://docs.millmagesoftware.com/latest/Reference/FileManagement/)
+beschreibt Grafikimport getrennt von CNC-Operationen. RDWorks, SignCut, weitere
+MillMage-Varianten und der breitere F04-Korpus bleiben offen.

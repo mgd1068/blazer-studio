@@ -814,8 +814,11 @@ bool Document::importSvg(const QUrl &url) {
     return true;
 }
 QByteArray Document::serialize() const {
+    return serialize(snapshot());
+}
+QByteArray Document::serialize(const Snapshot &state) const {
     QJsonArray objects;
-    for (const auto &a : m_items)
+    for (const auto &a : state.items)
         objects.append(QJsonObject{
             {"id", a.id},
             {"name", a.name},
@@ -850,15 +853,15 @@ QByteArray Document::serialize() const {
                                      {"version", 8},
                                      {"units", "mm"},
                                      {"origin", "bottom-left"},
-                                     {"pages", QJsonArray::fromStringList(m_pages)},
-                                     {"activePage", m_activePage},
-                                     {"title", m_title},
-                                     {"notes", m_notes},
-                                     {"selected", m_selected},
-                                     {"selectedRows", QJsonArray::fromVariantList(selectedRows())},
+                                     {"pages", QJsonArray::fromStringList(state.pages)},
+                                     {"activePage", state.activePage},
+                                     {"title", state.title},
+                                     {"notes", state.notes},
+                                     {"selected", state.selected},
+                                     {"selectedRows", [&state] {QJsonArray rows;for(int row:state.selection)rows.append(row);return rows;}()},
                                      {"objects", objects},
-                                     {"layers", QJsonArray::fromVariantList(m_layers)},
-                                     {"material", QJsonObject::fromVariantMap(m_material)}})
+                                     {"layers", QJsonArray::fromVariantList(state.layers)},
+                                     {"material", QJsonObject::fromVariantMap(state.material)}})
         .toJson();
 }
 std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const {

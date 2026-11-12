@@ -758,6 +758,27 @@ class WorkflowTest : public QObject {
         QVERIFY(!machine.paused());
         QVERIFY(screenshot("gcode-import"));
         project.newProject();
+        QVERIFY(project.applyBasicMaterial(sourceProfile));
+        const auto magePath=storage.filePath("geometry.mage");
+        QFile mage(magePath);
+        QVERIFY(mage.open(QIODevice::WriteOnly));
+        mage.write("<MillMageProject FormatVersion=\"1\"><Shape Type=\"Rect\" W=\"10\" H=\"5\">"
+                   "<XForm>1 0 0 1 20 20</XForm></Shape>"
+                   "<Operation><Feed Value=\"33333\"/><Spindle Value=\"25000\"/></Operation></MillMageProject>");
+        mage.close();
+        QVERIFY(click(window,item("importMotifButton")));
+        QTRY_VERIFY(importPicker->property("visible").toBool());
+        QVERIFY(importPicker->property("nameFilters").toStringList().join(' ').contains("*.mage"));
+        QVERIFY(chooseFile("importMotifDialog",magePath));
+        QTRY_COMPARE(project.count(),1);
+        QCOMPARE(project.items()[0].bounds,QRectF(15,17.5,10,5));
+        QCOMPARE(project.material()["id"].toString(),sourceProfile["id"].toString());
+        QCOMPARE(project.layers()[0].toMap()["power"].toDouble(),100.);
+        QCOMPARE(project.layers()[0].toMap()["speed"].toDouble(),5000.);
+        QVERIFY(project.message().contains("MillMage"));
+        QVERIFY(!machine.running());
+        QVERIFY(screenshot("millmage-import"));
+        project.newProject();
         QVERIFY(machine.simulation());
         QVERIFY(!machine.log().join('\n').contains("Baud geöffnet"));
         QVERIFY(window->close());

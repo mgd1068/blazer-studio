@@ -246,7 +246,7 @@ ScrollView {
                 ActionButton { text: "Datei importieren"; dark: tools.dark; onClicked: tools.importRequested() }
                 ActionButton { text: "SVG exportieren"; dark: tools.dark; onClicked: tools.exportRequested() }
             }
-            Text { text: "DXF (ASCII), SVG, HPGL/PLT-Grundpfade, GCode-Geometrie, PDF/AI über Inkscape, Rasterbilder, STL/OBJ und unterstützte LightBurn-Grundformen. Nicht unterstützte Inhalte werden gemeldet."; wrapMode: Text.WordWrap; Layout.fillWidth: true; color: tools.muted; font.pixelSize: 10 }
+            Text { text: "DXF (ASCII), SVG, HPGL/PLT-Grundpfade, GCode-Geometrie, PDF/AI über Inkscape, Rasterbilder, STL/OBJ und unterstützte LightBurn-/MillMage-Grundformen und eingebettete PNG-Bilder. Nicht unterstützte Inhalte werden gemeldet."; wrapMode: Text.WordWrap; Layout.fillWidth: true; color: tools.muted; font.pixelSize: 10 }
             SectionLabel { text: "REFERENZFOTO / 4-PUNKT-REGISTRIERUNG"; dark: tools.dark }
             ActionButton { text: "Foto laden"; dark: tools.dark; enabled: typeof cameraRegistration!=="undefined"; onClicked: {tools.nextCorner=0;tools.cameraRequested()} }
             Text { text: "Pixelkoordinaten der vier Arbeitsraum-Ecken: links oben, rechts oben, rechts unten, links unten. Das Foto muss die reale 200 × 150-mm-Fläche zeigen. Keine automatische Kameraaufnahme oder Linsenentzerrung."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 10 }

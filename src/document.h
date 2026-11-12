@@ -178,6 +178,7 @@ class Document : public QAbstractListModel {
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
     void applySnapshot(const Snapshot &state);
     QByteArray serialize() const;
+    QByteArray serialize(const Snapshot &state) const;
     std::optional<Snapshot> parse(const QByteArray &json) const;
     void checkpoint(const QString &label = QStringLiteral("Bearbeitung"));
     void clearHistory();

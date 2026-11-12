@@ -19,6 +19,7 @@ option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp
+    src/nativedesign.cpp src/nativedesign.h
     src/applicationservices.cpp src/applicationservices.h
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
     src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imagelimits.h src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
@@ -81,6 +82,9 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-expansion-tests tests/expansion_test.cpp)
     target_link_libraries(blazer-expansion-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME expansion COMMAND blazer-expansion-tests -platform offscreen)
+    qt_add_executable(blazer-nativeimport-tests tests/nativeimport_test.cpp)
+    target_link_libraries(blazer-nativeimport-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME nativeimport COMMAND blazer-nativeimport-tests -platform offscreen)
     qt_add_executable(blazer-relief-tests tests/relief_test.cpp)
     target_link_libraries(blazer-relief-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME relief COMMAND blazer-relief-tests -platform offscreen)
@@ -97,7 +101,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-workflow-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-workflow-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME workflow COMMAND blazer-workflow-tests -platform offscreen)
-    set_tests_properties(release stability core ui workflow job grbl relief expansion raster PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    set_tests_properties(release stability core ui workflow job grbl relief expansion nativeimport raster PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)
