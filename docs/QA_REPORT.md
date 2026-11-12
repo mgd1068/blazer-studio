@@ -211,3 +211,8 @@ Das Paket und der Download führen Dokumentation, Abbildungen und Lizenzen mit g
 ## Produktionsreife T08 Skalierung als Softwarefall
 
 Der vollständige Workflow lief zusätzlich mit `QT_SCALE_FACTOR=2` bei kompakter dunkler Ansicht und mit `QT_SCALE_FACTOR=1.5` bei heller Ansicht durch, einschließlich Dateihandlersignalen, fokussierter Dezimalkomma-Eingabe, Vorschau, Simulatorlauf und Projektrundlauf. Beide Fälle bestanden; die kompakte dunkle Editoraufnahme wurde visuell geprüft. Dies prüft Qt-Skalierung mit Offscreen-/Software-Backend. Native Dateiauswahl, reale Wayland-/X11-Sitzung, Monitorwechsel und beobachtete externe Einsteiger bleiben offen.
+
+
+## Kandidatenabnahme beta.2
+
+Der genaue Paketstand `18ce2e67e691d1d6f117132f22d4479e9243ec4d` bestand den sauberen Docker-Bau und die frische Laufzeitprüfung mit vorheriger beta.1-Installation, Upgrade, Manifestabgleich, Nicht-root-Start, Neuinstallation/Entfernung und Erhalt von Benutzerdaten. Alle 145 Quelldateien im Archiv sind bytegleich zum genannten Commit. 104 Dokumentationsverweise und alle Downloadprüfsummen bestanden. Beide GitHub-Pipelines für den Arbeitszweig sowie den PR sind grün. Details, Prüfsummen, Nachweise und verbleibende Freigaben stehen im [Kandidatenprotokoll](beta/CANDIDATE_BETA2.md). Keine Geräteaktion während der Nacht; keine 1.0-Freigabe.
