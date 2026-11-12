@@ -255,6 +255,256 @@ class ExpansionTest : public QObject {
         QVERIFY(QFile::exists(temp.filePath("jobs/job-0002.gcode")));
         QVERIFY(!d.batch(csv, QUrl::fromLocalFile(temp.filePath("jobs")), ""));
     }
+    void deletingPageKeepsUnrelatedOutput_data() {
+        QTest::addColumn<int>("active");
+        QTest::addColumn<int>("removed");
+        QTest::addColumn<int>("expected");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("after-active") << 0 << 2 << 0 << QString("A");
+        QTest::newRow("before-active") << 2 << 0 << 1 << QString("C");
+        QTest::newRow("immediately-before-active") << 1 << 0 << 0 << QString("B");
+        QTest::newRow("immediately-after-active") << 0 << 1 << 0 << QString("A");
+        QTest::newRow("active-middle") << 1 << 1 << 1 << QString("C");
+        QTest::newRow("active-last") << 2 << 2 << 1 << QString("B");
+    }
+    void deletingPageKeepsUnrelatedOutput() {
+        QFETCH(int, active);
+        QFETCH(int, removed);
+        QFETCH(int, expected);
+        QFETCH(QString, name);
+        Document d;
+        d.newProject();
+        QVERIFY(d.renamePage(0, "A"));
+        for (int i = 0; i < 3; ++i) {
+            if (i)
+                QVERIFY(d.addPage(i == 1 ? "B" : "C"));
+            d.addShape("rect");
+            d.setProperty("width", 10. * (i + 1));
+        }
+        d.activatePage(active);
+        QVERIFY(d.save(QUrl::fromLocalFile(temp.filePath("page-delete.blazer"))));
+        const auto before = d.projectBytes();
+        const auto gcode = d.job().gcode();
+        QVERIFY(d.removePage(removed));
+        QCOMPARE(d.activePage(), expected);
+        QCOMPARE(d.pages()[d.activePage()], name);
+        if (removed != active)
+            QCOMPARE(d.job().gcode(), gcode);
+        QVERIFY(d.dirty());
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        QVERIFY(!d.dirty());
+        d.redo();
+        QCOMPARE(d.pages()[d.activePage()], name);
+    }
+    void selectionCopyToAnotherPageKeepsIndependentGroups() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        d.addShape("ellipse");
+        d.toggleSelection(0);
+        d.groupSelection();
+        const auto sourceGroup = d.items()[0].groupId;
+        QVERIFY(!sourceGroup.isEmpty());
+        QVERIFY(d.addPage("Ziel"));
+        d.activatePage(0);
+        d.selectGroup(0);
+        QVERIFY(d.command("copyToPage", {{"page", 1}}));
+        QCOMPARE(d.items().size(), 4);
+        QVERIFY(!d.items()[2].groupId.isEmpty());
+        QCOMPARE(d.items()[2].groupId, d.items()[3].groupId);
+        QVERIFY(d.items()[2].groupId != sourceGroup);
+        QCOMPARE(d.items()[2].groupName, d.items()[0].groupName);
+        QCOMPARE(d.activePage(), 0);
+        d.select(0);
+        QVERIFY(d.command("copyToPage", {{"page", 1}}));
+        QVERIFY(d.items().last().groupId.isEmpty());
+        QVERIFY(d.items().last().groupName.isEmpty());
+        d.activatePage(1);
+        d.selectGroup(2);
+        QCOMPARE(d.selectedRows(), QVariantList({2, 3}));
+        d.activatePage(0);
+        d.selectGroup(0);
+        QVERIFY(d.command("copyToPage", {{"page", 0}}));
+        d.selectGroup(5);
+        QCOMPARE(d.selectedRows(), QVariantList({5, 6}));
+        QVERIFY(d.items()[5].groupId != sourceGroup);
+    }
+    void fullPageCopyPreservesContentAndOutputIndependently() {
+        Document d;
+        d.newProject();
+        QVERIFY(d.setMetadata("Mehrere Blätter", "Fokus manuell; gleiche Vorlage"));
+        d.addShape("rect");
+        d.addShape("ellipse");
+        d.toggleSelection(0);
+        d.groupSelection();
+        const auto imageFile = bitmap();
+        QVERIFY(d.importImage(imageFile));
+        d.toggleVisible(2);
+        const auto svgFile = write("sheet-source.svg", "<svg xmlns='http://www.w3.org/2000/svg' "
+                                   "width='10mm' height='8mm'><rect width='10' height='8'/></svg>");
+        QVERIFY(d.importSvg(svgFile));
+        d.addShape("text");
+        d.setProperty("text", "Seite A");
+        const int operation = d.addOperation("Weitere Gravur", "Gravur");
+        d.assignOperations({0, operation});
+        d.setProperty("power", 17.);
+        QVERIFY(d.importRelief(imageFile));
+        d.toggleVisible(5);
+        QVERIFY(d.addPage("Anderes Blatt"));
+        d.addShape("rect");
+        d.activatePage(0);
+        const auto sourcePath = QUrl::fromLocalFile(temp.filePath("sheets-source.blazer"));
+        QVERIFY(d.save(sourcePath));
+        const auto before = d.projectBytes();
+        const auto source = d.items();
+        const auto operations = d.layers();
+        const auto gcode = d.job().gcode();
+        QVERIFY(d.job().valid());
+        const auto sourceSvg = QUrl::fromLocalFile(temp.filePath("sheet-export-source.svg"));
+        const auto otherSvg = QUrl::fromLocalFile(temp.filePath("sheet-export-other.svg"));
+        const auto copySvg = QUrl::fromLocalFile(temp.filePath("sheet-export-copy.svg"));
+        auto svgBytes = [](const QUrl &file) {
+            QFile input(file.toLocalFile());
+            return input.open(QIODevice::ReadOnly) ? input.readAll() : QByteArray();
+        };
+        QVERIFY(d.exportSvg(sourceSvg));
+        QVERIFY(svgBytes(sourceSvg).contains("<path"));
+        d.activatePage(1);
+        QVERIFY(d.exportSvg(otherSvg));
+        QVERIFY(svgBytes(otherSvg) != svgBytes(sourceSvg));
+        d.activatePage(0);
+        QVERIFY(d.copyPage(0, " Rückseite "));
+        QCOMPARE(d.pages(), QStringList({"Blatt 01", "Anderes Blatt", "Rückseite"}));
+        QCOMPARE(d.activePage(), 2);
+        QCOMPARE(d.selected(), -1);
+        QCOMPARE(d.fileUrl(), sourcePath);
+        QCOMPARE(d.layers(), operations);
+        const int copiesStart = source.size();
+        const int copiedCount = source.size() - 1;
+        QCOMPARE(d.items().size(), copiesStart + copiedCount);
+        QCOMPARE(d.job().gcode(), gcode);
+        QVERIFY(d.exportSvg(copySvg));
+        QCOMPARE(svgBytes(copySvg), svgBytes(sourceSvg));
+        QVERIFY(d.dirty());
+        QSet<QString> ids;
+        for (const auto &item : d.items()) {
+            QVERIFY(!ids.contains(item.id));
+            ids.insert(item.id);
+        }
+        for (int i = 0; i < copiedCount; ++i) {
+            const auto &copy = d.items()[source.size() + i];
+            auto comparable = copy;
+            comparable.id = source[i].id;
+            comparable.page = source[i].page;
+            if (!source[i].groupId.isEmpty()) {
+                QVERIFY(copy.groupId != source[i].groupId);
+                comparable.groupId = source[i].groupId;
+            }
+            QVERIFY(comparable == source[i]);
+        }
+        QCOMPARE(d.items()[copiesStart].groupId, d.items()[copiesStart + 1].groupId);
+        QVERIFY(!d.items()[copiesStart + 2].visible);
+        QCOMPARE(d.items()[copiesStart + 4].extraOperations, QList<int>{operation});
+        QVERIFY(d.items()[copiesStart + 5].reliefAsset);
+        // Both embedded formats survive removal of their original files.
+        QVERIFY(QFile::remove(svgFile.toLocalFile()));
+        QVERIFY(QFile::remove(imageFile.toLocalFile()));
+        Document reopened;
+        QVERIFY(reopened.restoreBytes(d.projectBytes()));
+        const auto output = QUrl::fromLocalFile(temp.filePath("sheets-copy.blazer"));
+        QVERIFY(reopened.save(output));
+        Document loaded;
+        QVERIFY(loaded.open(output));
+        QCOMPARE(loaded.projectBytes(), d.projectBytes());
+        QCOMPARE(loaded.job().gcode(), gcode);
+        {
+            Recovery recovery(&d, temp.filePath("sheets-recovery"));
+            QVERIFY(recovery.save());
+        }
+        Document recovered;
+        Recovery recovery(&recovered, temp.filePath("sheets-recovery"));
+        QVERIFY(recovery.restore());
+        QCOMPARE(recovered.activePage(), 2);
+        QCOMPARE(recovered.job().gcode(), gcode);
+        d.select(copiesStart + 4);
+        const auto beforeEdit = d.projectBytes();
+        const auto width = d.items()[copiesStart + 4].bounds.width();
+        d.setProperty("width", width + 2);
+        QVERIFY(d.items()[4] == source[4]);
+        QVERIFY(d.items()[copiesStart + 4].bounds.width() != source[4].bounds.width());
+        d.undo();
+        QCOMPARE(d.projectBytes(), beforeEdit);
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        QVERIFY(!d.dirty());
+        d.redo();
+        QCOMPARE(d.activePage(), 2);
+        QCOMPARE(d.job().gcode(), gcode);
+    }
+    void pageCopyLimitsAndRejectedNamesAreAtomic() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        const auto before = d.projectBytes();
+        for (const QString &name : {QString(), QString("  "), QString("A\nB"),
+                                    QString("A\rB"), QString(201, 'x')}) {
+            QVERIFY(!d.addPage(name));
+            QVERIFY(!d.renamePage(0, name));
+            QVERIFY(!d.copyPage(0, name));
+            QCOMPARE(d.projectBytes(), before);
+        }
+        QVERIFY(!d.copyPage(-1, "X"));
+        QVERIFY(!d.copyPage(1, "X"));
+        QCOMPARE(d.projectBytes(), before);
+        // Rejections must not insert a no-op history entry.
+        d.undo();
+        QCOMPARE(d.count(), 0);
+        d.newProject();
+        for (int i = 1; i < 100; ++i)
+            QVERIFY(d.addPage(QString("Blatt %1").arg(i + 1)));
+        const auto atLimit = d.projectBytes();
+        QVERIFY(!d.addPage("101"));
+        QVERIFY(!d.copyPage(0, "101"));
+        QCOMPARE(d.projectBytes(), atLimit);
+        d.undo();
+        QCOMPARE(d.pages().size(), 99);
+        // Empty sheets are real, undoable copies too.
+        QVERIFY(d.copyPage(0, QString(200, 'x')));
+        QCOMPARE(d.count(), 0);
+        QCOMPARE(d.activePage(), 99);
+        d.newProject();
+        d.addShape("rect");
+        d.setProperty("width", 1.);
+        d.setProperty("height", 1.);
+        QVERIFY(d.command("duplicateGrid", {{"copies", 1000}, {"columns", 32}, {"gap", 0}}));
+        d.addShape("ellipse");
+        QCOMPARE(d.count(), 1001);
+        const auto objects = d.projectBytes();
+        QVERIFY(!d.copyPage(0, "Zu viele Objekte"));
+        QCOMPARE(d.projectBytes(), objects);
+        d.undo();
+        QCOMPARE(d.count(), 1000);
+        d.undo();
+        QCOMPARE(d.count(), 1);
+        // Embedded-byte limits count references on both sheets, even when
+        // the in-memory asset is immutable and shared.
+        d.newProject();
+        const auto largeSvg = write("large-sheet.svg", "<svg xmlns='http://www.w3.org/2000/svg' "
+                                    "width='10mm' height='10mm'><!--" +
+                                    QByteArray(6 * 1024 * 1024, 'x') +
+                                    "--><rect width='10' height='10'/></svg>");
+        QVERIFY(d.importSvg(largeSvg));
+        for (int i = 0; i < 3; ++i)
+            d.duplicateSelected();
+        QCOMPARE(d.count(), 4);
+        const auto originalItems = d.items();
+        QVERIFY(!d.copyPage(0, "Zu viele Einbettungen"));
+        QCOMPARE(d.pages().size(), 1);
+        QVERIFY(d.items() == originalItems);
+        d.undo();
+        QCOMPARE(d.count(), 3);
+    }
     void operationManagementAndMultiSheet() {
         Document d;
         d.newProject();

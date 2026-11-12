@@ -68,6 +68,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE int addOperation(const QString &name, const QString &mode);
     Q_INVOKABLE void assignOperations(const QVariantList &rows);
     Q_INVOKABLE bool addPage(const QString &name);
+    Q_INVOKABLE bool copyPage(int page, const QString &name);
     Q_INVOKABLE void activatePage(int page);
     Q_INVOKABLE bool removePage(int page);
     bool outputs(const Artwork &item) const;

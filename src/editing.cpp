@@ -16,6 +16,24 @@
 #include <cmath>
 #include <qrcodegen/qrcodegen.hpp>
 
+namespace {
+bool validPageName(const QString &name) {
+    return !name.trimmed().isEmpty() && name.size() <= 200 && !name.contains('\n') &&
+           !name.contains('\r');
+}
+Artwork pageCopy(const Artwork &source, int page, QMap<QString, QString> &groups) {
+    auto copy = source;
+    copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    copy.page = page;
+    if (!source.groupId.isEmpty()) {
+        if (!groups.contains(source.groupId))
+            groups[source.groupId] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        copy.groupId = groups[source.groupId];
+    }
+    return copy;
+}
+} // namespace
+
 bool Document::bakePath(Artwork &a, const QPainterPath &path) {
     if (path.isEmpty() || path.elementCount() > 100000)
         return false;
@@ -111,14 +129,46 @@ void Document::assignOperations(const QVariantList &ops) {
     refresh();
 }
 bool Document::addPage(const QString &name) {
-    if (m_pages.size() >= 100 || name.trimmed().isEmpty() || name.size() > 200)
+    if (m_pages.size() >= 100 || !validPageName(name)) {
+        notify("Bitte einen einzeiligen Blattnamen mit 1–200 Zeichen wählen; maximal 100 Blätter.");
         return false;
+    }
     checkpoint();
-    m_pages.append(name);
+    m_pages.append(name.trimmed());
     m_activePage = m_pages.size() - 1;
     m_selection.clear();
     m_selected = -1;
+    if (!m_items.isEmpty())
+        emit dataChanged(index(0), index(m_items.size() - 1));
     refresh();
+    return true;
+}
+bool Document::copyPage(int page, const QString &name) {
+    if (page < 0 || page >= m_pages.size() || m_pages.size() >= 100 || !validPageName(name)) {
+        notify("Blattkopie benötigt ein vorhandenes Blatt, einen einzeiligen Namen mit 1–200 "
+               "Zeichen und Platz für ein weiteres Blatt (maximal 100).");
+        return false;
+    }
+    auto result = m_items;
+    QMap<QString, QString> groups;
+    for (const auto &item : m_items)
+        if (item.page == page)
+            result.append(pageCopy(item, m_pages.size(), groups));
+    if (!validBudget(result)) {
+        notify("Blattkopie überschreitet die Objekt- oder Einbettungsgrenzen des Projekts.");
+        return false;
+    }
+    checkpoint();
+    beginResetModel();
+    m_items = std::move(result);
+    m_pages.append(name.trimmed());
+    m_activePage = m_pages.size() - 1;
+    m_selection.clear();
+    m_selected = -1;
+    normalizeGroups();
+    endResetModel();
+    refresh();
+    notify("Blatt kopiert und zur Anzeige/Ausgabe gewählt. Operationen gelten projektweit.");
     return true;
 }
 void Document::activatePage(int page) {
@@ -131,15 +181,21 @@ void Document::activatePage(int page) {
     m_job.reset();
     if (m_background)
         m_preparation.submit(jobInput());
-    emit dataChanged(index(0), index(m_items.size() - 1));
+    if (!m_items.isEmpty())
+        emit dataChanged(index(0), index(m_items.size() - 1));
     emit changed();
     emit selectionChanged();
 }
 bool Document::renamePage(int page, const QString &name) {
-    if (page < 0 || page >= m_pages.size() || name.trimmed().isEmpty() || name.size() > 200)
+    if (page < 0 || page >= m_pages.size() || !validPageName(name)) {
+        notify("Bitte ein vorhandenes Blatt und einen einzeiligen Blattnamen mit 1–200 Zeichen "
+               "wählen.");
         return false;
+    }
+    if (m_pages[page] == name.trimmed())
+        return true;
     checkpoint();
-    m_pages[page] = name;
+    m_pages[page] = name.trimmed();
     refresh();
     return true;
 }
@@ -782,14 +838,9 @@ bool Document::command(const QString &action, const QVariantMap &args) {
         if (page < 0 || page >= m_pages.size() ||
             result.size() + m_selection.size() > Geometry::objectLimit)
             return false;
-        for (int row : m_selection) {
-            auto a = result[row];
-            a.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            a.groupId.clear();
-            a.groupName.clear();
-            a.page = page;
-            result.append(a);
-        }
+        QMap<QString, QString> groups;
+        for (int row : m_selection)
+            result.append(pageCopy(m_items[row], page, groups));
     } else
         return fail("Unbekanntes Werkzeug: " + action);
     if (!validBudget(result))
@@ -909,7 +960,10 @@ bool Document::removePage(int page) {
             --m_items[i].page;
     }
     m_pages.removeAt(page);
-    m_activePage = std::min(page, int(m_pages.size() - 1));
+    if (m_activePage > page)
+        --m_activePage;
+    else if (m_activePage == page)
+        m_activePage = std::min(page, int(m_pages.size() - 1));
     m_selected = -1;
     m_selection.clear();
     normalizeGroups();

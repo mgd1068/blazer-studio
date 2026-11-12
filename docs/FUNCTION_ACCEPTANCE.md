@@ -9,7 +9,7 @@ Ein Testname belegt nur seinen beschriebenen Fall. **Teilumfang** bedeutet vorha
 | ID | Vorhandener Umfang und Nachweis | Verbleibende Arbeit |
 |---|---|---|
 | F01 | Projektdateien, Namen/Notizen, eigene Vorlagen, lokaler Dateiverlauf, Undo/Redo und Dateirundlauf: `projectMetadataHistoryAndRoundtrip`, `projectMetadataValidationIsAtomic`, `projectMetadataReadsLegacyWithoutNotes`, `recentProjectsPersistBoundAndDeduplicate`, `projectTemplateIsIndependentAndKeepsEmbeddedContent`, `workflow` | Softwarefälle geprüft; native Desktop-/externe Bedienung bleiben T08. Format 8 und Vorlagen sind im [geprüften beta.3-Kandidaten](beta/CANDIDATE_BETA3.md) enthalten |
-| F02 | Benannte Blätter, aktive Ausgabe und Verschachteln über Blätter: `operationManagementAndMultiSheet` | Blattkopien und sämtliche blattübergreifenden Bearbeitungsfälle spezifizieren |
+| F02 | Benannte Blätter, unabhängige Blatt-/Auswahlkopien, aktive Ausgabe, Ausgabeerhalt beim Löschen und Dateirundlauf: `fullPageCopyPreservesContentAndOutputIndependently`, `deletingPageKeepsUnrelatedOutput`, `workflow` | Softwarefälle ab beta.4-dev [geprüft](PROJECTS.md); native Desktop-/externe Bedienung bleiben T08. Projektweite Operationen sind weiterhin gemeinsam |
 | F03 | Undo/Redo, atomare Sicherung und Recovery: `stability`, `modelAndCleanHistory` | Sichtbaren Verlauf und praktische Wiederherstellungsfälle am Desktop abnehmen |
 | F04 | SVG, DXF-Teilmenge, PDF/AI/EPS über Inkscape: `vectorImportsAndExport`, `pdfLightBurnAndVectorClip` | HPGL/PLT, GCode-Geometrie und aufgeführte Austauschformate implementieren; Importkorpus verbreitern |
 | F05 | Qt-Rasterimporte, SVG- und GCode-Export: `raster`, `workflow` | Pluginabhängige Rasterformate einzeln abnehmen; Export verarbeiteter Bilder vervollständigen |

@@ -20,6 +20,28 @@ ScrollView {
     property int section: 0
     property int nextCorner: 0
     property string imageDraftKey: ""
+    // Planning progress also emits Document::changed. Cache the actual page
+    // values so progress cannot rebuild an open menu or reset its target.
+    property bool sheetsReady: false
+    property string sheetModelKey: ""
+    property int observedOutputPage: -1
+    readonly property string sheetNamesKey: JSON.stringify(project.pages)
+    readonly property int outputPage: project.activePage
+    function refreshSheets() {
+        if (!sheetsReady)return
+        let names=project.pages
+        let active=project.activePage
+        let chosen=observedOutputPage===active ? page.currentIndex : active
+        let key=JSON.stringify(names)
+        if(sheetModelKey!==key) {
+            sheetModelKey=key
+            page.model=names.map((name,index)=>(index+1)+" · "+name)
+        }
+        observedOutputPage=active
+        page.currentIndex=Math.max(0,Math.min(chosen,names.length-1))
+    }
+    onSheetNamesKeyChanged: refreshSheets()
+    onOutputPageChanged: refreshSheets()
     function refreshImage() {
         let style=project.selection.style || ({})
         let key=(project.selection.id || "")+JSON.stringify(style)+project.selection.imageWidth+","+project.selection.imageHeight
@@ -31,7 +53,7 @@ ScrollView {
         cropX.value=style.cropX ?? 0;cropY.value=style.cropY ?? 0;cropW.value=style.cropW ?? (project.selection.imageWidth || 1);cropH.value=style.cropH ?? (project.selection.imageHeight || 1)
     }
     Connections {target: project; function onSelectionChanged(){tools.refreshImage()} }
-    Component.onCompleted: refreshImage()
+    Component.onCompleted: {refreshImage();sheetsReady=true;refreshSheets()}
     clip: true; contentWidth: availableWidth
     function apply(action,args) { project.command(action,args || ({})) }
     FontDialog { id: fonts; onAccepted: project.command("textStyle",{font:selectedFont.family,bold:selectedFont.bold,spacing:textSpacing.value}) }
@@ -188,18 +210,20 @@ ScrollView {
             visible: tools.section===3
             Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20; spacing: 12
             Text { text: "Arbeitsblätter und Serien"; color: tools.ink; font.pixelSize: 16 }
-            ToolCombo { dark: tools.dark; id: page; model: project.pages; currentIndex: project.activePage; Layout.fillWidth: true }
-            Text { text: "Zielblatt für Kopie oder Anzeige"; color: tools.muted; font.pixelSize: 10 }
-            RowLayout {
-                ActionButton { text: "Blatt anzeigen"; dark: tools.dark; onClicked: project.activatePage(page.currentIndex) }
-                ActionButton { text: "Blatt mit Inhalt löschen"; dark: tools.dark; enabled: project.pages.length>1; onClicked: project.removePage(page.currentIndex) }
-            }
-            TextField { HelpBubble { target: parent } id: pageName; text: "Neues Blatt"; Layout.fillWidth: true }
+            Text { objectName: "activeOutputPage"; text: "Aktive Ausgabe: " + (project.activePage+1) + " · " + project.pages[project.activePage]; textFormat: Text.PlainText; color: tools.ink; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            ToolCombo { objectName: "pageTarget"; dark: tools.dark; id: page; Layout.fillWidth: true }
+            Text { text: "Gewähltes Zielblatt. Anzeige und Ausgabe wechseln erst mit Anzeigen / ausgeben. Operationen gelten projektweit."; color: tools.muted; font.pixelSize: 10; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            ActionButton { objectName: "activatePageButton"; text: "Anzeigen / ausgeben"; dark: tools.dark; onClicked: project.activatePage(page.currentIndex) }
+            TextField { HelpBubble { target: parent; description: "Name für ein neues Blatt, eine vollständige Blattkopie oder das gewählte Blatt. Maximal 200 Zeichen." } objectName: "pageNameEditor"; id: pageName; text: "Neues Blatt"; maximumLength: 200; Layout.fillWidth: true; selectByMouse: true }
             RowLayout { Layout.fillWidth: true
-                ActionButton { text: "+ Blatt"; dark: tools.dark; onClicked: project.addPage(pageName.text) }
-                ActionButton { text: "Umbenennen"; dark: tools.dark; onClicked: project.renamePage(project.activePage,pageName.text) }
-                ActionButton { text: "Auswahl hier kopieren"; dark: tools.dark; onClicked: tools.apply("copyToPage",{page:page.currentIndex}) }
+                ActionButton { objectName: "addPageButton"; text: "+ Blatt"; dark: tools.dark; onClicked: project.addPage(pageName.text) }
+                ActionButton { objectName: "copyPageButton"; text: "Blatt kopieren"; dark: tools.dark; onClicked: project.copyPage(page.currentIndex,pageName.text) }
             }
+            RowLayout { Layout.fillWidth: true
+                ActionButton { objectName: "renamePageButton"; text: "Umbenennen"; dark: tools.dark; onClicked: project.renamePage(page.currentIndex,pageName.text) }
+                ActionButton { objectName: "removePageButton"; text: "Blatt löschen"; dark: tools.dark; destructive: true; enabled: project.pages.length>1; hint: "Löscht das gewählte Blatt mit seinem gesamten Inhalt. Rückgängig stellt es wieder her."; onClicked: project.removePage(page.currentIndex) }
+            }
+            ActionButton { objectName: "copySelectionPageButton"; text: "Auswahl ins Zielblatt kopieren"; dark: tools.dark; enabled: project.selectedRows.length>0; onClicked: tools.apply("copyToPage",{page:page.currentIndex}) }
             NumberField { id: copies; hint: "Gesamtzahl der gewünschten Kopien."; label: "×"; value: 4; unit: "Stk"; decimals: 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
             NumberField { id: columns; hint: "Anzahl der Spalten im Kopienraster."; label: "↔"; value: 2; unit: "Sp."; decimals: 0; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }
             NumberField { id: gap; hint: "Freier Abstand zwischen den kopierten Objekten in Millimetern."; label: "Δ"; value: 2; unit: "mm"; dark: tools.dark; Layout.fillWidth: true; onEdited: n=>value=n }

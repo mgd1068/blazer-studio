@@ -49,11 +49,20 @@ bool click(QQuickWindow *window, QQuickItem *item) {
                             std::clamp(parent->property("contentY").toDouble() + delta, 0., limit));
     }
     QTest::qWait(30);
-    const auto point = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
-    if (!QRectF(0, 0, window->width(), window->height()).contains(point))
-        return false;
-    QTest::mouseClick(window, Qt::LeftButton, {}, point.toPoint());
-    return true;
+    // In the offscreen backend a pointer move may polish a pending layout.
+    // Recalculate after that frame instead of clicking its old coordinates.
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const auto point = item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint();
+        if (!QRect(0, 0, window->width(), window->height()).contains(point))
+            return false;
+        QTest::mouseMove(window, point);
+        QTest::qWait(20);
+        if (item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint() == point) {
+            QTest::mouseClick(window, Qt::LeftButton, {}, point);
+            return true;
+        }
+    }
+    return false;
 }
 QByteArray read(const QString &path) {
     QFile file(path);
@@ -133,6 +142,153 @@ class WorkflowTest : public QObject {
                 return false;
             return click(window, item(name));
         };
+        project.addShape("rect");
+        QVERIFY(item("objectCheck0"));
+        QVERIFY(project.addPage("Rückseite"));
+        auto *pageIndicator = item("activePageIndicator");
+        QVERIFY(pageIndicator);
+        QVERIFY(pageIndicator->property("text").toString().contains("Rückseite"));
+        QTRY_VERIFY(!item("objectCheck0")->isVisible());
+        project.newProject();
+        // The target chooser is separate from the actual output sheet.
+        // Rename/copy/delete must act on that chosen target, and may not
+        // silently redirect output from another sheet.
+        QVERIFY(project.renamePage(0, "Vorne"));
+        project.addShape("rect");
+        project.setProperty("width", 5.);
+        project.setProperty("height", 4.);
+        project.addShape("ellipse");
+        project.toggleSelection(0);
+        project.groupSelection();
+        QVERIFY(project.addPage("Hinten"));
+        project.addShape("text");
+        project.setProperty("text", "B");
+        project.activatePage(0);
+        window->setProperty("basic", false);
+        QVERIFY(click(window, item("workflow4")));
+        QVERIFY(click(window, item("toolsProduction")));
+        auto choosePage = [&](int index) {
+            if (!click(window, item("pageTarget")))
+                return false;
+            auto *popup = item("pageTarget")->property("popup").value<QObject *>();
+            if (!popup || !QTest::qWaitFor([&] { return popup->property("opened").toBool(); }, 1000)) {
+                qWarning() << "page popup did not open" << index << item("pageTarget")->property("currentIndex")
+                           << item("pageTarget")->hasActiveFocus() << (popup ? popup->property("visible") : QVariant());
+                screenshot("page-picker-failure");
+                return false;
+            }
+            const auto previous = item("pageTarget")->property("currentIndex").toInt();
+            if (!QMetaObject::invokeMethod(&project, "changed") ||
+                item("pageTarget")->property("currentIndex").toInt() != previous ||
+                !popup->property("opened").toBool())
+                return false;
+            QTest::keyClick(window, Qt::Key_Home);
+            for (int i = 0; i < index; ++i)
+                QTest::keyClick(window, Qt::Key_Down);
+            QTest::keyClick(window, Qt::Key_Return);
+            if (!QTest::qWaitFor([&] { return !popup->property("visible").toBool(); }, 1000)) {
+                qWarning() << "page popup did not close" << index;
+                screenshot("page-picker-failure");
+                return false;
+            }
+            return item("pageTarget")->property("currentIndex").toInt() == index;
+        };
+        auto pageName = [&](const QByteArray &name) {
+            if (!click(window, item("pageNameEditor")))
+                return false;
+            QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+            typeText(window, name);
+            return true;
+        };
+        QVERIFY(choosePage(1));
+        // Planning progress uses Document::changed too. It must not reset
+        // a deliberately chosen target to the current output sheet.
+        QVERIFY(QMetaObject::invokeMethod(&project, "changed"));
+        QCOMPARE(item("pageTarget")->property("currentIndex").toInt(), 1);
+        QCOMPARE(project.activePage(), 0);
+        QVERIFY(pageIndicator->property("text").toString().contains("Vorne"));
+        const auto beforeNameDraft = project.projectBytes();
+        QVERIFY(pageName("Name draft"));
+        QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(project.projectBytes(), beforeNameDraft);
+        QVERIFY(pageName("Rueckseite"));
+        QVERIFY(click(window, item("renamePageButton")));
+        QCOMPARE(project.pages(), QStringList({"Vorne", "Rueckseite"}));
+        QCOMPARE(project.activePage(), 0);
+        Document target;
+        QVERIFY(target.restoreBytes(project.projectBytes()));
+        target.activatePage(1);
+        const auto targetGcode = target.job().gcode();
+        QVERIFY(target.job().valid());
+        QVERIFY(choosePage(1));
+        QVERIFY(pageName("Kopie"));
+        QVERIFY(click(window, item("copyPageButton")));
+        QCOMPARE(project.pages(), QStringList({"Vorne", "Rueckseite", "Kopie"}));
+        QCOMPARE(project.activePage(), 2);
+        QCOMPARE(project.count(), 4);
+        QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy() && project.job().valid(), 5000);
+        QCOMPARE(project.job().gcode(), targetGcode);
+        QVERIFY(pageIndicator->property("text").toString().contains("Kopie"));
+        QVERIFY(item("activeOutputPage")->property("text").toString().contains("Kopie"));
+        QVERIFY(screenshot("sheets"));
+        QVERIFY(project.setMetadata(QString(1000, 'P'), ""));
+        QVERIFY(project.renamePage(2, "<b>" + QString(193, 'X') + "</b>"));
+        QTest::qWait(100);
+        const auto startBounds = item("startJobButton")->mapRectToScene(
+            QRectF(0, 0, item("startJobButton")->width(), item("startJobButton")->height()));
+        QVERIFY2(startBounds.right() <= window->width(), "long names hide the start button");
+        auto *footer = item("activePageFooter"), *hint = item("workspaceHint");
+        QVERIFY(footer && hint);
+        const auto footerBounds = footer->mapRectToScene(QRectF(0, 0, footer->width(), footer->height()));
+        const auto hintBounds = hint->mapRectToScene(QRectF(0, 0, hint->width(), hint->height()));
+        QVERIFY2(footerBounds.right() <= hintBounds.left() + 1, "long sheet name overlaps hints");
+        const auto parentBounds = hint->parentItem()->mapRectToScene(
+            QRectF(0, 0, hint->parentItem()->width(), hint->parentItem()->height()));
+        QVERIFY2(hintBounds.right() <= parentBounds.right() + 1, "footer overflows its workspace");
+        QVERIFY2(item("activeOutputPage")->property("paintedWidth").toDouble() <=
+                     item("activeOutputPage")->width() + 1,
+                 "long unbroken sheet name overflows its label");
+        QVERIFY(screenshot("sheets-long-names"));
+        const auto headerPoint = pageIndicator->mapToScene(
+            QPointF(pageIndicator->width() / 2, pageIndicator->height() / 2));
+        QTest::mouseMove(window, headerPoint.toPoint());
+        auto *pageTip = window->findChild<QObject *>("activePageTooltip");
+        QVERIFY(pageTip);
+        QTRY_VERIFY(pageTip->property("opened").toBool());
+        auto *tipContent = pageTip->property("contentItem").value<QQuickItem *>();
+        QVERIFY(tipContent);
+        QVERIFY(tipContent->property("paintedWidth").toDouble() <= tipContent->width() + 1);
+        QVERIFY(screenshot("sheets-long-tooltip"));
+        QVERIFY(project.setMetadata("Unbenannt", ""));
+        QVERIFY(project.renamePage(2, "Kopie"));
+        QVERIFY(choosePage(0));
+        QCOMPARE(project.activePage(), 2);
+        QVERIFY(click(window, item("activatePageButton")));
+        QCOMPARE(project.activePage(), 0);
+        project.selectGroup(0);
+        QVERIFY(choosePage(1));
+        QVERIFY(click(window, item("copySelectionPageButton")));
+        QCOMPARE(project.count(), 6);
+        QCOMPARE(project.activePage(), 0);
+        QVERIFY(!project.items()[4].groupId.isEmpty());
+        QCOMPARE(project.items()[4].groupId, project.items()[5].groupId);
+        QVERIFY(project.items()[4].groupId != project.items()[0].groupId);
+        QVERIFY(choosePage(1));
+        QVERIFY(click(window, item("removePageButton")));
+        QCOMPARE(project.pages(), QStringList({"Vorne", "Kopie"}));
+        QCOMPARE(project.count(), 3);
+        QCOMPARE(project.activePage(), 0);
+        QVERIFY(pageIndicator->property("text").toString().contains("Vorne"));
+        QVERIFY(click(window, item("workflow0")));
+        QVERIFY(click(window, item("workspace")));
+        QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(project.pages().size(), 3);
+        QCOMPARE(project.count(), 6);
+        QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(project.pages().size(), 2);
+        project.newProject();
+        window->findChild<QObject *>("toolsPanel")->setProperty("section", 0);
+        window->setProperty("basic", true);
         // Project metadata is a modal draft. Editor shortcuts and Escape must
         // not change the underlying selection, history or project files.
         project.addShape("rect");
@@ -306,6 +462,10 @@ class WorkflowTest : public QObject {
         project.toggleSelection(1);
         const double oldX = project.selection()["x"].toDouble();
         project.setProperty("x", oldX + 20);
+        QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy() && project.job().valid(), 5000);
+        QCOMPARE(project.job().moves.last().to.x(), originalEnd.x() + 20);
+        QVERIFY(project.copyPage(0, "Naechster Durchlauf"));
+        QCOMPARE(project.activePage(), 1);
         QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy() && project.job().valid(), 5000);
         QCOMPARE(project.job().moves.last().to.x(), originalEnd.x() + 20);
         QVERIFY(click(window, item("pauseJobButton")));

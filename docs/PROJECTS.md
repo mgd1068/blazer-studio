@@ -1,4 +1,4 @@
-# Projektname und Notizen
+# Projekte und Arbeitsblätter
 
 Verfügbar ab `0.9.0-beta.3`. Die Geräte- und externen Bedienungsabnahmen bleiben gesondert offen.
 
@@ -56,5 +56,21 @@ Die zweite Variante exportiert ausschließlich in eine Datei, öffnet keine Ger�
 Eine ältere automatische Sicherung bleibt bis zur Entscheidung über **Wiederherstellen** oder **Sicherung verwerfen** geschützt. Auch ein direkt aus einer Datei gestarteter neuer Vorlagenentwurf darf sie während dieser Entscheidung nicht überschreiben. Beim Beenden ohne Entscheidung bleiben die vorhandenen Sicherungsstände erhalten. Nach Wiederherstellen oder bewusstem Verwerfen sichert Autosave die weiteren ungespeicherten Änderungen wieder automatisch.
 
 Wird das Beenden eines ungespeicherten Entwurfs abgebrochen, erscheint die offene Wiederherstellungsentscheidung erneut. Das gilt auch beim Abbrechen des vorgeschalteten Speicherdialogs. Kann eine Sicherung nicht entfernt werden, meldet die Anwendung den Fehler und hält die Entscheidung offen.
+
+## Arbeitsblätter – Entwicklung ab beta.4-dev
+
+Diese Erweiterung gehört zum Entwicklungsstand `0.9.0-beta.4-dev`; das geprüfte beta.3-Paket enthält sie noch nicht.
+
+Unter **Advanced → Werkzeuge → Produktion** werden die benannten Arbeitsblätter verwaltet. Die Kopfzeile und **Aktive Ausgabe** nennen das tatsächlich für Vorschau, SVG-/GCode-Export und den nächsten Auftrag gewählte Blatt. Die Objektliste zeigt nur dessen Objekte; die Beschriftung **im Projekt** zählt dagegen alle Objekte auf sämtlichen Blättern.
+
+Das Dropdown wählt ein **Zielblatt** für die folgenden Aktionen. Allein diese Auswahl wechselt die Ausgabe nicht. Statusmeldungen der Hintergrundberechnung erhalten das gewählte Ziel auch bei geöffnetem Dropdown. **Anzeigen / ausgeben** macht das Zielblatt aktiv und leert die bisherige Objektauswahl. **Umbenennen** und **Blatt löschen** beziehen sich auf das gewählte Zielblatt. Beim Löschen eines anderen Blatts bleibt das bisherige Ausgabeblatt erhalten; wird das aktive Blatt gelöscht, folgt dessen nächster Nachbar beziehungsweise beim letzten Blatt der vorherige. Das letzte vorhandene Blatt kann nicht gelöscht werden. Löschen entfernt dessen gesamten Inhalt und lässt sich rückgängig machen.
+
+Das Namensfeld gilt für **+ Blatt**, **Blatt kopieren** und **Umbenennen**. Neue Namen haben höchstens 200 Zeichen und keine CR-/LF-Zeilenumbrüche; äußere Leerzeichen werden entfernt. Historisch gespeicherte Namen werden beim Lesen nicht umgeschrieben. Blätter werden zusätzlich nummeriert. Höchstens 100 Blätter sind möglich.
+
+**Blatt kopieren** erstellt eine vollständige Kopie des gewählten Zielblatts unter dem eingegebenen Namen und aktiviert diese Kopie. Enthalten sind auch ausgeblendete Objekte, eingebettete SVG-/Bild-/Reliefdaten, Objektwerte, Zuordnungen und Gruppen. Die neuen Objekt- und Gruppenkennungen sind unabhängig von der Quelle. Auch leere Blätter lassen sich kopieren. Objekt-, Geometrie- und Einbettungsbudgets gelten weiterhin für das gesamte Projekt; eine abgelehnte Kopie ändert weder Inhalt noch Verlauf.
+
+**Auswahl ins Zielblatt kopieren** kopiert nur die ausgewählten Objekte und lässt das aktive Ausgabeblatt unverändert. Vollständig oder mehrfach übernommene Gruppen erhalten eigene Kennungen; ein einzeln übernommenes Gruppenmitglied wird als einzelnes Objekt eingefügt. Die vorhandenen Operationen und ihre Werte gelten projektweit: Änderungen einer gemeinsam verwendeten Operation betreffen beide Blätter. Objektbezogene Abweichungen und Geometrie lassen sich an der Kopie unabhängig bearbeiten.
+
+Beim Speichern werden Blattinhalt, Namen und aktives Blatt übernommen und beim Öffnen wiederhergestellt. Hinzufügen, Kopieren, Umbenennen und Löschen gehören zu Undo/Redo; das reine Anzeigen eines anderen Blatts fügt keinen Bearbeitungsschritt hinzu und fordert allein keine Speicherung. Ein bereits gestarteter Simulatorauftrag behält seinen eingefrorenen Plan, wenn danach das aktive Blatt oder dessen Entwurf geändert wird. Die reale Geräteabnahme dieses Ablaufs bleibt offen.
 
 Der vollständige [Funktionsstand](FUNCTION_ACCEPTANCE.md) und die [Abnahmekriterien](PRODUCTION_READINESS.md) bleiben maßgeblich.

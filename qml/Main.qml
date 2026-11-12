@@ -401,6 +401,7 @@ ApplicationWindow {
                     objectName: "projectDetailsButton"
                     Layout.maximumWidth: win.width < 1280 ? 140 : 220
                     Layout.minimumWidth: 60
+                    Layout.fillWidth: true
                     text: project.title + " ▾"
                     dark: win.night
                     compact: true
@@ -420,7 +421,23 @@ ApplicationWindow {
                     }
                 }
                 Text { text: project.dirty ? "●" : ""; color: "#d79b54"; font.pixelSize: 12 }
-                Text { text: "/  Blatt 01"; color: win.muted; font.pixelSize: 11 }
+                Text {
+                    id: activePageLabel
+                    objectName: "activePageIndicator"
+                    text: "/  " + (project.activePage+1) + " · " + project.pages[project.activePage]
+                    textFormat: Text.PlainText; color: win.muted; font.pixelSize: 11
+                    Layout.fillWidth: true; Layout.minimumWidth: 40; Layout.preferredWidth: 150; Layout.maximumWidth: 150
+                    elide: Text.ElideRight
+                    HoverHandler { id: pageHover }
+                    ToolTip {
+                        id: pageNameTip; objectName: "activePageTooltip"; parent: activePageLabel; visible: pageHover.hovered; delay: 650
+                        x: 0; y: activePageLabel.height + 6
+                        text: "Aktives Blatt für Vorschau und Ausgabe: " + project.pages[project.activePage]
+                        width: Math.min(380,implicitWidth)
+                        background: Rectangle { radius: 5; color: win.panel; border.color: win.line }
+                        contentItem: Text { text: pageNameTip.text; textFormat: Text.PlainText; color: win.ink; wrapMode: Text.Wrap }
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 ActionButton { text: "Neu"; dark: win.night; compact: true; onClicked: win.requestAction("new") }
                 ActionButton { text: "Beispiel"; dark: win.night; compact: true; onClicked: win.requestAction("demo") }
@@ -576,7 +593,7 @@ ApplicationWindow {
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     RowLayout {
                         SectionLabel { text: "OBJEKTE"; dark: win.night; Layout.fillWidth: true }
-                        Text { text: project.count + " Elemente"; color: win.muted; font.pixelSize: 12 }
+                        Text { text: project.count + " im Projekt"; color: win.muted; font.pixelSize: 12 }
                     }
                     ListView {
                         id: objectList
@@ -856,9 +873,8 @@ ApplicationWindow {
                     Rectangle { height: 1; width: parent.width; color: win.line }
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
-                        Text { text: "●  " + (win.page === 2 ? machine.state : project.pages[project.activePage]); color: "#209b76"; font.pixelSize: 12 }
-                        Item { Layout.fillWidth: true }
-                        Text { text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: 0,5 mm   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 11 }
+                        Text { objectName: "activePageFooter"; text: "●  " + (win.page === 2 ? machine.state : project.pages[project.activePage]); textFormat: Text.PlainText; color: "#209b76"; font.pixelSize: 12; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight }
+                        Text { objectName: "workspaceHint"; text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: 0,5 mm   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 11 }
                     }
                 }
             }
