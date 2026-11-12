@@ -41,8 +41,31 @@ void Workspace::setDocument(Document *d) {
             update();
         });
     }
+    if (d)
+        connect(d, &Document::deviceProfileChanged, this, &Workspace::syncDeviceProfile);
+    syncDeviceProfile();
     emit documentChanged();
     update();
+}
+void Workspace::syncDeviceProfile() {
+    const auto profile = m_document ? m_document->deviceProfile() : DeviceProfile::m3Reference();
+    if (m_registration)
+        m_registration->setDeviceProfile(profile);
+    if (m_profileFingerprint != profile.outputFingerprint()) {
+        cancelGuideDrag();
+        m_drag = false;
+        m_dragNode = -1;
+        m_alignmentX.reset();
+        m_alignmentY.reset();
+        m_profileFingerprint = profile.outputFingerprint();
+        fit();
+    }
+}
+QPointF Workspace::worldToCanvas(QPointF point) const {
+    return Geometry::worldToCanvas(point, workArea().height());
+}
+QRectF Workspace::worldToCanvas(QRectF rect) const {
+    return Geometry::worldToCanvas(rect, workArea().height());
 }
 void Workspace::setSimulator(Simulator *s) {
     if (m_simulator)
@@ -53,13 +76,17 @@ void Workspace::setSimulator(Simulator *s) {
     emit simulatorChanged();
 }
 double Workspace::scale() const {
-    return std::max(.1, std::min((width() - 110) / 200., (height() - 110) / 150.)) * m_zoom;
+    return std::min(std::max(1., width() - 110) / workArea().width(),
+                    std::max(1., height() - 110) / workArea().height()) *
+           m_zoom;
 }
 QPointF Workspace::origin() const {
-    return QPointF((width() - 200 * scale()) / 2, (height() - 150 * scale()) / 2) + m_pan;
+    return QPointF((width() - workArea().width() * scale()) / 2,
+                   (height() - workArea().height() * scale()) / 2) +
+           m_pan;
 }
 QPointF Workspace::toWorld(QPointF p) const {
-    return Geometry::worldToCanvas((p - origin()) / scale());
+    return worldToCanvas((p - origin()) / scale());
 }
 void Workspace::zoomBy(double factor) {
     if (!std::isfinite(factor) || factor <= 0)
@@ -71,7 +98,7 @@ void Workspace::zoomBy(double factor) {
 QRectF Workspace::selectedScreenBounds() const {
     if (!m_document || m_document->selected() < 0)
         return {};
-    const auto r = Geometry::worldToCanvas(m_document->selectionBounds());
+    const auto r = worldToCanvas(m_document->selectionBounds());
     return {origin() + r.topLeft() * scale(), r.size() * scale()};
 }
 void Workspace::ensureSelectionVisible() {
@@ -111,8 +138,10 @@ void Workspace::mousePressEvent(QMouseEvent *e) {
     auto pos = toWorld(e->position());
     const auto o = origin();
     const auto s = scale();
-    const bool fromTop = QRectF(o.x(), o.y() - 28, 200 * s, 26).contains(e->position());
-    const bool fromLeft = QRectF(o.x() - 40, o.y(), 38, 150 * s).contains(e->position());
+    const bool fromTop =
+        QRectF(o.x(), o.y() - 28, workArea().width() * s, 26).contains(e->position());
+    const bool fromLeft =
+        QRectF(o.x() - 40, o.y(), 38, workArea().height() * s).contains(e->position());
     if (e->button() == Qt::LeftButton && (fromTop || fromLeft)) {
         m_document->select(-1);
         m_selectedGuide.clear();
@@ -195,7 +224,8 @@ void Workspace::mouseMoveEvent(QMouseEvent *e) {
         pos.setX(std::round(pos.x() / snapStep()) * snapStep());
         pos.setY(std::round(pos.y() / snapStep()) * snapStep());
         if (!e->modifiers().testFlag(Qt::AltModifier)) {
-            QList<double> xs{0, 100, 200}, ys{0, 75, 150};
+            QList<double> xs{0, workArea().width() / 2, workArea().width()},
+                ys{0, workArea().height() / 2, workArea().height()};
             for (int i = 0; i < m_document->items().size(); ++i) {
                 const auto &a = m_document->items()[i];
                 if (a.visible && a.page == m_document->activePage() && !m_document->isSelected(i)) {
@@ -274,7 +304,7 @@ void Workspace::paint(QPainter *p) {
     p->fillRect(boundingRect(), m_dark ? QColor("#202b35") : QColor("#e9eef1"));
     auto o = origin();
     auto s = scale();
-    QRectF bed(o, QSizeF(200 * s, 150 * s));
+    QRectF bed(o, QSizeF(workArea().width() * s, workArea().height() * s));
     p->setPen(Qt::NoPen);
     p->setBrush(m_dark ? QColor("#162028") : QColor("#d3dce0"));
     p->drawRoundedRect(bed.translated(4, 6), 3, 3);
@@ -285,7 +315,7 @@ void Workspace::paint(QPainter *p) {
         p->setClipRect(bed);
         p->setOpacity(.45);
         QTransform world;
-        world.translate(o.x(), o.y() + 150 * s);
+        world.translate(o.x(), o.y() + workArea().height() * s);
         world.scale(s, -s);
         p->setTransform(m_registration->transform() * world);
         p->drawImage(QPointF(0, 0), m_registration->frame());
@@ -295,17 +325,19 @@ void Workspace::paint(QPainter *p) {
     p->setClipRect(bed);
     p->setPen(QPen(m_dark ? QColor("#35434a") : QColor("#eef0e9"), 1));
     const double minor = m_imperial ? 2.54 : 5, major = m_imperial ? 25.4 : 25;
-    for (double x = 0; x <= 200; x += minor)
-        p->drawLine(QPointF(o.x() + x * s, o.y()), QPointF(o.x() + x * s, o.y() + 150 * s));
-    for (double y = 0; y <= 150; y += minor)
-        p->drawLine(QPointF(o.x(), o.y() + (150 - y) * s),
-                    QPointF(o.x() + 200 * s, o.y() + (150 - y) * s));
+    for (double x = 0; x <= workArea().width(); x += minor)
+        p->drawLine(QPointF(o.x() + x * s, o.y()),
+                    QPointF(o.x() + x * s, o.y() + workArea().height() * s));
+    for (double y = 0; y <= workArea().height(); y += minor)
+        p->drawLine(QPointF(o.x(), o.y() + (workArea().height() - y) * s),
+                    QPointF(o.x() + workArea().width() * s, o.y() + (workArea().height() - y) * s));
     p->setPen(QPen(m_dark ? QColor("#43515a") : QColor("#dde3d9"), 1));
-    for (double x = 0; x <= 200; x += major)
-        p->drawLine(QPointF(o.x() + x * s, o.y()), QPointF(o.x() + x * s, o.y() + 150 * s));
-    for (double y = 0; y <= 150; y += major)
-        p->drawLine(QPointF(o.x(), o.y() + (150 - y) * s),
-                    QPointF(o.x() + 200 * s, o.y() + (150 - y) * s));
+    for (double x = 0; x <= workArea().width(); x += major)
+        p->drawLine(QPointF(o.x() + x * s, o.y()),
+                    QPointF(o.x() + x * s, o.y() + workArea().height() * s));
+    for (double y = 0; y <= workArea().height(); y += major)
+        p->drawLine(QPointF(o.x(), o.y() + (workArea().height() - y) * s),
+                    QPointF(o.x() + workArea().width() * s, o.y() + (workArea().height() - y) * s));
     if (m_document) {
         p->setClipRect(boundingRect());
         p->translate(o);
@@ -318,18 +350,18 @@ void Workspace::paint(QPainter *p) {
                          (move.rapid || move.power <= 0) ? Qt::DashLine : Qt::SolidLine);
                 pen.setCosmetic(true);
                 p->setPen(pen);
-                p->drawLine(Geometry::worldToCanvas(move.from), Geometry::worldToCanvas(move.to));
+                p->drawLine(worldToCanvas(move.from), worldToCanvas(move.to));
             }
         } else {
             int idx = 0;
-            QPointF previous(0, 150);
+            QPointF previous(0, workArea().height());
             for (const auto &world : m_document->items()) {
                 if (world.page != m_document->activePage()) {
                     ++idx;
                     continue;
                 }
                 Artwork a = world;
-                a.bounds = Geometry::worldToCanvas(world.bounds);
+                a.bounds = worldToCanvas(world.bounds);
                 const bool enabled = m_document->layers()[a.layer].toMap()["enabled"].toBool();
                 const bool selected = m_document->isSelected(idx);
                 if ((!a.visible && (!selected || m_preview)) || (!enabled && m_preview)) {
@@ -349,7 +381,7 @@ void Workspace::paint(QPainter *p) {
                     QString error;
                     auto path = JobPlanner::geometry(world, error, true);
                     QTransform t;
-                    t.translate(0, 150);
+                    t.translate(0, workArea().height());
                     t.scale(1, -1);
                     if (a.toolLayer != 0 || m_document->layers()[a.layer].toMap()["mode"] == "Schnitt")
                         p->drawPath(t.map(path));
@@ -371,7 +403,7 @@ void Workspace::paint(QPainter *p) {
                     QString error;
                     auto path = JobPlanner::geometry(world, error, true);
                     QTransform t;
-                    t.translate(0, 150);
+                    t.translate(0, workArea().height());
                     t.scale(1, -1);
                     p->fillPath(t.map(path), c);
                 }
@@ -403,16 +435,14 @@ void Workspace::paint(QPainter *p) {
                 p->setBrush(QColor("#ffffff"));
                 for (auto node : m_document->nodes()) {
                     auto n = node.toMap();
-                    auto point =
-                        Geometry::worldToCanvas(QPointF(n["x"].toDouble(), n["y"].toDouble()));
+                    auto point = worldToCanvas(QPointF(n["x"].toDouble(), n["y"].toDouble()));
                     p->drawEllipse(point, 2 / scale(), 2 / scale());
                 }
             }
             if (!m_preview && m_document->selectedRows().size() > 1) {
                 p->setPen(QPen(QColor("#1c956f"), .6, Qt::DashLine));
                 p->setBrush(Qt::NoBrush);
-                p->drawRect(
-                    Geometry::worldToCanvas(m_document->selectionBounds()).adjusted(-2, -2, 2, 2));
+                p->drawRect(worldToCanvas(m_document->selectionBounds()).adjusted(-2, -2, 2, 2));
             }
         }
         p->resetTransform();
@@ -423,13 +453,14 @@ void Workspace::paint(QPainter *p) {
     p->drawRect(bed);
     p->setFont(QFont("DejaVu Sans", 8));
     p->setPen(m_dark ? QColor("#9cabb4") : QColor("#768994"));
-    for (double x = 0; x <= 200; x += major) {
+    const double ruler = major * std::max(1., std::ceil(45. / (major * s)));
+    for (double x = 0; x <= workArea().width(); x += ruler) {
         auto px = o.x() + x * s;
         p->drawText(QRectF(px - 15, o.y() - 24, 30, 15), Qt::AlignCenter,
                     QString::number(m_imperial ? qRound(x / 25.4) : qRound(x)));
     }
-    for (double y = 0; y <= 150; y += major) {
-        const auto py = o.y() + (150 - y) * s;
+    for (double y = 0; y <= workArea().height(); y += ruler) {
+        const auto py = o.y() + (workArea().height() - y) * s;
         p->drawText(QRectF(o.x() - 36, py - 7, 25, 14), Qt::AlignRight | Qt::AlignVCenter,
                     QString::number(m_imperial ? qRound(y / 25.4) : qRound(y)));
     }
@@ -439,7 +470,7 @@ void Workspace::paint(QPainter *p) {
     p->setPen(QPen(QColor("#378f7b"), 2));
     p->drawLine(bed.bottomLeft(), bed.bottomLeft() + QPointF(0, -18));
     if (m_simulator && m_simulator->connected()) {
-        QPointF h = o + QPointF(m_simulator->x() * s, (150 - m_simulator->y()) * s);
+        QPointF h = o + QPointF(m_simulator->x() * s, (workArea().height() - m_simulator->y()) * s);
         bool fire = m_simulator->firing();
         p->setPen(QPen(fire ? QColor("#d17a35") : QColor("#697f8d"), 1));
         p->drawLine(h - QPointF(9, 0), h + QPointF(9, 0));
@@ -485,7 +516,7 @@ void Workspace::paintGuides(QPainter *p) {
             const double x = o.x() + position * s;
             p->drawLine(QPointF(x, 0), QPointF(x, height() - 45));
         } else {
-            const double y = o.y() + (150 - position) * s;
+            const double y = o.y() + (workArea().height() - position) * s;
             p->drawLine(QPointF(0, y), QPointF(width(), y));
         }
     };

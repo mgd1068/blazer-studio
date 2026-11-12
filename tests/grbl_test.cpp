@@ -6,6 +6,7 @@
 #include <QtTest>
 #include <fcntl.h>
 #include <pty.h>
+#include <termios.h>
 #include <unistd.h>
 class Controller : public QObject {
   public:
@@ -29,6 +30,12 @@ class Controller : public QObject {
         if (openpty(&master, &slave, name, nullptr, nullptr))
             qFatal("openpty failed");
         port = name;
+        termios attributes{};
+        if (tcgetattr(slave, &attributes))
+            qFatal("tcgetattr failed");
+        cfmakeraw(&attributes);
+        if (tcsetattr(slave, TCSANOW, &attributes))
+            qFatal("tcsetattr failed");
         close(slave);
         fcntl(master, F_SETFL, O_NONBLOCK);
         notifier = new QSocketNotifier(master, QSocketNotifier::Read, this);
@@ -156,6 +163,40 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void connectedMachinePreventsProjectProfileReplacement() {
+        Controller controller;
+        Document document;
+        document.newProject();
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        auto descriptor = DeviceProfile::m3Reference().toJson();
+        auto area = descriptor["workspace"].toObject();
+        area["width"] = 600;
+        area["height"] = 400;
+        descriptor["workspace"] = area;
+        QString error;
+        const auto other = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(other);
+        const auto bytes = document.projectBytes();
+        const auto revision = document.historyRevision();
+        QVERIFY(!document.setDeviceProfile(*other));
+        QCOMPARE(document.projectBytes(), bytes);
+        QCOMPARE(document.historyRevision(), revision);
+        const auto beforeClose = controller.commands.size();
+        machine.toggleConnection();
+        QTRY_COMPARE(controller.commands.size(), beforeClose + 1);
+        QCOMPARE(controller.commands.last(), QString("M5 S0"));
+        QVERIFY(document.setDeviceProfile(*other));
+        QVERIFY(machine.simulation());
+        const auto before = controller.commands.size();
+        QVERIFY(!machine.connectHardware(controller.port));
+        QTest::qWait(20);
+        QCOMPARE(controller.commands.size(), before);
+        QVERIFY(document.setDeviceProfile(DeviceProfile::m3Reference()));
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+    }
     void foreignJobProfilesNeverSendTheirCachedCommands() {
         Controller controller;
         GrblSession session;

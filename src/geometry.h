@@ -23,11 +23,11 @@ inline bool insideBed(const QRectF &r, QSizeF bed = {bedWidth, bedHeight}) {
            r.bottom() <= bed.height();
 }
 // Both arguments use mm. QRectF's minimum y represents the lower edge in world space.
-inline QPointF worldToCanvas(QPointF world) {
-    return {world.x(), bedHeight - world.y()};
+inline QPointF worldToCanvas(QPointF world, double height = bedHeight) {
+    return {world.x(), height - world.y()};
 }
-inline QRectF worldToCanvas(QRectF world) {
-    return {world.x(), bedHeight - world.y() - world.height(), world.width(), world.height()};
+inline QRectF worldToCanvas(QRectF world, double height = bedHeight) {
+    return {world.x(), height - world.y() - world.height(), world.width(), world.height()};
 }
 inline QPointF framePoint(const QRectF &r, double progress) {
     const double distance = std::clamp(progress, 0., 1.) * 2 * (r.width() + r.height());

@@ -1,6 +1,6 @@
 # Blaze X M3 – importiertes Profil
 
-Das M3 ist das erste Referenzgerät. Weitere Laser sind als Produktziel eingeplant; Profil, Controlleradapter und Geräteabnahme werden getrennt entwickelt. Der [Mehrgeräteplan](MULTI_DEVICE_PLAN.md) beschreibt den eingeführten Profilvertrag und die noch nötige durchgängige Umstellung. Aktuell ist weiterhin ausschließlich die bisherige M3-Konfiguration an die Laufzeit angebunden.
+Das M3 ist das erste Referenzgerät. Weitere Laser sind als Produktziel eingeplant; Profil, Controlleradapter und Geräteabnahme werden getrennt entwickelt. Der [Mehrgeräteplan](MULTI_DEVICE_PLAN.md) beschreibt den Profilvertrag, die durchgängigen Profildaten für bekannte GRBL-XY-Projekte und den offenen Ausbau um weitere Adapter. Aktuell ist weiterhin ausschließlich die bisherige M3-Konfiguration an die Laufzeit angebunden.
 
 Ausgelesen am 09.11.2026 aus der vorhandenen Installation, ausschließlich Dateizugriff. Die Originalkonfiguration wurde nicht verändert und kein serieller Anschluss geöffnet.
 

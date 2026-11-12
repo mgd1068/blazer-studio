@@ -52,20 +52,20 @@ Artwork pageCopy(const Artwork &source, int page, QMap<QString, QString> &groups
 }
 } // namespace
 
-bool Document::bakePath(Artwork &a, const QPainterPath &path) {
+bool Document::bakePath(Artwork &a, const QPainterPath &path) const {
     if (path.isEmpty() || path.elementCount() > 100000)
         return false;
     const auto physical = path.boundingRect();
     auto b = physical;
     if (b.width() < Geometry::minimumSize) {
         b.adjust(-Geometry::minimumSize/2,0,Geometry::minimumSize/2,0);
-        if(physical.left()>=0 && physical.right()<=Geometry::bedWidth)
-            b.moveLeft(std::clamp(b.left(),0.,Geometry::bedWidth-b.width()));
+        if (physical.left() >= 0 && physical.right() <= bedWidth())
+            b.moveLeft(std::clamp(b.left(), 0., bedWidth() - b.width()));
     }
     if (b.height() < Geometry::minimumSize) {
         b.adjust(0,-Geometry::minimumSize/2,0,Geometry::minimumSize/2);
-        if(physical.top()>=0 && physical.bottom()<=Geometry::bedHeight)
-            b.moveTop(std::clamp(b.top(),0.,Geometry::bedHeight-b.height()));
+        if (physical.top() >= 0 && physical.bottom() <= bedHeight())
+            b.moveTop(std::clamp(b.top(), 0., bedHeight() - b.height()));
     }
     if (!Geometry::validBounds(b))
         return false;
@@ -242,6 +242,8 @@ bool Document::restoreBytes(const QByteArray &bytes) {
         notify("Wiederherstellung abgelehnt: ungültiges Projekt.");
         return false;
     }
+    if (!canApplyDeviceProfile(state->deviceProfile))
+        return false;
     checkpoint("Wiederherstellung");
     m_saved = Snapshot{};
     setFileUrl({});
@@ -794,7 +796,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
                             auto delta = c - rb.topLeft();
                             auto q = rotated.translated(delta);
                             auto bounds = q.boundingRect();
-                            if (!Geometry::insideBed(bounds))
+                            if (!Geometry::insideBed(bounds, workArea()))
                                 continue;
                             QPainterPathStroker stroker;
                             stroker.setWidth(2 * gap);
@@ -915,9 +917,10 @@ bool Document::exportSvg(const QUrl &url) const {
     out.writeStartDocument();
     out.writeStartElement("svg");
     out.writeDefaultNamespace("http://www.w3.org/2000/svg");
-    out.writeAttribute("width", "200mm");
-    out.writeAttribute("height", "150mm");
-    out.writeAttribute("viewBox", "0 0 200 150");
+    out.writeAttribute("width", QString::number(bedWidth(), 'g', 17) + "mm");
+    out.writeAttribute("height", QString::number(bedHeight(), 'g', 17) + "mm");
+    out.writeAttribute("viewBox", "0 0 " + QString::number(bedWidth(), 'g', 17) + " " +
+                                      QString::number(bedHeight(), 'g', 17));
     for (const auto &a : m_items)
         if (a.page == m_activePage && a.visible && a.toolLayer == 0) {
             QString error;
@@ -925,7 +928,7 @@ bool Document::exportSvg(const QUrl &url) const {
             if (!error.isEmpty())
                 return false;
             QTransform t;
-            t.translate(0, 150);
+            t.translate(0, bedHeight());
             t.scale(1, -1);
             out.writeStartElement("path");
             out.writeAttribute("d", VectorUtil::svg(t.map(path)));

@@ -277,12 +277,12 @@ ScrollView {
             Text { text: "DXF (ASCII), SVG, HPGL/PLT-Grundpfade, GCode-/RDWorks-Jobgeometrie, PDF/AI über Inkscape, Rasterbilder, STL/OBJ und unterstützte LightBurn-/MillMage-Grundformen und eingebettete PNG-Bilder. Nicht unterstützte Inhalte werden gemeldet."; wrapMode: Text.WordWrap; Layout.fillWidth: true; color: tools.muted; font.pixelSize: 10 }
             SectionLabel { text: "REFERENZFOTO / 4-PUNKT-REGISTRIERUNG"; dark: tools.dark }
             ActionButton { text: "Foto laden"; dark: tools.dark; enabled: typeof cameraRegistration!=="undefined"; onClicked: {tools.nextCorner=0;tools.cameraRequested()} }
-            Text { text: "Pixelkoordinaten der vier Arbeitsraum-Ecken: links oben, rechts oben, rechts unten, links unten. Das Foto muss die reale 200 × 150-mm-Fläche zeigen. Keine automatische Kameraaufnahme oder Linsenentzerrung."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 10 }
+            Text { text: "Pixelkoordinaten der vier Arbeitsraum-Ecken: links oben, rechts oben, rechts unten, links unten. Das Foto muss die gesamte Arbeitsfläche des Projektprofils zeigen. Keine automatische Kameraaufnahme oder Linsenentzerrung."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 10 }
             Image {
                 id: referencePreview; objectName: "referencePreview"; Layout.fillWidth: true; Layout.preferredHeight: 190
                 fillMode: Image.PreserveAspectFit
                 source: typeof cameraRegistration!=="undefined" ? cameraRegistration.source : ""
-                MouseArea { anchors.fill: parent; hoverEnabled: true; ToolTip.visible: containsMouse; ToolTip.text: "Nacheinander die vier Ecken der Arbeitsfläche anklicken: unten links, unten rechts, oben rechts, oben links. Danach Kalibrieren wählen."; ToolTip.delay: 650; onClicked: mouse=>{let x=(mouse.x-(referencePreview.width-referencePreview.paintedWidth)/2)/referencePreview.paintedWidth*cameraRegistration.imageWidth;let y=(mouse.y-(referencePreview.height-referencePreview.paintedHeight)/2)/referencePreview.paintedHeight*cameraRegistration.imageHeight;if(isFinite(x)&&isFinite(y)&&x>=0&&y>=0&&x<=cameraRegistration.imageWidth&&y<=cameraRegistration.imageHeight){corners.itemAt(tools.nextCorner%4).setCoordinates(x,y);tools.nextCorner++}} }
+                MouseArea { anchors.fill: parent; hoverEnabled: true; ToolTip.visible: containsMouse; ToolTip.text: "Nacheinander die vier Ecken der Arbeitsfläche anklicken: links oben, rechts oben, rechts unten, links unten. Danach Kalibrieren wählen."; ToolTip.delay: 650; onClicked: mouse=>{let x=(mouse.x-(referencePreview.width-referencePreview.paintedWidth)/2)/referencePreview.paintedWidth*cameraRegistration.imageWidth;let y=(mouse.y-(referencePreview.height-referencePreview.paintedHeight)/2)/referencePreview.paintedHeight*cameraRegistration.imageHeight;if(isFinite(x)&&isFinite(y)&&x>=0&&y>=0&&x<=cameraRegistration.imageWidth&&y<=cameraRegistration.imageHeight){corners.itemAt(tools.nextCorner%4).setCoordinates(x,y);tools.nextCorner++}} }
             }
             Text { text: "Im Foto die vier Ecken der Reihe nach anklicken; nächster Punkt: P"+(tools.nextCorner%4+1); color: tools.muted; font.pixelSize: 10 }
             Repeater { id: corners; model: 4
@@ -295,7 +295,7 @@ ScrollView {
                 }
             }
             RowLayout { Layout.fillWidth: true
-                ActionButton { objectName: "registerCamera"; text: "Kalibrieren"; dark: tools.dark; enabled: typeof cameraRegistration!=="undefined"; onClicked: {let points=[];for(let i=0;i<4;i++)points=points.concat(corners.itemAt(i).coordinates());if(!cameraRegistration.calibrate(points,[0,150,200,150,200,0,0,0]))project.notify("Vier nicht kollineare Eckpunkte im Foto erforderlich.")} }
+                ActionButton { objectName: "registerCamera"; text: "Kalibrieren"; dark: tools.dark; enabled: typeof cameraRegistration!=="undefined"; onClicked: {let points=[];for(let i=0;i<4;i++)points=points.concat(corners.itemAt(i).coordinates());if(!cameraRegistration.calibrate(points,[0,project.bedHeight,project.bedWidth,project.bedHeight,project.bedWidth,0,0,0]))project.notify("Vier nicht kollineare Eckpunkte im Foto erforderlich.")} }
                 CheckBox { HelpBubble { target: parent } text: "Foto einblenden"; enabled: typeof cameraRegistration!=="undefined" && cameraRegistration.calibrated; checked: typeof cameraRegistration!=="undefined" && cameraRegistration.visible; onClicked: cameraRegistration.visible=checked }
             }
             ActionButton { text: "Letzte Sicherung wiederherstellen"; dark: tools.dark; enabled: typeof recovery!=="undefined" && recovery.available; onClicked: recovery.restore() }

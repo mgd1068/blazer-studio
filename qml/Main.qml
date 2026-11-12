@@ -15,7 +15,7 @@ ApplicationWindow {
     property bool basic: true
     property bool proofConfirmed: false
     property string probeKey: ""
-    readonly property string parameterKey: JSON.stringify(project.material)+JSON.stringify(project.layers)
+    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)
     readonly property bool isBasicProbe: probeKey===parameterKey && project.count===1 && project.selection.width===5 && project.selection.height===5
     onParameterKeyChanged: proofConfirmed=false
     onBasicChanged: if(basic && page>2)page=0
@@ -27,11 +27,11 @@ ApplicationWindow {
     function refreshFraming() { frameRegion=project.framingBounds(frameScope) }
     onFrameScopeChanged: refreshFraming()
     property real step: 10
-    property real selectedModuleW: deviceProfile.modulePowerW || 5
-    readonly property real appliedModuleW: project.material.moduleW || deviceProfile.modulePowerW || 5
+    property real selectedModuleW: project.deviceInfo.modulePowerW || 0
+    readonly property real appliedModuleW: project.material.moduleW || project.deviceInfo.modulePowerW || 0
     onAppliedModuleWChanged: selectedModuleW = appliedModuleW
     readonly property var toolHeadPowers: { let names = materialLibrary.names; return materialLibrary.modulePowers() }
-    readonly property var toolHeadNames: toolHeadPowers.map(watts => watts + " W" + (watts === deviceProfile.modulePowerW ? " · eingerichtet" : ""))
+    readonly property var toolHeadNames: toolHeadPowers.map(watts => watts + " W" + (watts === project.deviceInfo.modulePowerW ? " · eingerichtet" : ""))
     readonly property var materialRows: { let names = materialLibrary.names; return materialLibrary.rowsForModule(selectedModuleW) }
     readonly property var materialNames: materialRows.map(row => materialLibrary.profileAt(row).name)
     readonly property int materialRow: materialRows.indexOf(libraryIndex)
@@ -504,9 +504,9 @@ ApplicationWindow {
                         Layout.fillWidth: true; height: 78; radius: 7; color: win.night ? "#293e47" : "#f0f7f4"; border.color: win.night ? "#36554f" : "#d8e9e2"
                         Column {
                             anchors.fill: parent; anchors.margins: 12; spacing: 5
-                            Text { text: "◈  " + deviceProfile.name; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
-                            Text { text: "200 × 150 mm  ·  GRBL"; color: win.muted; font.pixelSize: 11 }
-                            Text { text: "Profil aus LightBurn"; color: "#299679"; font.pixelSize: 12 }
+                            Text { objectName: "deviceProfileName"; width: parent.width; elide: Text.ElideRight; textFormat: Text.PlainText; text: "◈  " + project.deviceInfo.name; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                            Text { width: parent.width; elide: Text.ElideRight; textFormat: Text.PlainText; text: project.bedWidth+" × "+project.bedHeight+" mm  ·  "+project.deviceInfo.controller; color: win.muted; font.pixelSize: 11 }
+                            Text { text: "Projektprofil"; color: "#299679"; font.pixelSize: 12 }
                         }
                     }
                     ColumnLayout {
@@ -522,7 +522,7 @@ ApplicationWindow {
                             // ComboBox selects row 0 during a model reset; restore the bound selection afterwards.
                             onModelChanged: Qt.callLater(function() { toolHeadChoice.currentIndex = Qt.binding(function() { return win.toolHeadPowers.indexOf(win.selectedModuleW) }) })
                             currentIndex: win.toolHeadPowers.indexOf(win.selectedModuleW)
-                            displayText: currentIndex >= 0 ? currentText : win.selectedModuleW + " W"
+                            displayText: currentIndex >= 0 ? currentText : win.selectedModuleW > 0 ? win.selectedModuleW + " W" : "Leistung unbekannt"
                             onActivated: index => win.selectedModuleW = win.toolHeadPowers[index]
                             contentItem: Text { text: toolHeadChoice.displayText; color: win.ink; font: toolHeadChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: toolHeadChoice.indicator.width + 8 }
                             indicator: Text { x: toolHeadChoice.width - width - 10; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink; font.pixelSize: 14 }
@@ -605,7 +605,7 @@ ApplicationWindow {
                         }
                         Text { visible: win.materialRows.length === 0; text: "Noch kein Materialprofil für diesen Kopf · mit + anlegen"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Text { visible: !win.projectHeadMatches; text: "Projektprofil: " + win.appliedModuleW + " W · passendes Material wählen"; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Text { text: project.materialModified ? "Projektwerte weichen vom Profil ab" : (project.material.model !== "M3" ? "M3 Pro · Zuordnung zum M3 offen" : "Eigene Werte · noch nicht am Material geprüft"); color: project.materialModified ? "#bd8b40" : win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text { text: project.materialModified ? "Projektwerte weichen vom Profil ab" : (project.material.model !== "M3" ? "Herstellerreferenzen · Gerätezuordnung prüfen" : "Eigene Werte · noch nicht am Material geprüft"); color: project.materialModified ? "#bd8b40" : win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Text { visible: !!project.material.sourceParameters && project.material.sourceParameters.passes === null; text: "Gravur-Durchgänge: keine Herstellerangabe · Projektwert " + project.layers[0].passes; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Text { visible: materialLibrary.message.length > 0; text: materialLibrary.message; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
@@ -796,7 +796,7 @@ ApplicationWindow {
                         Rectangle {
                             anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 20
                             width: win.lengthUnit==="in" ? 190 : 168; height: 30; radius: 15; color: win.panel; border.color: win.line
-                            Text { objectName: "editorBedSize"; anchors.centerIn: parent; width: parent.width-14; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; textFormat: Text.PlainText; text: win.page === 0 ? project.pages[project.activePage]+" · "+(win.lengthUnit==="in" ? (200/25.4).toFixed(3)+" × "+(150/25.4).toFixed(3)+" in" : "200 × 150 mm") : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 12 }
+                            Text { objectName: "editorBedSize"; anchors.centerIn: parent; width: parent.width-14; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; textFormat: Text.PlainText; text: win.page === 0 ? project.pages[project.activePage]+" · "+(win.lengthUnit==="in" ? (project.bedWidth/25.4).toFixed(3)+" × "+(project.bedHeight/25.4).toFixed(3)+" in" : project.bedWidth+" × "+project.bedHeight+" mm") : "Berechnete Bearbeitungswege"; color: win.muted; font.pixelSize: 12 }
                         }
                         ToolCombo {
                             objectName: "editorUnitChoice"; dark: win.night; width: 76; height: 30
@@ -877,10 +877,10 @@ ApplicationWindow {
                                         ColumnLayout {
                                             Layout.fillWidth: true; spacing: 8
                                             SectionLabel { text: "POSITION & FOKUS"; dark: win.night }
-                                            Text { text: machine.firing ? "2 % angefordert" : "Fokuspunkt mit 2 %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
-                                            Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei 2 % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
+                                            Text { text: machine.firing ? project.deviceInfo.focusPower+" % angefordert" : "Fokuspunkt mit "+project.deviceInfo.focusPower+" %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+                                            Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei "+project.deviceInfo.focusPower+" % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
                                         }
-                                        ActionButton { objectName: "focusHold"; text: "◎  Halten für 2 %"; primary: true; implicitHeight: 44; enabled: machine.ready || machine.firing; onPressedChanged: machine.focus(pressed) }
+                                        ActionButton { objectName: "focusHold"; text: "◎  Halten für "+project.deviceInfo.focusPower+" %"; primary: true; implicitHeight: 44; enabled: machine.ready || machine.firing; onPressedChanged: machine.focus(pressed) }
                                     }
                                 }
                                 ColumnLayout {
@@ -1014,7 +1014,7 @@ ApplicationWindow {
                             Rectangle { visible: !win.basic; Layout.fillWidth: true; height: 1; color: win.line }
                             SectionLabel { visible: !win.basic; text: "GERÄTEPROFIL"; dark: win.night }
                             Repeater {
-                                model: win.basic ? [] : [{k:"Verbindung",v:"GRBL · seriell"},{k:"Baudrate",v:"115200"},{k:"S-Max",v:"1000"},{k:"Fokuspunkt",v:"2 % / S20"},{k:"Z-Achse",v:"Deaktiviert"}]
+                                model: win.basic ? [] : [{k:"Verbindung",v:project.deviceInfo.controller+" · seriell"},{k:"Baudrate",v:String(project.deviceInfo.baudRate)},{k:"S-Max",v:String(project.deviceInfo.powerScale)},{k:"Fokuspunkt",v:project.deviceInfo.focusPower+" % / S"+Math.round(project.deviceInfo.focusPower*project.deviceInfo.powerScale/100)},{k:"Z-Achse",v:project.deviceInfo.zEnabled ? "Aktiviert" : "Deaktiviert"}]
                                 delegate: RowLayout {
                                     required property var modelData
                                     Layout.fillWidth: true

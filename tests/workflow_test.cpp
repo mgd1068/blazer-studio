@@ -86,6 +86,83 @@ class WorkflowTest : public QObject {
         QTest::newRow("light") << false;
         QTest::newRow("compact-dark") << true;
     }
+    void deviceProfileUpdatesTheVisibleWorkspace_data() {
+        QTest::addColumn<bool>("compactDark");
+        QTest::newRow("profile-light") << false;
+        QTest::newRow("profile-dark") << true;
+    }
+    void deviceProfileUpdatesTheVisibleWorkspace() {
+        QFETCH(bool, compactDark);
+        QTemporaryDir storage;
+        Document project;
+        project.newProject();
+        Machine machine(&project, nullptr, Machine::HardwareAccess::Disabled);
+        MaterialLibrary library(storage.filePath("materials.json"));
+        Registration registration;
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        QVERIFY(services.finishOnboarding());
+        QQmlApplicationEngine engine;
+        auto *context = engine.rootContext();
+        context->setContextProperty("project", &project);
+        context->setContextProperty("machine", &machine);
+        context->setContextProperty("materialLibrary", &library);
+        context->setContextProperty("cameraRegistration", &registration);
+        context->setContextProperty("appServices", &services);
+        context->setContextProperty(
+            "manufacturerReference",
+            QJsonDocument::fromJson(
+                read(QStringLiteral(BLAZER_SOURCE_DIR "/profiles/manufacturer-materials.json")))
+                .toVariant());
+        engine.load(QUrl::fromLocalFile(QStringLiteral(BLAZER_SOURCE_DIR "/qml/Main.qml")));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->setProperty("basic", false);
+        if (compactDark) {
+            window->resize(1180, 760);
+            window->setProperty("night", true);
+        }
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto descriptor = DeviceProfile::m3Reference().toJson();
+        descriptor["id"] = "synthetic-ui";
+        descriptor["name"] = "<b>Synthetischer Laser</b>";
+        auto area = descriptor["workspace"].toObject();
+        area["width"] = 600;
+        area["height"] = 400;
+        descriptor["workspace"] = area;
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        window->setProperty("proofConfirmed", true);
+        QVERIFY(project.setDeviceProfile(*profile));
+        QTRY_VERIFY(!window->property("proofConfirmed").toBool());
+        project.addShape("rect");
+        project.setProperty("x", 400.);
+        project.setProperty("y", 300.);
+        project.setProperty("width", 30.);
+        project.setProperty("height", 20.);
+        auto *label = findItem(window->contentItem(), "editorBedSize");
+        QVERIFY(label);
+        QTRY_VERIFY(label->property("text").toString().contains("600 × 400 mm"));
+        auto *name = findItem(window->contentItem(), "deviceProfileName");
+        QVERIFY(name);
+        QCOMPARE(name->property("text").toString(), QString("◈  <b>Synthetischer Laser</b>"));
+        QCOMPARE(name->property("textFormat").toInt(), 0); // PlainText.
+        QVERIFY(project.job().valid());
+        QVERIFY(project.framingBounds("selection")["valid"].toBool());
+        QVERIFY(services.setLengthUnit("in"));
+        QTRY_VERIFY(label->property("text").toString().contains("23.622 × 15.748 in"));
+        QVERIFY(services.setLengthUnit("mm"));
+        QTest::qWait(100);
+        if (qEnvironmentVariableIsSet("BLAZER_WORKFLOW_SCREENSHOT"))
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("BLAZER_WORKFLOW_SCREENSHOT") +
+                                              "." + QTest::currentDataTag() + ".png"));
+    }
     void completeApplicationWorkflow() {
         QFETCH(bool, compactDark);
         QTemporaryDir storage;

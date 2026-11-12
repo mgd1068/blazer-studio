@@ -38,7 +38,9 @@ Die Vorlage wird beim Laden, Bearbeiten und normalen Projektspeichern nicht ver�
 
 Vorlagen übernehmen keine Maschinenverbindung oder Startfreigabe. Beim neuen Projekt werden Materialbestätigung und der Sonderstatus einer früheren Probe zurückgesetzt. Vor einem echten Start bleiben Material, Lage, Fokus und die gerätespezifischen Bedingungen zu prüfen. Eine Vorlage startet weder Bewegung noch Laser.
 
-Das eigene Vorlagenformat hat die Kennung `blazer-studio-template`, `templateVersion: 1` und enthält das jeweils benötigte Projektformat 8, 9 oder 10. Die Dateigrenze bleibt 64 MiB; Projekt-, Bild- und Geometriegrenzen werden beim Laden vollständig geprüft. Es wurde kein Import fremder Vorlagenformate abgenommen.
+Abweichende Geräteprofile verwenden ab beta.4-dev **Format 11** mit `deviceProfile`, den Hilfslinienfeldern und `toolLayer` für jedes Objekt. Das Profil enthält ausschließlich den bekannten GRBL-XY-Projektparametervertrag; Herkunft, Anschlussnamen und Zugangsdaten werden nicht eingebettet. Alte Dateien ohne Geräteprofil behalten ausdrücklich die M3-Fläche und Leistungsskala. Ein Öffnen skaliert keine Geometrie. Profilwechsel sind rücknehmbar und bei aktiver Verbindung oder laufendem Auftrag gesperrt. Umfang und aktuelle Gerätebegrenzung stehen im [Mehrgeräteplan](MULTI_DEVICE_PLAN.md). Ein älterer Leser muss Format 11 ablehnen; es wird nicht ohne Gerätedaten zurückgespeichert.
+
+Das eigene Vorlagenformat hat die Kennung `blazer-studio-template`, `templateVersion: 1` und enthält das jeweils benötigte Projektformat 8, 9, 10 oder 11. Die Dateigrenze bleibt 64 MiB; Projekt-, Bild- und Geometriegrenzen werden beim Laden vollständig geprüft. Es wurde kein Import fremder Vorlagenformate abgenommen.
 
 Das Linux-Paket und der lokale Quellstarter registrieren `.blazertemplate` als eigenen Dateityp. Ein entsprechender Dateistart erzeugt ein neues Projekt. Die Prüfung am tatsächlichen Desktop einschließlich seiner Dateizuordnung bleibt ein eigener T08-Fall.
 

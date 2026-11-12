@@ -11,6 +11,20 @@ Simulator::Simulator(QObject *p) : QObject(p) {
     connect(&m_focusLimit, &QTimer::timeout, this, [this] { focus(false); });
     append("Simulator bereit · keine Hardwareverbindung");
 }
+bool Simulator::setDeviceProfile(const DeviceProfile &profile) {
+    if (busy() || firing())
+        return false;
+    if (profile.outputFingerprint() == m_deviceProfile.outputFingerprint())
+        return true;
+    m_deviceProfile = profile;
+    m_job = JobPlan(profile);
+    m_x = profile.workArea().width() / 2;
+    m_y = profile.workArea().height() / 2;
+    m_frame = {};
+    m_progress = 0;
+    emit changed();
+    return true;
+}
 QString Simulator::state() const {
     switch (m_mode) {
     case Mode::Ready:
@@ -55,8 +69,8 @@ void Simulator::disconnectFault() {
 void Simulator::jog(double dx, double dy) {
     if (m_mode != Mode::Ready || m_firing || !std::isfinite(dx) || !std::isfinite(dy))
         return;
-    m_x = std::clamp(m_x + dx, 0., Geometry::bedWidth);
-    m_y = std::clamp(m_y + dy, 0., Geometry::bedHeight);
+    m_x = std::clamp(m_x + dx, 0., m_deviceProfile.workArea().width());
+    m_y = std::clamp(m_y + dy, 0., m_deviceProfile.workArea().height());
     append(QString("Position %1 / %2 mm").arg(m_x, 0, 'f', 1).arg(m_y, 0, 'f', 1));
 }
 void Simulator::home() {
@@ -73,7 +87,9 @@ void Simulator::focus(bool on) {
         m_focusLimit.start();
     else
         m_focusLimit.stop();
-    append(on ? "2 % Fokuspunkt simuliert · max. 3 Sekunden" : "Laser-Aus simuliert");
+    append(on ? QString::number(m_deviceProfile.driverSettings()["focusPower"].toDouble()) +
+                    " % Fokuspunkt simuliert · max. 3 Sekunden"
+              : "Laser-Aus simuliert");
 }
 void Simulator::frame(const QVariantMap &bounds) {
     if (m_mode != Mode::Ready || m_firing)
@@ -88,7 +104,7 @@ void Simulator::frame(const QVariantMap &bounds) {
     }
     QRectF rect(bounds["x"].toDouble(), bounds["y"].toDouble(), bounds["width"].toDouble(),
                 bounds["height"].toDouble());
-    if (!bounds["valid"].toBool() || !Geometry::insideBed(rect)) {
+    if (!bounds["valid"].toBool() || !Geometry::insideBed(rect, m_deviceProfile.workArea())) {
         append("Rahmenfahrt abgelehnt: kein aktives Motiv oder außerhalb des Arbeitsraums.");
         return;
     }

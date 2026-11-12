@@ -102,6 +102,8 @@ bool Document::copySelectionToClipboard(bool cut) {
     state.title = "Zwischenablage";
     state.notes.clear();
     state.material.clear();
+    state.deviceProfile =
+        DeviceProfile::m3Reference(); // Clipboard transfers objects, never the target device.
     state.layers = m_layers.mid(0, 2);
     QMap<int, int> operationMap{{0, 0}, {1, 1}};
     const auto operation = [&](int source) {
@@ -242,8 +244,8 @@ bool Document::pasteFromClipboard(bool inPlace) {
             a.kind = "svg";
             a.asset = asset;
             a.layer = 0;
-            a.bounds = QRectF(QPointF((Geometry::bedWidth - asset->sizeMm.width()) / 2,
-                                      (Geometry::bedHeight - asset->sizeMm.height()) / 2),
+            a.bounds = QRectF(QPointF((bedWidth() - asset->sizeMm.width()) / 2,
+                                      (bedHeight() - asset->sizeMm.height()) / 2),
                               asset->sizeMm);
             fingerprint = svg;
         } else if (data->hasImage() || data->hasFormat("image/png")) {

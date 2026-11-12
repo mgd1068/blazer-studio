@@ -46,7 +46,7 @@ Das separate Speichern eines Bilds bleibt eine ausdrückliche Bildexportfunktion
 
 Projekte, eigene Vorlagen und Wiederherstellungen bewahren die Zuordnung;
 Blattkopien und Projektimport ebenfalls. Solange mindestens eine Hilfsform
-vorhanden ist, wird **Projektformat 10** gespeichert. Es verlangt je Objekt ein
+vorhanden ist, wird **Projektformat 10** gespeichert. Ein zusätzlich abweichendes Geräteprofil verwendet Format 11 einschließlich dieser Hilfsformfelder. Es verlangt je Objekt ein
 ganzzahliges `toolLayer` mit 0 (Laserobjekt), 1 (T1) oder 2 (T2), zusätzlich zu
 den Hilfsliniendaten von Format 9. Ältere Versionen müssen Format 10 ablehnen.
 Damit wird eine Hilfsform beim Öffnen mit einer älteren Anwendung nicht

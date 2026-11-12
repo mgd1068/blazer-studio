@@ -57,7 +57,7 @@ Ein Testname belegt nur seinen beschriebenen Fall. **Teilumfang** bedeutet vorha
 | F37 | Manuelle Maß-/Scanparameter, G54 und vorläufiges Referenzfoto | Maschinenkonfiguration sichern/wiederherstellen, unabhängige Maß- und Scanabnahme ergänzen |
 | F38 | Serielle Verbindung, Alarme, Homing und Jog: `grbl` | Gespeicherte Positionen und kontrollierte reale Fehlerfallabnahme offen |
 | F39 | G90/G54, Arbeitsnullpunkt und [laserfreie Rahmenfahrt für Auftrag, Auswahl oder T1/T2](FRAMING.md); geplante Weggrenzen und physische Offsetgrenzen geprüft | Relative/auswahlbezogene Startursprünge und Auswahl anfahren vervollständigen |
-| F40 | Eingefrorene Jobs mit Geräteprofil-/Fingerprintbindung, RX-Kredite, Pause/Stop und neue Idle-Bestätigung: `grbl`, `workflow`, `stability`; fremde Profile vor dem ersten Befehl abgewiesen | Neuer Treiberstand am Gerät, USB-/KVM-Fälle und Gerätespeicher soweit vorhanden abnehmen; wechselbare Dokumentprofile und weitere Controller bleiben in MD2–MD5 offen |
+| F40 | Eingefrorene Jobs mit Geräteprofil-/Fingerprintbindung, RX-Kredite, Pause/Stop und neue Idle-Bestätigung: `grbl`, `workflow`, `stability`; fremde Profile vor dem ersten Befehl abgewiesen. Format-11-Dokumentprofile und Wechsel-/Wiederherstellungsfälle: `deviceworkspace` | Neuer Treiberstand am Gerät, USB-/KVM-Fälle und Gerätespeicher soweit vorhanden abnehmen; weitere Controller und Geräteverwaltung bleiben MD3–MD5 |
 | F41 | Ausgelesene Konfiguration und begrenzter Ereignisverlauf | Bedienbare Konsole/Makros sowie Settings-Rundlauf mit eindeutigen Zustandsregeln fehlen |
 | F42 | Serielle Geräteerkennung vorhanden | Netzwerktransport und Bridge benötigen geklärtes Herstellerprotokoll; nicht eingerichtet |
 | F43 | Expliziter begrenzter 2-%-Puls: `finiteFocusAndAlarm`, `focusInterlocks` | Optische Wirkung und Abschaltung am Gerät offen; Host kann Abschaltung bei verlorenem Transport nicht garantieren |
@@ -66,7 +66,7 @@ Ein Testname belegt nur seinen beschriebenen Fall. **Teilumfang** bedeutet vorha
 
 | ID | Vorhandener Umfang und Nachweis | Verbleibende Arbeit |
 |---|---|---|
-| F44 | Manuelles Referenzfoto/Vierpunktregistrierung: `registrationAndInvalidProjects`; externe Webcamversuche | Kameraauswahl, Live-Aufnahme, Linsenmodell und reproduzierbare persistente Ausrichtung integrieren/abnehmen |
+| F44 | Manuelles Referenzfoto/Vierpunktregistrierung: `registrationAndInvalidProjects`; Profilfläche und Verwerfen alter Zuordnung: `deviceworkspace`; externe Webcamversuche | Kameraauswahl, Live-Aufnahme, Linsenmodell und reproduzierbare persistente Ausrichtung integrieren/abnehmen |
 | F45 | Keine integrierte Mehr-/Kopfkamera | Passenden Aufbau und Zusammensetzung spezifizieren; eine externe Webcam erfüllt diese Familie nicht |
 | F46 | Projektive Bildregistrierung als Grundlage | Manuellen und kameragestützten Print-and-Cut-Ausgabeablauf implementieren und unabhängig prüfen |
 | F47 | Rotary am vorhandenen XY-Profil nicht eingerichtet | Gerätefähigkeit/Zubehör zuerst belegen; Rotations-/Konusverfahren nicht als vorhanden ausgeben |

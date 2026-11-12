@@ -27,6 +27,8 @@ class Workspace : public QQuickPaintedItem {
         if (m_registration)
             disconnect(m_registration, nullptr, this, nullptr);
         m_registration = r;
+        if (r && m_document)
+            r->setDeviceProfile(m_document->deviceProfile());
         if (r)
             connect(r, &Registration::changed, this, [this] { update(); });
         emit registrationChanged();
@@ -100,6 +102,13 @@ class Workspace : public QQuickPaintedItem {
     void mouseUngrabEvent() override;
 
   private:
+    QSizeF workArea() const {
+        return m_document ? m_document->workArea() : DeviceProfile::m3Reference().workArea();
+    }
+    QPointF worldToCanvas(QPointF point) const;
+    QRectF worldToCanvas(QRectF rect) const;
+    void syncDeviceProfile();
+    QByteArray m_profileFingerprint;
     double scale() const;
     QPointF origin() const;
     QPointF toWorld(QPointF p) const;

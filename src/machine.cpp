@@ -1,9 +1,24 @@
 #include "machine.h"
 #include "document.h"
+#include <QPointer>
 #include <QSerialPortInfo>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
-    : Simulator(p), document(d), grbl(nullptr, d->deviceProfile()), hardwareAccess(access) {
-    connect(&grbl, &GrblSession::changed, this, &Simulator::changed);
+    : Simulator(p), document(d), hardwareAccess(access) {
+    document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
+        return !self || (!self->busy() && !self->firing() && !self->grbl->connected());
+    });
+    syncDeviceProfile();
+    connect(d, &Document::deviceProfileChanged, this, &Machine::syncDeviceProfile);
+}
+void Machine::syncDeviceProfile() {
+    if (grbl &&
+        grbl->deviceProfile().outputFingerprint() == document->deviceProfile().outputFingerprint())
+        return;
+    live = false;
+    grbl = std::make_unique<GrblSession>(nullptr, document->deviceProfile());
+    connect(grbl.get(), &GrblSession::changed, this, &Simulator::changed);
+    Simulator::setDeviceProfile(document->deviceProfile());
+    emit changed();
 }
 QStringList Machine::ports() const {
     if (hardwareAccess == HardwareAccess::Disabled)
@@ -20,48 +35,58 @@ bool Machine::connectHardware(const QString &port) {
         document->notify("Hardwareanschluss in diesem Offline-Lauf deaktiviert.");
         return false;
     }
+    const auto profileError = DeviceBackends::runtimeSupportError(document->deviceProfile());
+    if (!profileError.isEmpty()) {
+        document->notify(profileError);
+        return false;
+    }
     if (busy() || firing())
         return false;
-    if (grbl.connected())
-        grbl.close();
+    if (grbl->connected())
+        grbl->close();
     Simulator::stop();
     live = true;
-    bool result = grbl.open(port);
+    bool result = grbl->open(port);
     emit changed();
     return result;
 }
 void Machine::useSimulator() {
-    grbl.close();
+    grbl->close();
     live = false;
     emit changed();
 }
 void Machine::toggleConnection() {
     if (live)
-        grbl.close();
+        grbl->close();
     else
         Simulator::toggleConnection();
 }
 void Machine::jog(double x, double y) {
     if (live)
-        grbl.jog(x, y);
+        grbl->jog(x, y);
     else
         Simulator::jog(x, y);
 }
 void Machine::home() {
     if (live)
-        grbl.home();
+        grbl->home();
     else
         Simulator::home();
 }
 void Machine::focus(bool on) {
     if (live)
-        grbl.focus(on);
+        grbl->focus(on);
     else
         Simulator::focus(on);
 }
 void Machine::frame(const QVariantMap &b) {
+    if (b.value("outputFingerprint").toString() !=
+        QString::fromLatin1(document->deviceProfile().outputFingerprint())) {
+        document->notify("Rahmenziel gehört zu einem anderen Geräteprofil.");
+        return;
+    }
     if (live)
-        grbl.frame(b);
+        grbl->frame(b);
     else
         Simulator::frame(b);
 }
@@ -82,7 +107,7 @@ void Machine::start() {
         return;
     }
     if (live)
-        grbl.start(job);
+        grbl->start(job);
     else {
         Simulator::setJob(job);
         Simulator::start();
@@ -90,19 +115,19 @@ void Machine::start() {
 }
 void Machine::pause() {
     if (live)
-        grbl.pause();
+        grbl->pause();
     else
         Simulator::pause();
 }
 void Machine::stop() {
     if (live)
-        grbl.stop();
+        grbl->stop();
     else
         Simulator::stop();
 }
 void Machine::disconnectFault() {
     if (live)
-        grbl.close();
+        grbl->close();
     else
         Simulator::disconnectFault();
 }

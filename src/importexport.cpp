@@ -309,6 +309,11 @@ bool Document::importProject(const QUrl &url) {
     if (!state || m_items.size() + state->items.size() > Geometry::objectLimit ||
         m_layers.size() + state->layers.size() > 64)
         return false;
+    if (state->deviceProfile.outputFingerprint() != m_deviceProfile.outputFingerprint()) {
+        notify("Projektimport abgelehnt: abweichendes Geräteprofil. Geometrie bei Bedarf separat "
+               "importieren.");
+        return false;
+    }
     auto items = state->items;
     int offset = m_layers.size();
     QMap<QString, QString> groups;

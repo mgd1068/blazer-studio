@@ -11,6 +11,7 @@
 #include <QPainterPath>
 #include <QUrl>
 #include <QVariantMap>
+#include <functional>
 #include <optional>
 
 class Document : public QAbstractListModel {
@@ -24,6 +25,9 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QVariantList guides READ guides NOTIFY changed)
     Q_PROPERTY(bool guidesVisible READ guidesVisible NOTIFY changed)
     Q_PROPERTY(bool guideSnapping READ guideSnapping NOTIFY changed)
+    Q_PROPERTY(double bedWidth READ bedWidth NOTIFY deviceProfileChanged)
+    Q_PROPERTY(double bedHeight READ bedHeight NOTIFY deviceProfileChanged)
+    Q_PROPERTY(QVariantMap deviceInfo READ deviceInfo NOTIFY deviceProfileChanged)
     Q_PROPERTY(QStringList pages READ pages NOTIFY changed)
     Q_PROPERTY(int activePage READ activePage NOTIFY changed)
     Q_PROPERTY(QVariantList history READ history NOTIFY changed)
@@ -65,6 +69,18 @@ class Document : public QAbstractListModel {
     bool backgroundPlanning() const { return m_background; }
     JobInput jobInput() const;
     const DeviceProfile &deviceProfile() const { return m_deviceProfile; }
+    QSizeF workArea() const { return m_deviceProfile.workArea(); }
+    double bedWidth() const { return workArea().width(); }
+    double bedHeight() const { return workArea().height(); }
+    QVariantMap deviceInfo() const {
+        auto info = m_deviceProfile.legacyUiProperties();
+        info["outputFingerprint"] = QString::fromLatin1(m_deviceProfile.outputFingerprint());
+        return info;
+    }
+    bool setDeviceProfile(const DeviceProfile &profile);
+    void addDeviceProfileChangeGuard(std::function<bool()> guard) {
+        m_profileGuards.append(std::move(guard));
+    }
     Q_INVOKABLE void cancelPlanning();
     Q_INVOKABLE void retryPlanning();
     QString planningState() const;
@@ -182,6 +198,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void finishMove();
     Q_INVOKABLE void notify(const QString &message);
   signals:
+    void deviceProfileChanged();
     void changed();
     void selectionChanged();
     void messageChanged();
@@ -201,10 +218,12 @@ class Document : public QAbstractListModel {
         QString notes;
         QList<Guide> guides;
         bool guidesVisible = true, guideSnapping = true;
+        DeviceProfile deviceProfile = DeviceProfile::m3Reference();
     };
     Snapshot snapshot() const;
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
     void applySnapshot(const Snapshot &state);
+    bool canApplyDeviceProfile(const DeviceProfile &profile);
     QByteArray serialize() const;
     QByteArray serialize(const Snapshot &state) const;
     std::optional<Snapshot> parse(const QByteArray &json) const;
@@ -219,10 +238,11 @@ class Document : public QAbstractListModel {
     void removeSelection(const QString &label);
     bool canAppend(const Artwork &item);
     static bool validBudget(const QList<Artwork> &items);
-    static bool bakePath(Artwork &item, const QPainterPath &path);
+    bool bakePath(Artwork &item, const QPainterPath &path) const;
     void appendArtwork(const Artwork &item);
     QList<Artwork> m_items;
-    const DeviceProfile m_deviceProfile = DeviceProfile::m3Reference();
+    DeviceProfile m_deviceProfile = DeviceProfile::m3Reference();
+    QList<std::function<bool()>> m_profileGuards;
     QVariantList m_layers;
     QVariantMap m_material;
     int m_selected = -1;

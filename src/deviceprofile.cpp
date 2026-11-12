@@ -216,6 +216,30 @@ QString DeviceBackends::grblOutputError(const DeviceProfile &profile) {
         return "Der vorhandene GRBL-Ausgabeadapter benötigt XY und dynamische Leistung.";
     return {};
 }
+std::optional<DeviceProfile> DeviceBackends::projectProfile(const DeviceProfile &profile,
+                                                            QString &error) {
+    auto fail = [&](QString message) -> std::optional<DeviceProfile> {
+        error = std::move(message);
+        return {};
+    };
+    if (profile.driverId() != "grbl-serial" || profile.transport() != "serial")
+        return fail("Für diesen Controller ist noch kein Projektprofilschema eingebunden.");
+    const auto settings = profile.driverSettings();
+    if (!keys(settings, {"baudRate", "powerScale", "focusPower", "zEnabled",
+                         "homeOnStartupConfigured", "originCode"}) ||
+        !number(settings["baudRate"], 1200, 4000000) ||
+        std::floor(settings["baudRate"].toDouble()) != settings["baudRate"].toDouble() ||
+        !number(settings["focusPower"], 0, 100) || settings["zEnabled"] != false ||
+        !settings["homeOnStartupConfigured"].isBool() || settings["originCode"] != 0 ||
+        !grblOutputError(profile).isEmpty())
+        return fail("Projektprofil benötigt bekannte GRBL-XY-Ausgabeparameter und Ursprung links "
+                    "unten; keine Anschluss- oder Zugangsdaten.");
+    if (profile.workArea().width() > 2000 || profile.workArea().height() > 2000)
+        return fail("Der aktuelle Editor unterstützt Arbeitsflächen bis 2000 × 2000 mm.");
+    auto data = profile.toJson();
+    data["provenance"] = QJsonObject{};
+    return DeviceProfile::parse(QJsonDocument(data).toJson(), error);
+}
 QString DeviceBackends::runtimeSupportError(const DeviceProfile &profile) {
     if (profile.driverId() != "grbl-serial")
         return "Für diesen Controller ist noch kein aktiver Treiber eingebunden.";

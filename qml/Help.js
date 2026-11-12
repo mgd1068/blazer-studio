@@ -64,7 +64,7 @@ var actions = {
   "Rasterprobe": "Erzeugt Vergleichsflächen mit verschiedenen Linienabständen.",
   "Fokusmarken": "Erzeugt Marken für getrennte manuelle Fokusproben. Es gibt keine automatische Höhenverstellung.",
   "Foto laden": "Lädt ein Referenzfoto für die Ausrichtung auf der Zeichenfläche.",
-  "Kalibrieren": "Ordnet die vier angeklickten Foto-Ecken dem 200 × 150-mm-Arbeitsraum zu.",
+  "Kalibrieren": "Ordnet die vier angeklickten Foto-Ecken dem Arbeitsraum des Projektprofils zu.",
   "Foto einblenden": "Blendet das registrierte Referenzfoto als Positionierhilfe ein oder aus.",
   "Letzte Sicherung wiederherstellen": "Stellt die letzte automatische Sicherung wieder her. Anschließend separat speichern.",
   "GRBL verbinden": "Öffnet die Verbindung zum ausgewählten Laser und prüft dessen Konfiguration. Keine automatische Bewegung.",

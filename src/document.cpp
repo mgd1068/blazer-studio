@@ -316,14 +316,16 @@ void Document::notify(const QString &s) {
     emit messageChanged();
 }
 Document::Snapshot Document::snapshot() const {
-    return {m_items, m_layers,     m_title, m_selected, m_material,      m_selection,
-            m_pages, m_activePage, m_notes, m_guides,   m_guidesVisible, m_guideSnapping};
+    return {m_items,         m_layers,        m_title,        m_selected, m_material,
+            m_selection,     m_pages,         m_activePage,   m_notes,    m_guides,
+            m_guidesVisible, m_guideSnapping, m_deviceProfile};
 }
 bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
     return a.items == b.items && a.layers == b.layers && a.title == b.title &&
            a.material == b.material && a.pages == b.pages && a.notes == b.notes &&
            a.guides == b.guides && a.guidesVisible == b.guidesVisible &&
-           a.guideSnapping == b.guideSnapping;
+           a.guideSnapping == b.guideSnapping &&
+           a.deviceProfile.toJson() == b.deviceProfile.toJson();
 }
 void Document::refresh(int row) {
     m_job.reset();
@@ -346,8 +348,44 @@ void Document::setFileUrl(const QUrl &url) {
     m_fileUrl = url;
     emit fileUrlChanged();
 }
+bool Document::canApplyDeviceProfile(const DeviceProfile &profile) {
+    if (profile.outputFingerprint() == m_deviceProfile.outputFingerprint())
+        return true;
+    if (m_batch.busy() || std::any_of(m_profileGuards.cbegin(), m_profileGuards.cend(),
+                                      [](const auto &guard) { return !guard(); })) {
+        notify("Geräteprofilwechsel gesperrt: Verbindung schließen und laufenden Auftrag, Fokus "
+               "oder Export beenden.");
+        return false;
+    }
+    return true;
+}
+bool Document::setDeviceProfile(const DeviceProfile &profile) {
+    QString error;
+    const auto clean = DeviceBackends::projectProfile(profile, error);
+    if (!clean) {
+        notify(error);
+        return false;
+    }
+    if (clean->toJson() == m_deviceProfile.toJson())
+        return true;
+    if (!canApplyDeviceProfile(*clean))
+        return false;
+    finishMove();
+    checkpoint("Geräteprofil");
+    const bool outputChanged = clean->outputFingerprint() != m_deviceProfile.outputFingerprint();
+    m_deviceProfile = *clean;
+    if (outputChanged)
+        m_material.clear();
+    emit deviceProfileChanged();
+    refresh();
+    notify("Projektprofil übernommen; Maße und Bearbeitungswerte bleiben unverändert. "
+           "Materialparameter für dieses Gerät prüfen.");
+    return true;
+}
 void Document::applySnapshot(const Snapshot &s) {
+    const bool profileChanged = m_deviceProfile.toJson() != s.deviceProfile.toJson();
     beginResetModel();
+    m_deviceProfile = s.deviceProfile;
     m_items = s.items;
     m_layers = s.layers;
     m_title = s.title;
@@ -362,6 +400,8 @@ void Document::applySnapshot(const Snapshot &s) {
     m_guideSnapping = s.guideSnapping;
     m_beforeMove.reset();
     endResetModel();
+    if (profileChanged)
+        emit deviceProfileChanged();
     refresh();
 }
 void Document::demo() {
@@ -375,7 +415,10 @@ void Document::demo() {
     m_activePage = 0;
     m_layers = {layer("01 · Gravieren", "Gravur", 3000, 20),
                 layer("02 · Schneiden", "Schnitt", 600, 80)};
-    m_material = MaterialLibrary::example();
+    m_material =
+        m_deviceProfile.outputFingerprint() == DeviceProfile::m3Reference().outputFingerprint()
+            ? MaterialLibrary::example()
+            : QVariantMap{};
     m_items = {
         {id(), "Schildkontur", "rect", "", QRectF(30, 35, 140, 80), 1, true, {}},
         {id(), "Bohrung links", "ellipse", "", QRectF(37, 104, 4, 4), 1, true, {}},
@@ -445,6 +488,11 @@ bool Document::restoreHistory(int position, quint64 revision) {
     }
     if (position == m_undo.size())
         return true;
+    const auto &target = position < m_undo.size()
+                             ? m_undo[position].state
+                             : m_redo[m_redo.size() - 1 - (position - m_undo.size() - 1)].state;
+    if (!canApplyDeviceProfile(target.deviceProfile))
+        return false;
     auto current = snapshot();
     while (m_undo.size() > position) {
         auto previous = m_undo.takeLast();
@@ -824,9 +872,9 @@ bool Document::importSvg(const QUrl &url) {
                     file.fileName().section('/', -1),
                     "svg",
                     "",
-                    QRectF((Geometry::bedWidth - asset->sizeMm.width()) / 2,
-                           (Geometry::bedHeight - asset->sizeMm.height()) / 2,
-                           asset->sizeMm.width(), asset->sizeMm.height()),
+                    QRectF((bedWidth() - asset->sizeMm.width()) / 2,
+                           (bedHeight() - asset->sizeMm.height()) / 2, asset->sizeMm.width(),
+                           asset->sizeMm.height()),
                     0,
                     true,
                     asset};
@@ -840,6 +888,7 @@ QByteArray Document::serialize() const {
     return serialize(snapshot());
 }
 QByteArray Document::serialize(const Snapshot &state) const {
+    const bool hasProfile = state.deviceProfile.toJson() != DeviceProfile::m3Reference().toJson();
     QJsonArray objects;
     for (const auto &a : state.items)
         objects.append(QJsonObject{
@@ -873,7 +922,7 @@ QByteArray Document::serialize(const Snapshot &state) const {
              a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
     const bool hasTools = std::any_of(state.items.cbegin(), state.items.cend(), [](const Artwork &a){return a.toolLayer!=0;});
-    if (hasTools)
+    if (hasTools || hasProfile)
         for (int i=0;i<objects.size();++i) {auto object=objects[i].toObject();object["toolLayer"]=state.items[i].toolLayer;objects[i]=object;}
     QJsonObject root{{"format", "blazer-studio"},
                      {"version", 8},
@@ -894,8 +943,11 @@ QByteArray Document::serialize(const Snapshot &state) const {
                      {"objects", objects},
                      {"layers", QJsonArray::fromVariantList(state.layers)},
                      {"material", QJsonObject::fromVariantMap(state.material)}};
-    if (hasTools || !state.guides.isEmpty() || !state.guidesVisible || !state.guideSnapping) {
-        root["version"] = hasTools ? 10 : 9;
+    if (hasProfile || hasTools || !state.guides.isEmpty() || !state.guidesVisible ||
+        !state.guideSnapping) {
+        root["version"] = hasProfile ? 11 : hasTools ? 10 : 9;
+        if (hasProfile)
+            root["deviceProfile"] = state.deviceProfile.toJson();
         root["guidesVisible"] = state.guidesVisible;
         root["guideSnapping"] = state.guideSnapping;
         QJsonArray guides;
@@ -916,7 +968,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 10) ||
+        !number(root, "version", 1, 11) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -928,6 +980,20 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     if (objects.size() > Geometry::objectLimit || layers.size() < 2 || layers.size() > 64)
         return {};
     Snapshot state;
+    if (version >= 11) {
+        if (!root["deviceProfile"].isObject())
+            return {};
+        QString profileError;
+        const auto profile = DeviceProfile::parse(
+            QJsonDocument(root["deviceProfile"].toObject()).toJson(), profileError);
+        if (!profile)
+            return {};
+        const auto clean = DeviceBackends::projectProfile(*profile, profileError);
+        if (!clean)
+            return {};
+        state.deviceProfile = *clean;
+    } else if (root.contains("deviceProfile"))
+        return {};
     state.title = root["title"].toString();
     if (version >= 8) {
         if (!text(root, "notes", 16000))
@@ -1288,6 +1354,8 @@ bool Document::open(const QUrl &url) {
         notify("Keine gültige Blazer-Studio-Projektdatei; aktuelles Projekt bleibt erhalten.");
         return false;
     }
+    if (!canApplyDeviceProfile(state->deviceProfile))
+        return false;
     clearHistory();
     applySnapshot(*state);
     markClean();
@@ -1342,6 +1410,8 @@ bool Document::newFromTemplate(const QUrl &url) {
         notify("Vorlage enthält kein gültiges Projekt; das aktuelle Projekt bleibt erhalten.");
         return false;
     }
+    if (!canApplyDeviceProfile(state->deviceProfile))
+        return false;
     // A template starts an independent, unsaved document with fresh history.
     // Its source is never treated as the project's ordinary save destination.
     clearHistory();
@@ -1386,7 +1456,7 @@ QStringList Document::issues() const {
     for (const auto &a : m_items)
         if (outputs(a)) {
             ++count;
-            if (!Geometry::insideBed(a.bounds))
+            if (!Geometry::insideBed(a.bounds, workArea()))
                 result << a.name + ": außerhalb des Arbeitsraums";
         }
     if (!count)
@@ -1412,7 +1482,9 @@ bool Document::exportGcode(const QUrl &url) {
         notify("GCode konnte nicht gespeichert werden.");
         return false;
     }
-    notify("GRBL-GCode exportiert · G21/G90, M4, S-Max 1000.");
+    notify("GRBL-GCode exportiert · G21/G90, M4, S-Max " +
+           QString::number(m_deviceProfile.driverSettings()["powerScale"].toDouble(), 'f', 0) +
+           ".");
     return true;
 }
 bool Document::importImage(const QUrl &url) {

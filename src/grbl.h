@@ -11,6 +11,7 @@ class GrblSession : public QObject {
     explicit GrblSession(QObject *parent = nullptr,
                          DeviceProfile profile = DeviceProfile::m3Reference());
     bool open(const QString &port);
+    const DeviceProfile &deviceProfile() const { return m_deviceProfile; }
     void close();
     bool connected() const { return serial.isOpen(); }
     bool ready() const;
