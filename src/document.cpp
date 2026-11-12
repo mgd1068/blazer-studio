@@ -1127,6 +1127,7 @@ bool Document::save(const QUrl &url) {
     markClean();
     emit changed();
     notify("Projekt gespeichert.");
+    emit projectFileUsed(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     return true;
 }
 bool Document::open(const QUrl &url) {
@@ -1146,6 +1147,7 @@ bool Document::open(const QUrl &url) {
     markClean();
     emit changed();
     notify("Projekt geöffnet.");
+    emit projectFileUsed(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     return true;
 }
 QPainterPath Document::outline(const Artwork &a) {

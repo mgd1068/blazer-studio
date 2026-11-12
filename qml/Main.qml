@@ -33,6 +33,8 @@ ApplicationWindow {
     readonly property int materialRow: materialRows.indexOf(libraryIndex)
     readonly property bool projectHeadMatches: appliedModuleW === selectedModuleW
     property string pendingAction: ""
+    property url pendingProjectFile
+    readonly property bool projectDialogActive: projectDetails.visible || recentProjects.visible
     property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
     readonly property color panel: night ? "#202e39" : "#ffffff"
@@ -71,7 +73,7 @@ ApplicationWindow {
     function finishSave(file) {
         let action=win.pendingAction
         win.pendingAction=""
-        if(!project.save(file))return false
+        if(!project.save(file)) { win.pendingProjectFile=""; return false }
         if(action.length>0)win.performAction(action)
         return true
     }
@@ -80,6 +82,13 @@ ApplicationWindow {
         document: project
         dark: win.night
         onAboutToShow: machine.focus(false)
+    }
+    RecentProjectsDialog {
+        id: recentProjects
+        service: typeof appServices !== "undefined" ? appServices : null
+        dark: win.night
+        onAboutToShow: machine.focus(false)
+        onProjectRequested: file => { win.pendingProjectFile = file; win.requestAction("recent") }
     }
     OnboardingDialog {
         id: onboarding; onAboutToShow: machine.focus(false); dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
@@ -133,6 +142,13 @@ ApplicationWindow {
         else performAction(action)
     }
     function performAction(action) {
+        if (action === "recent") {
+            let file = win.pendingProjectFile
+            win.pendingProjectFile = ""
+            if(typeof appServices !== "undefined" && !appServices.openRecentProject(file) && appServices.message.length > 0) project.notify(appServices.message)
+            return
+        }
+        win.pendingProjectFile = ""
         if (action === "demo") project.demo()
         else if (action === "new") project.newProject()
         else if(action==="basicprobe") {
@@ -213,14 +229,14 @@ ApplicationWindow {
             }
         }
     }
-    Shortcut { sequences: [StandardKey.Save]; enabled: !projectDetails.visible; onActivated: saveDialog.open() }
-    Shortcut { sequences: [StandardKey.Open]; enabled: !projectDetails.visible; onActivated: win.requestAction("open") }
-    Shortcut { sequences: [StandardKey.Undo]; enabled: !projectDetails.visible; onActivated: project.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; enabled: !projectDetails.visible; onActivated: project.redo() }
-    Shortcut { sequence: "Ctrl+I"; enabled: !projectDetails.visible; onActivated: importDialog.open() }
-    Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDetails.visible; onActivated: { machine.stop(); project.select(-1) } }
+    Shortcut { sequences: [StandardKey.Save]; enabled: !projectDialogActive; onActivated: saveDialog.open() }
+    Shortcut { sequences: [StandardKey.Open]; enabled: !projectDialogActive; onActivated: win.requestAction("open") }
+    Shortcut { sequences: [StandardKey.Undo]; enabled: !projectDialogActive; onActivated: project.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; enabled: !projectDialogActive; onActivated: project.redo() }
+    Shortcut { sequence: "Ctrl+I"; enabled: !projectDialogActive; onActivated: importDialog.open() }
+    Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDialogActive; onActivated: { machine.stop(); project.select(-1) } }
     FileDialog { id: importDialog; objectName: "importMotifDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: win.importMotif(selectedFile) }
-    FileDialog { id: saveDialog; objectName: "saveProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: win.finishSave(selectedFile); onRejected: win.pendingAction="" }
+    FileDialog { id: saveDialog; objectName: "saveProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: win.finishSave(selectedFile); onRejected: {win.pendingAction="";win.pendingProjectFile=""} }
     FileDialog { id: openDialog; objectName: "openProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     FileDialog { id: gcodeDialog; objectName: "exportGcodeDialog"; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: imageDialog; title: "Bild importieren"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: project.importImage(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
@@ -286,7 +302,7 @@ ApplicationWindow {
             close()
             win.performAction(action)
         }
-        onRejected: win.pendingAction = ""
+        onRejected: { win.pendingAction = ""; win.pendingProjectFile = "" }
     }
 
     // Application header and workflow tabs.
@@ -359,6 +375,7 @@ ApplicationWindow {
                 ActionButton { text: "Neu"; dark: win.night; compact: true; onClicked: win.requestAction("new") }
                 ActionButton { text: "Beispiel"; dark: win.night; compact: true; onClicked: win.requestAction("demo") }
                 ActionButton { objectName: "openProjectButton"; text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
+                ActionButton { objectName: "recentProjectsButton"; text: "Zuletzt"; dark: win.night; compact: true; visible: typeof appServices !== "undefined"; onClicked: recentProjects.open() }
                 ActionButton { objectName: "importMotifButton"; text: win.basic ? "Motiv laden" : "↓  Importieren"; hint: "Lädt ein Bild oder eine Vektorzeichnung als Motiv. Das allein startet noch keinen Laser."; dark: win.night; compact: true; onClicked: importDialog.open() }
                 ActionButton { objectName: "importImageButton"; visible: !win.basic; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
                 ActionButton { objectName: "exportGcodeButton"; text: "GCode"; visible: !win.basic; dark: win.night; compact: true; enabled: project.jobSummary.valid; onClicked: gcodeDialog.open() }

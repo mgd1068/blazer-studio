@@ -9,6 +9,7 @@ class ApplicationServices : public QObject {
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(QString revision READ revision CONSTANT)
     Q_PROPERTY(QString message READ message NOTIFY changed)
+    Q_PROPERTY(QVariantList recentProjects READ recentProjects NOTIFY changed)
   public:
     ApplicationServices(Document *document, Simulator *machine, const QString &settingsFile = {},
                         QObject *parent = nullptr);
@@ -19,6 +20,10 @@ class ApplicationServices : public QObject {
     Q_INVOKABLE bool finishOnboarding();
     Q_INVOKABLE QVariantMap diagnostics() const;
     Q_INVOKABLE bool exportDiagnostics(const QUrl &file);
+    QVariantList recentProjects() const;
+    Q_INVOKABLE bool clearRecentProjects();
+    Q_INVOKABLE bool openRecentProject(const QUrl &file);
+    Q_INVOKABLE void refreshRecentProjects() { emit changed(); }
   signals:
     void changed();
 
@@ -28,4 +33,6 @@ class ApplicationServices : public QObject {
     std::unique_ptr<QSettings> m_settings;
     bool m_complete = false;
     QString m_message;
+    QStringList m_recent;
+    bool storeRecentProjects(const QStringList &files);
 };

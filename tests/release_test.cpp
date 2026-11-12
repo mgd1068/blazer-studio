@@ -2,8 +2,8 @@
 #include "machine.h"
 #include "materiallibrary.h"
 #include "recovery.h"
-#include <QFile>
 #include <QDir>
+#include <QFile>
 #include <QJsonDocument>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -18,6 +18,131 @@ class ReleaseTest : public QObject {
         return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
     }
   private slots:
+    void recentProjectsPersistBoundAndDeduplicate() {
+        QTemporaryDir dir;
+        const auto ini = dir.filePath("settings.ini");
+        Document d;
+        Simulator machine;
+        QList<QUrl> urls;
+        {
+            ApplicationServices service(&d, &machine, ini);
+            QVERIFY(service.finishOnboarding());
+            QVERIFY(service.recentProjects().isEmpty());
+            for (int i = 0; i < 12; ++i) {
+                const auto file =
+                    QUrl::fromLocalFile(dir.filePath(QString("project %1.blazer").arg(i)));
+                urls.append(file);
+                QVERIFY(d.save(file));
+            }
+            QCOMPARE(service.recentProjects().size(), 10);
+            QCOMPARE(service.recentProjects().first().toMap()["url"].toUrl(), urls[11]);
+            QCOMPARE(service.recentProjects().last().toMap()["url"].toUrl(), urls[2]);
+            QVERIFY(d.open(urls[5]));
+            QCOMPARE(service.recentProjects().size(), 10);
+            QCOMPARE(service.recentProjects().first().toMap()["url"].toUrl(), urls[5]);
+            const auto alias = dir.filePath("alias.blazer");
+            QVERIFY(QFile::link(urls[5].toLocalFile(), alias));
+            QVERIFY(d.open(QUrl::fromLocalFile(alias)));
+            QCOMPARE(service.recentProjects().size(), 10);
+            QCOMPARE(service.recentProjects().first().toMap()["url"].toUrl(), urls[5]);
+            const auto before = service.recentProjects();
+            QVERIFY(!d.open(QUrl("https://example.org/project.blazer")));
+            QVERIFY(!d.save(QUrl::fromLocalFile(dir.filePath("missing/project.blazer"))));
+            QVERIFY(d.exportGcode(QUrl::fromLocalFile(dir.filePath("output.gcode"))));
+            QCOMPARE(service.recentProjects(), before);
+            QVERIFY(d.setMetadata("Unsaved", "Keep this"));
+            const auto bytes = d.projectBytes();
+            QVERIFY(!service.openRecentProject(urls[0])); // Evicted entry cannot be opened.
+            QCOMPARE(d.projectBytes(), bytes);
+        }
+        ApplicationServices restored(&d, &machine, ini);
+        QVERIFY(!restored.firstRun());
+        QCOMPARE(restored.recentProjects().size(), 10);
+        QCOMPARE(restored.recentProjects().first().toMap()["url"].toUrl(), urls[5]);
+        const auto bytes = d.projectBytes();
+        QVERIFY(restored.clearRecentProjects());
+        QVERIFY(restored.recentProjects().isEmpty());
+        QCOMPARE(d.projectBytes(), bytes);
+        for (const auto &url : urls)
+            QVERIFY(QFile::exists(url.toLocalFile()));
+        ApplicationServices cleared(&d, &machine, ini);
+        QVERIFY(cleared.recentProjects().isEmpty());
+        QVERIFY(!cleared.firstRun());
+    }
+    void recentProjectsRejectUntrustedAndMissingFilesWithoutLosingCurrentProject() {
+        QTemporaryDir dir;
+        Document d;
+        Simulator machine;
+        const auto existing = QUrl::fromLocalFile(dir.filePath("valid #1.blazer"));
+        const auto missing = QUrl::fromLocalFile(dir.filePath("missing.blazer"));
+        QVERIFY(d.save(existing));
+        const auto bytes = d.projectBytes();
+        const auto ini = dir.filePath("settings.ini");
+        const QStringList stored{missing.toString(QUrl::FullyEncoded),
+                                 "https://example.org/project.blazer",
+                                 "file:relative.blazer",
+                                 "file://other-computer/project.blazer",
+                                 existing.toString(QUrl::FullyEncoded),
+                                 existing.toString(QUrl::FullyEncoded)};
+        {
+            QSettings settings(ini, QSettings::IniFormat);
+            settings.setValue("projects/v1/recent", stored);
+            settings.sync();
+        }
+        ApplicationServices service(&d, &machine, ini);
+        QCOMPARE(service.recentProjects().size(), 2);
+        QVERIFY(!service.recentProjects().first().toMap()["available"].toBool());
+        QVERIFY(service.recentProjects().last().toMap()["available"].toBool());
+        QVERIFY(!service.openRecentProject(missing));
+        QCOMPARE(d.projectBytes(), bytes);
+        QCOMPARE(service.recentProjects().size(), 2);
+        {
+            QSettings settings(ini, QSettings::IniFormat);
+            QCOMPARE(settings.value("projects/v1/recent").toStringList(), stored);
+        }
+        // A file may still exist while its contents have become corrupt.
+        QFile file(existing.toLocalFile());
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QVERIFY(file.write("broken project") > 0);
+        file.close();
+        QVERIFY(!service.openRecentProject(existing));
+        QCOMPARE(d.projectBytes(), bytes);
+        QCOMPARE(service.recentProjects().first().toMap()["url"].toUrl(), missing);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(file.write(bytes), bytes.size());
+        file.close();
+        QVERIFY(service.openRecentProject(existing));
+        QCOMPARE(service.recentProjects().first().toMap()["url"].toUrl(), existing);
+        QVERIFY(QFile::copy(existing.toLocalFile(), missing.toLocalFile()));
+        service.refreshRecentProjects();
+        QVERIFY(service.recentProjects().last().toMap()["available"].toBool());
+    }
+    void recentProjectSettingsFailureDoesNotFailProjectSaveOrClaimClearedHistory() {
+        QTemporaryDir dir;
+        Document d;
+        Simulator machine;
+        const auto ini = dir.filePath("settings.ini");
+        ApplicationServices service(&d, &machine, ini);
+        const auto url = QUrl::fromLocalFile(dir.filePath("project.blazer"));
+        QVERIFY(d.save(url));
+        QCOMPARE(service.recentProjects().size(), 1);
+        QVERIFY(QFile::remove(ini));
+        QVERIFY(QDir().mkdir(ini)); // Reproducible write failure, including when tests run as root.
+        QVERIFY(!service.clearRecentProjects());
+        QCOMPARE(service.recentProjects().size(), 1);
+        QVERIFY(d.setMetadata("Changed", "Project data is more important than history"));
+        QVERIFY(d.save(url));
+        QVERIFY(!d.dirty());
+        QCOMPARE(read(url.toLocalFile()), d.projectBytes());
+        QVERIFY(service.message().contains("Dateiverlauf"));
+        QCOMPARE(service.recentProjects().size(), 1);
+        QVERIFY(QDir().rmdir(ini));
+        QVERIFY(service.clearRecentProjects()); // Recover after the settings location is repaired.
+        QVERIFY(service.recentProjects().isEmpty());
+        QVERIFY(d.save(url));
+        QCOMPARE(service.recentProjects().size(), 1);
+        QVERIFY(service.message().isEmpty());
+    }
     void offlineCliLeavesUserLibraryUntouched_data() {
         QTest::addColumn<QString>("mode");
         QTest::newRow("screenshot") << QString("screenshot");
@@ -31,9 +156,20 @@ class ReleaseTest : public QObject {
         const auto libraryDirectory = data + "/BlazerStudio/Blazer Studio";
         QVERIFY(QDir().mkpath(libraryDirectory));
         const auto libraryPath = libraryDirectory + "/materials.json";
-        const auto original = QJsonDocument::fromVariant(
-            QVariantMap{{"schemaVersion", 1}, {"profiles", QVariantList{MaterialLibrary::example()}}})
-                                  .toJson();
+        const auto configDirectory = isolated.filePath("config/BlazerStudio");
+        QVERIFY(QDir().mkpath(configDirectory));
+        const auto settingsPath = configDirectory + "/Blazer Studio.conf";
+        const QByteArray originalSettings =
+            "[projects]\nv1\\recent=file:///private/original.blazer\n";
+        QFile settings(settingsPath);
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        QCOMPARE(settings.write(originalSettings), originalSettings.size());
+        settings.close();
+        const auto original =
+            QJsonDocument::fromVariant(
+                QVariantMap{{"schemaVersion", 1},
+                            {"profiles", QVariantList{MaterialLibrary::example()}}})
+                .toJson();
         QFile library(libraryPath);
         QVERIFY(library.open(QIODevice::WriteOnly));
         QCOMPARE(library.write(original), original.size());
@@ -55,7 +191,8 @@ class ReleaseTest : public QObject {
             d.addShape("rect");
             const auto project = isolated.filePath("input.blazer");
             QVERIFY(d.save(QUrl::fromLocalFile(project)));
-            arguments = {"--open-project", project, "--export-gcode", isolated.filePath("output.gcode")};
+            arguments = {"--open-project", project, "--export-gcode",
+                         isolated.filePath("output.gcode")};
         }
         QProcess process;
         process.setProcessEnvironment(environment);
@@ -65,6 +202,7 @@ class ReleaseTest : public QObject {
         QCOMPARE(process.exitStatus(), QProcess::NormalExit);
         QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
         QCOMPARE(read(libraryPath), original);
+        QCOMPARE(read(settingsPath), originalSettings);
         QVERIFY(!QFile::exists(libraryPath + ".before-manufacturer-v1.bak"));
     }
     void offlineModeCannotSelectHardware() {
@@ -106,6 +244,8 @@ class ReleaseTest : public QObject {
         d.setBackgroundPlanning(true);
         Simulator m;
         ApplicationServices service(&d, &m, storage.filePath("diagnostics.ini"));
+        QVERIFY(d.save(project));
+        QVERIFY(!service.recentProjects().isEmpty());
         const auto output = storage.filePath("diagnostics.json");
         QVERIFY(service.exportDiagnostics(QUrl::fromLocalFile(output)));
         const auto bytes = read(output);

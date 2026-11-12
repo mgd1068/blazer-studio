@@ -321,6 +321,74 @@ class WorkflowTest : public QObject {
         QCOMPARE(project.notes(), expectedNotes);
         QCOMPARE(project.job().gcode(), originalGcode);
         QCOMPARE(library.profileAt(sourceRow), sourceProfile);
+        QCOMPARE(services.recentProjects().size(), 1);
+        QCOMPARE(services.recentProjects().first().toMap()["url"].toUrl(),
+                 QUrl::fromLocalFile(projectPath));
+        QVERIFY(project.setMetadata("Other project", "Other project notes"));
+        const auto otherPath = storage.filePath("other.blazer");
+        QVERIFY(project.save(QUrl::fromLocalFile(otherPath)));
+        auto pickRecent = [&](const QString &path) {
+            int row = -1;
+            const auto recent = services.recentProjects();
+            for (int i = 0; i < recent.size(); ++i)
+                if (recent[i].toMap()["url"].toUrl() == QUrl::fromLocalFile(path))
+                    row = i;
+            if (row < 0 || !click(window, item("recentProjectsButton")))
+                return false;
+            const QString name = "recentProject" + QString::number(row);
+            if (!QTest::qWaitFor([&] { return item(name) != nullptr; }, 1000))
+                return false;
+            return click(window, item(name));
+        };
+        QVERIFY(project.setMetadata("Unsaved edit", "Save this separately"));
+        const auto unsaved = project.projectBytes();
+        QVERIFY(pickRecent(projectPath));
+        QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("cancelCloseButton")));
+        QCOMPARE(project.projectBytes(), unsaved);
+        QVERIFY(window->property("pendingProjectFile").toUrl().isEmpty());
+        QVERIFY(pickRecent(projectPath));
+        QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("saveChangesButton")));
+        QTRY_VERIFY(
+            window->findChild<QObject *>("saveProjectDialog")->property("visible").toBool());
+        const auto thirdPath = storage.filePath("saved-before-switch.blazer");
+        // Saving reorders the history. The pending file must remain the URL
+        // chosen earlier, rather than following the row that now moved.
+        QVERIFY(chooseFile("saveProjectDialog", thirdPath));
+        QTRY_COMPARE(project.projectBytes(), originalBytes);
+        QCOMPARE(read(thirdPath), unsaved);
+        QCOMPARE(services.recentProjects().size(), 3);
+        QCOMPARE(services.recentProjects().first().toMap()["url"].toUrl(),
+                 QUrl::fromLocalFile(projectPath));
+        QVERIFY(project.setMetadata("Discard this", "Unneeded changes"));
+        QVERIFY(pickRecent(otherPath));
+        QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("discardChangesButton")));
+        QTRY_COMPARE(project.title(), QString("Other project"));
+        QCOMPARE(project.notes(), QString("Other project notes"));
+        QVERIFY(!project.dirty());
+        const auto current = project.projectBytes();
+        const auto currentSelection = project.selected();
+        const auto currentLog = machine.log();
+        QVERIFY(QFile::remove(thirdPath));
+        QVERIFY(click(window, item("recentProjectsButton")));
+        QTRY_VERIFY(item("recentProject2"));
+        QTRY_VERIFY(!item("recentProject2")->isEnabled());
+        QVERIFY(screenshot("recent"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(
+            !window->findChild<QObject *>("recentProjectsDialog")->property("visible").toBool());
+        QCOMPARE(project.selected(), currentSelection);
+        QCOMPARE(project.projectBytes(), current);
+        QCOMPARE(machine.log(), currentLog);
+        QVERIFY(click(window, item("recentProjectsButton")));
+        QVERIFY(click(window, item("clearRecentProjects")));
+        QTRY_VERIFY(services.recentProjects().isEmpty());
+        QVERIFY(QFile::exists(projectPath));
+        QVERIFY(QFile::exists(otherPath));
+        QCOMPARE(project.projectBytes(), current);
+        QVERIFY(click(window, item("closeRecentProjects")));
         QVERIFY(machine.simulation());
         QVERIFY(!machine.log().join('\n').contains("Baud geöffnet"));
         QVERIFY(window->close());

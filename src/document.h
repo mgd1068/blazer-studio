@@ -147,6 +147,7 @@ class Document : public QAbstractListModel {
     void changed();
     void selectionChanged();
     void messageChanged();
+    void projectFileUsed(const QUrl &file);
 
   private:
     struct Snapshot {

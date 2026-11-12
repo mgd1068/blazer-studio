@@ -16,4 +16,14 @@ Notizen eignen sich für Materialbezeichnung, Dicke, Fokus, Versuch und beobacht
 
 Neu gespeicherte Projekte verwenden **Format 8** mit einem eigenen Klartextfeld `notes`. Formate 1–7 bleiben lesbar und erhalten leere Notizen. Frühere Titel werden beim Lesen nicht stillschweigend normalisiert. Ältere Blazer-Versionen einschließlich beta.2 unterstützen Format 8 nicht und müssen solche Dateien ablehnen. Ein Rückspeichern als Format 7 würde Notizen verlieren und wird daher nicht angeboten.
 
-Projektvorlagen und eine Liste zuletzt verwendeter Dateien sind separate offene Teile von F01. Dieser Dialog liefert diese Fähigkeiten nicht. Der vollständige [Funktionsstand](FUNCTION_ACCEPTANCE.md) und die [Abnahmekriterien](PRODUCTION_READINESS.md) bleiben maßgeblich.
+## Zuletzt verwendete Projekte
+
+**Zuletzt** neben **Öffnen** zeigt bis zu zehn erfolgreich geöffnete oder gespeicherte Projektdateien mit ihrem Pfad. Der jüngste Eintrag steht oben; erneutes Öffnen oder Speichern desselben Projekts erzeugt keine zweite Zeile. Fehlgeschlagene Vorgänge, Motivimporte, automatische Wiederherstellung und reine Exporte nehmen keine Datei in diese Liste auf. Der Verlauf bleibt lokal in den Anwendungseinstellungen und gehört nicht zum technischen Diagnosebericht.
+
+Ein Klick öffnet das ausgewählte Projekt. Bei ungespeicherten Änderungen bietet die Anwendung vorher Speichern, Verwerfen und Abbrechen an. Speichern kann die Verlaufsliste neu ordnen; geöffnet wird weiterhin die ursprünglich gewählte Datei. Bricht der Benutzer ab oder schlägt das Öffnen fehl, bleibt das aktuelle Projekt erhalten.
+
+Fehlende Dateien sind als **nicht gefunden** erkennbar und lassen sich nicht auswählen. Beim erneuten Öffnen der Liste wird die Verfügbarkeit aktualisiert. Umgezogene Dateien über den normalen Dateidialog öffnen; ihr neuer Pfad wird danach aufgenommen. Beschädigte Dateien werden beim Öffnungsversuch abgelehnt und überschreiben das aktuelle Projekt nicht.
+
+**Verlauf leeren** entfernt nur die gespeicherte Liste. Projektdateien und das geöffnete Dokument bleiben erhalten. Ein Fehler beim Speichern der Anwendungseinstellungen darf eine erfolgreich gespeicherte Projektdatei nicht nachträglich als fehlgeschlagen behandeln; der Verlauf meldet seinen eigenen Fehler und zeigt keine erfolgreich geleerte Liste an, wenn die Änderung nicht gesichert werden konnte. Offline-Aufrufe für Screenshot, GCode-Export und Selbsttest verändern den persönlichen Verlauf nicht.
+
+Projektvorlagen bleiben ein separater offener Teil von F01. Der vollständige [Funktionsstand](FUNCTION_ACCEPTANCE.md) und die [Abnahmekriterien](PRODUCTION_READINESS.md) bleiben maßgeblich.
