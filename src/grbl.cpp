@@ -103,20 +103,26 @@ bool GrblSession::open(const QString &port) {
     firing = paused = false;
     progress = 0;
     handshaking = true;
-    state = "Warte auf GRBL";
-    timeout.start();
-    serial.write("\r\n");
-    QTimer::singleShot(2000, this, [this] {
-        if (connected() && handshaking && !waitingAck)
-            handshake();
-    });
-    poll.start();
-    append(QString("%1 Baud geöffnet; GRBL 1.1, $30=%2 und $32=1 werden geprüft.")
-               .arg(m_deviceProfile.driverSettings()["baudRate"].toInt())
-               .arg(m_deviceProfile.driverSettings()["powerScale"].toDouble(), 0, 'f', 0));
+    awaitingReset = true;
+    connectionVerified = false;
+    state = "Controller zurücksetzen";
+    poll.stop();
+    timeout.start(10000);
+    // Realtime hold/reset discards a previous controller queue, never resumes it.
+    // No normal command or old acknowledgement may authorize this connection.
+    if (serial.write("!\x18", 2) != 2) {
+        fail("Controller-Reset konnte nicht gesendet werden.");
+        return false;
+    }
+    append(
+        QString("%1 Baud geöffnet; Controller-Reset, danach GRBL, $30=%2 und $32=1 frisch prüfen.")
+            .arg(m_deviceProfile.driverSettings()["baudRate"].toInt())
+            .arg(m_deviceProfile.driverSettings()["powerScale"].toDouble(), 0, 'f', 0));
     return true;
 }
 void GrblSession::handshake() {
+    awaitingReset = false;
+    connectionVerified = false;
     // Settings printouts must not be interrupted by our status polling. Some
     // ESP32 forks can otherwise interleave two replies on the serial stream.
     poll.stop();
@@ -151,6 +157,7 @@ void GrblSession::close() {
     sent = rxBytes = 0;
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
+    awaitingReset = connectionVerified = false;
     firing = paused = false;
     pauseRequested = zeroPending = false;
     knownPosition = knownOffset = knownOutput = false;
@@ -181,6 +188,7 @@ void GrblSession::fail(const QString &message) {
     sent = rxBytes = 0;
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
+    awaitingReset = connectionVerified = false;
     firing = paused = false;
     pauseRequested = zeroPending = false;
     knownOutput = knownOffset = false;
@@ -213,8 +221,7 @@ void GrblSession::receive() {
     }
 }
 void GrblSession::line(const QByteArray &s) {
-    if (s.contains('<') &&
-        (!s.startsWith('<') || !s.endsWith('>') || s.count('<') > 1)) {
+    if (s.contains('<') && (!s.startsWith('<') || !s.endsWith('>') || s.count('<') > 1)) {
         QByteArray remainder = s;
         QList<QByteArray> reports;
         int begin;
@@ -241,6 +248,8 @@ void GrblSession::line(const QByteArray &s) {
             return;
         }
     }
+    if (awaitingReset && !s.startsWith("Grbl "))
+        return;
     if (s.startsWith("Grbl ")) {
         version = s.startsWith("Grbl 1.1") || s.startsWith("Grbl 1.3a");
         if (!version) {
@@ -342,6 +351,7 @@ void GrblSession::line(const QByteArray &s) {
             knownPosition = true;
         }
         if (controllerState == "Alarm" || controllerState == "Door") {
+            connectionVerified = false;
             if (executing() || firing) {
                 fail("Controller gesperrt während Auftrag: " + controllerState +
                      ". Auftrag verworfen; Ausgangszustand prüfen.");
@@ -367,8 +377,8 @@ void GrblSession::line(const QByteArray &s) {
             fail("Leistungs-Override über 100 %; Auftrag verworfen, Ausgang prüfen.");
             return;
         }
-        if (waitingIdle && controllerState == "Idle" && knownPosition && knownOffset && knownOutput &&
-            reportedOutput == 0 && !activeInputs) {
+        if (waitingIdle && controllerState == "Idle" && knownPosition && knownOffset &&
+            knownOutput && reportedOutput == 0 && !activeInputs) {
             waitingIdle = false;
             timeout.stop();
             progress = 1;
@@ -402,6 +412,8 @@ void GrblSession::line(const QByteArray &s) {
             (controllerState == "Run" || controllerState == "Jog" || controllerState == "Hold" ||
              controllerState == "Home"))
             timeout.start();
+        if (ready())
+            connectionVerified = true;
         emit changed();
         return;
     }
@@ -565,13 +577,15 @@ void GrblSession::stop() {
     sent = rxBytes = 0;
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
+    awaitingReset = connectionVerified = false;
     timeout.stop();
     version = laserMode = powerScale = knownPosition = false;
+    awaitingReset = true;
     state = "Abbruch · warte auf GRBL-Neustart";
     serial.write("!\x18", 2);
     if (!connected())
         return;
-    timeout.start();
+    timeout.start(10000);
     append("Feed Hold und Soft-Reset gesendet; keine automatische Fortsetzung.");
 }
 void GrblSession::jog(double dx, double dy) {

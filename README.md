@@ -10,6 +10,8 @@ Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX
 
 **Neu im beta.5-Kandidaten:** [Änderungen und verbleibende Freigaben](docs/beta/CHANGES_BETA5.md), [genaue Paketrevision und Auslieferungsnachweise](docs/beta/CANDIDATE_BETA5.md).
 
+**Verbindungsfix beta.5.1:** Jeder neue GRBL-Verbindungsaufbau setzt den Controller vor der erneuten Prüfung zurück. Der Anschlussbutton wird erst nach bestätigter Verbindung grün und zeigt „GRBL verbunden“. [Ablauf und Grenzen](docs/GRBL_WORKFLOW.md). Der unveränderte beta.5-Release enthält diesen Folgestand noch nicht.
+
 **Lizenz:** [Source Available, Nutzung auch gewerblich erlaubt, Weitergabe nur kostenlos](LICENSE). Bezahlte Laserarbeiten sind erlaubt; das Programm und abgeleitete Versionen dürfen nicht verkauft oder gegen Bezahlung zugänglich gemacht werden. Das Verkaufsverbot entspricht keiner OSI-Open-Source-Lizenz. Qt und weitere Drittbestandteile behalten ihre eigenen Lizenzen; siehe [Hinweise](THIRD_PARTY_NOTICES.md).
 
 [Plan zur Produktionsreife](docs/PRODUCTION_READINESS.md) · [Reale Geräte- und Materialbefunde](docs/HARDWARE_ACCEPTANCE.md). Änderungen auf dem Produktionsreife-Zweig sind erst nach einem neuen geprüften Paket Bestandteil eines Downloads.

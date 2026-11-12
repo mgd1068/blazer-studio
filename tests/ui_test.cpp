@@ -21,15 +21,18 @@
 class UiMachine : public Simulator {
     Q_OBJECT
     Q_PROPERTY(bool simulation READ simulation WRITE setSimulation NOTIFY changed)
+    Q_PROPERTY(bool connectionVerified READ connectionVerified WRITE setConnectionVerified NOTIFY changed)
   public:
     bool simulation() const { return m_simulation; }
+    bool connectionVerified() const { return m_verified; }
+    void setConnectionVerified(bool value) { m_verified = value; emit changed(); }
     void setSimulation(bool value) {
         m_simulation = value;
         emit changed();
     }
 
   private:
-    bool m_simulation = true;
+    bool m_simulation = true, m_verified = false;
 };
 class UiTest : public QObject {
     Q_OBJECT
@@ -341,6 +344,39 @@ class UiTest : public QObject {
         QTRY_VERIFY(intro->property("visible").toBool());
         // Hide temporarily for existing layout screenshots; restore before the onboarding tests.
         QVERIFY(QMetaObject::invokeMethod(intro, "close"));
+        auto *connection = w->findChild<QObject *>("connectGrblButton");
+        QVERIFY(connection);
+        QCOMPARE(connection->property("text").toString(), QString("GRBL verbinden"));
+        QVERIFY(!connection->property("primary").toBool());
+        machine.setSimulation(false);
+        QCOMPARE(connection->property("text").toString(), QString("GRBL wird geprüft …"));
+        QVERIFY(!connection->property("primary").toBool());
+        machine.setConnectionVerified(true);
+        QCOMPARE(connection->property("text").toString(), QString("GRBL verbunden"));
+        QVERIFY(connection->property("primary").toBool());
+        QVERIFY(connection->property("enabled").toBool());
+        // Clicking the green status must not reset an established connection.
+        QVERIFY(QMetaObject::invokeMethod(connection, "clicked"));
+        QVERIFY(machine.connected());
+        w->setProperty("page", 2);
+        for (bool dark : {false,true}) {
+            w->resize(dark ? 1180 : 1480, dark ? 760 : 920); w->setProperty("night", dark);
+            QTest::qWait(120);
+            auto *background = connection->property("background").value<QQuickItem *>();
+            QVERIFY(background);
+            QCOMPARE(background->property("color").value<QColor>(), QColor("#209b76"));
+            if (qEnvironmentVariableIsSet("BLAZER_CONNECTION_SCREENSHOT_DIR")) {
+                const auto dir = qEnvironmentVariable("BLAZER_CONNECTION_SCREENSHOT_DIR");
+                QVERIFY(QDir().mkpath(dir));
+                QVERIFY(w->grabWindow().save(dir+(dark ? "/connection-dark.png" : "/connection-light.png")));
+            }
+        }
+        machine.toggleConnection();
+        QCOMPARE(connection->property("text").toString(), QString("GRBL verbinden"));
+        QVERIFY(!connection->property("primary").toBool());
+        machine.toggleConnection(); machine.setConnectionVerified(false); machine.setSimulation(true);
+        w->setProperty("page",0); w->resize(1480,920);w->setProperty("night",false);
+        QCOMPARE(project.projectBytes(), originalBytes);
         QTest::qWait(100);
         if (qEnvironmentVariableIsSet("BLAZER_BASIC_SCREENSHOT"))
             QVERIFY(w->grabWindow().save(qEnvironmentVariable("BLAZER_BASIC_SCREENSHOT")));
