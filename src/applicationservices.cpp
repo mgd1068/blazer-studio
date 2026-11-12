@@ -1,4 +1,5 @@
 #include "applicationservices.h"
+#include "blazer_version.h"
 #include "atomicfile.h"
 #include <QDateTime>
 #include <QFileInfo>

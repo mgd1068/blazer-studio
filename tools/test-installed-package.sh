@@ -11,7 +11,17 @@ package_dir="$(cd -- "$1" && pwd)"
 printf '%s\n' 'path-include=/usr/share/doc/blazer-studio/*' >> /etc/dpkg/dpkg.cfg.d/excludes
 export DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8
 apt-get update
+useradd --create-home --shell /bin/bash beta
+runuser -u beta -- mkdir -p /home/beta/.local/share/BlazerStudio '/home/beta/.config/BlazerStudio' /home/beta/runtime
+chmod 700 /home/beta/runtime
+runuser -u beta -- sh -c 'echo preserve > /home/beta/.local/share/BlazerStudio/package-test-sentinel'
+if [[ -n "${BLAZER_PREVIOUS_PACKAGE:-}" ]]; then
+    apt-get install --no-install-recommends -y "$BLAZER_PREVIOUS_PACKAGE"
+    runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+        XDG_RUNTIME_DIR=/home/beta/runtime blazer-studio --self-test
+fi
 apt-get install --no-install-recommends -y "$package_dir"/blazer-studio_*.deb
+test "$(cat /home/beta/.local/share/BlazerStudio/package-test-sentinel)" == preserve
 # No compiler, CMake or development Qt packages may have entered the runtime image.
 if command -v c++ || command -v cmake; then
     echo 'Unexpected compiler or CMake in runtime image.' >&2
@@ -23,13 +33,25 @@ test -f /usr/share/mime/packages/blazer-studio.xml
 test -f /usr/share/icons/hicolor/scalable/apps/blazer-studio.svg
 test -f /usr/share/doc/blazer-studio/LICENSE
 test -f /usr/share/doc/blazer-studio/LICENSES/LGPL-3.0.txt
+python3 /usr/share/blazer-studio/tools/check-doc-links.py /usr/share/doc/blazer-studio
 test -f /usr/share/blazer-studio/tools/photo_depth.py
-useradd --create-home --shell /bin/bash beta
-runuser -u beta -- mkdir -p /home/beta/.local/share/BlazerStudio '/home/beta/.config/BlazerStudio' /home/beta/runtime
-chmod 700 /home/beta/runtime
-runuser -u beta -- sh -c 'echo preserve > /home/beta/.local/share/BlazerStudio/package-test-sentinel'
-runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-    XDG_RUNTIME_DIR=/home/beta/runtime blazer-studio --self-test
+self_test() {
+    runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+        XDG_RUNTIME_DIR=/home/beta/runtime blazer-studio --self-test > /tmp/blazer-self-test.json
+    python3 - "$package_dir/BUILD-MANIFEST.json" /tmp/blazer-self-test.json <<'PY'
+import json, subprocess, sys
+manifest, actual = [json.load(open(path)) for path in sys.argv[1:]]
+assert actual['selfTest'] == 'passed' and actual['simulation'] is True
+assert actual['hardwareTested'] is False
+assert actual['version'] == manifest['version'], (actual, manifest)
+assert actual['revision'] == manifest['revision'], (actual, manifest)
+installed = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'blazer-studio'], text=True)
+assert installed == manifest['version'].replace('-', '~'), installed
+assert subprocess.check_output(['blazer-studio', '--version'], text=True).strip() == 'Blazer Studio ' + manifest['version']
+print(json.dumps(actual))
+PY
+}
+self_test
 # Exercise the desktop entry's no-file command too (a missing %f must not make it exit).
 [[ "$(sed -n 's/^Exec=//p' /usr/share/applications/blazer-studio.desktop)" == 'blazer-studio %f' ]]
 set +e
@@ -40,8 +62,7 @@ set -e
 [[ "$menu_status" == 124 ]]
 # Reinstall path preserves user files.
 apt-get install --reinstall --no-install-recommends -y "$package_dir"/blazer-studio_*.deb
-runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-    XDG_RUNTIME_DIR=/home/beta/runtime blazer-studio --self-test
+self_test
 apt-get remove -y blazer-studio
 test "$(cat /home/beta/.local/share/BlazerStudio/package-test-sentinel)" == preserve
 echo 'PACKAGE RUNTIME TEST PASSED (install, non-root launch, codecs, project roundtrip, render, reinstall, removal).'

@@ -3,7 +3,21 @@ include(GNUInstallDirs)
 install(FILES "${PROJECT_SOURCE_DIR}/packaging/blazer-studio.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 install(FILES "${PROJECT_SOURCE_DIR}/assets/blazer-studio.svg" DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
 install(FILES "${PROJECT_SOURCE_DIR}/packaging/blazer-studio.xml" DESTINATION "${CMAKE_INSTALL_DATADIR}/mime/packages")
-install(FILES "${PROJECT_SOURCE_DIR}/README.md" "${PROJECT_SOURCE_DIR}/docs/beta/START.md" "${PROJECT_SOURCE_DIR}/docs/beta/TEST_PROTOCOL.md" "${PROJECT_SOURCE_DIR}/docs/beta/KNOWN_LIMITATIONS.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/blazer-studio")
+set(blazer_documentation_dir "${CMAKE_INSTALL_DATADIR}/doc/blazer-studio")
+install(FILES "${PROJECT_SOURCE_DIR}/README.md" "${PROJECT_SOURCE_DIR}/LICENSE"
+    "${PROJECT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+    DESTINATION "${blazer_documentation_dir}" COMPONENT Documentation)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/docs" "${PROJECT_SOURCE_DIR}/assets"
+    "${PROJECT_SOURCE_DIR}/LICENSES"
+    DESTINATION "${blazer_documentation_dir}" COMPONENT Documentation)
+foreach(entry START TEST_PROTOCOL KNOWN_LIMITATIONS)
+    file(GENERATE OUTPUT "${PROJECT_BINARY_DIR}/documentation/${entry}.md"
+        CONTENT "# Blazer Studio ${BLAZER_RELEASE_LABEL}\n\n[${entry} öffnen](docs/beta/${entry}.md).\n\nDie vollständige Dokumentation und Abbildungen gehören zu diesem Kandidaten.\n")
+    install(FILES "${PROJECT_BINARY_DIR}/documentation/${entry}.md"
+        DESTINATION "${blazer_documentation_dir}" COMPONENT Documentation)
+endforeach()
+install(FILES "${PROJECT_SOURCE_DIR}/tools/check-doc-links.py"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/blazer-studio/tools")
 set(CPACK_GENERATOR "DEB")
 set(CPACK_PACKAGE_NAME "blazer-studio")
 set(CPACK_PACKAGE_VENDOR "Blazer Studio contributors")
@@ -11,7 +25,7 @@ set(CPACK_PACKAGE_CONTACT "https://github.com/mgd1068/blazer-studio/issues")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/mgd1068/blazer-studio")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Native Linux laser preparation and simulator - beta candidate")
 set(CPACK_PACKAGE_VERSION "${BLAZER_RELEASE_LABEL}")
-set(CPACK_DEBIAN_PACKAGE_VERSION "${PROJECT_VERSION}~beta.1")
+set(CPACK_DEBIAN_PACKAGE_VERSION "${BLAZER_DEBIAN_VERSION}")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Blazer Studio contributors")
 set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)

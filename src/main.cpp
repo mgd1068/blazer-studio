@@ -1,4 +1,5 @@
 #include "applicationservices.h"
+#include "blazer_version.h"
 #include "depthservice.h"
 #include "document.h"
 #include "machine.h"

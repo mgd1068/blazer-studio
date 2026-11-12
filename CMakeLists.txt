@@ -1,17 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
-project(BlazerStudio VERSION 0.9.0 LANGUAGES CXX)
-set(BLAZER_RELEASE_LABEL "0.9.0-beta.1" CACHE STRING "Human-readable prerelease version")
-find_package(Git QUIET)
-set(BLAZER_REVISION "source-archive")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SOURCE_REVISION")
-    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/SOURCE_REVISION" BLAZER_REVISION LIMIT_COUNT 1 REGEX "^[0-9a-f]+$")
-elseif(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
-    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" OUTPUT_VARIABLE BLAZER_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND "${GIT_EXECUTABLE}" status --porcelain WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" OUTPUT_VARIABLE BLAZER_DIRTY OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(BLAZER_DIRTY)
-        string(APPEND BLAZER_REVISION "-dirty")
-    endif()
-endif()
+include(cmake/Version.cmake)
+project(BlazerStudio VERSION ${BLAZER_BASE_VERSION} LANGUAGES CXX)
+add_custom_target(blazer-build-info
+    COMMAND "${CMAKE_COMMAND}" -DBLAZER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -DBLAZER_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildInfo.cmake"
+    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/generated/blazer_version.h"
+    VERBATIM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Svg SerialPort Xml Concurrent)
@@ -33,7 +28,8 @@ qt_add_library(blazer-core STATIC
 qt_add_resources(blazer-core manufacturer_catalog PREFIX /catalog FILES profiles/manufacturer-materials.json)
 target_include_directories(blazer-core PUBLIC src)
 target_link_libraries(blazer-core PUBLIC Qt6::Quick Qt6::Svg Qt6::SerialPort Qt6::Xml Qt6::Concurrent PkgConfig::QRCODE)
-target_compile_definitions(blazer-core PUBLIC BLAZER_VERSION="${BLAZER_RELEASE_LABEL}" BLAZER_REVISION="${BLAZER_REVISION}")
+add_dependencies(blazer-core blazer-build-info)
+target_include_directories(blazer-core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(blazer-core PRIVATE -Wall -Wextra -Wpedantic)
 if(BLAZER_SANITIZERS)
     target_compile_options(blazer-core PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -104,12 +100,11 @@ if(BUILD_TESTING)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)
+        add_test(NAME build_provenance COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/build_test.py)
+        add_test(NAME documentation COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check-doc-links.py ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
 endif()
 install(TARGETS blazer-studio RUNTIME DESTINATION bin)
-
-install(FILES LICENSE THIRD_PARTY_NOTICES.md DESTINATION share/doc/blazer-studio)
-install(DIRECTORY LICENSES DESTINATION share/doc/blazer-studio)
 
 install(FILES tools/photo_depth.py tools/setup_depth.py DESTINATION share/blazer-studio/tools)
 

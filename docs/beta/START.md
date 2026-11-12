@@ -1,4 +1,4 @@
-# Blazer Studio 0.9.0-beta.1 – Testkandidat
+# Blazer Studio 0.9.0-beta.2 – Testkandidat
 
 Getestete Paketplattform: **Ubuntu 26.04, x86_64**. Andere Linux-Versionen sind noch nicht als Paketplattform bestätigt. Es handelt sich um einen Software-Testkandidaten; Geräte-/Materialabnahme und externe Bedienungstests sind offen.
 
@@ -8,7 +8,7 @@ Das Debian-Paket und die passende Quellcode-Datei gehören zum selben Kandidaten
 
 ```bash
 sha256sum -c SHA256SUMS
-sudo apt install ./blazer-studio_0.9.0~beta.1_amd64.deb
+sudo apt install ./blazer-studio_0.9.0~beta.2_amd64.deb
 ```
 
 Die Paketverwaltung installiert die benötigten Laufzeitbibliotheken. Ein Compiler oder Qt-Entwicklungsumgebung ist nicht erforderlich. Starte anschließend **Blazer Studio** im Anwendungsmenü oder `blazer-studio` im Terminal. Beim Wechsel von einer alten Entwicklungsversion das alte Fenster regulär schließen; Benutzerdateien werden beim Installieren nicht gelöscht.
