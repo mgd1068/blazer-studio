@@ -28,6 +28,7 @@ qt_add_library(blazer-core STATIC
     src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imagelimits.h src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
     src/batchexport.cpp src/batchexport.h src/atomicfile.cpp src/atomicfile.h src/artwork.h src/cancellation.h src/jobpreparation.cpp src/jobpreparation.h src/document.cpp src/document.h src/geometry.h src/job.cpp src/job.h
     src/svgasset.cpp src/svgasset.h src/materiallibrary.cpp src/materiallibrary.h
+    src/controllersession.cpp src/controllersession.h
     src/grbl.cpp src/grbl.h src/machine.cpp src/machine.h
     src/simulator.cpp src/simulator.h src/workspace.cpp src/workspace.h)
 qt_add_resources(blazer-core manufacturer_catalog PREFIX /catalog FILES profiles/manufacturer-materials.json)

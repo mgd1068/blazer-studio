@@ -21,7 +21,7 @@ bool point(const QByteArray &v, QPointF &p) {
 }
 } // namespace
 GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
-    : QObject(parent), m_deviceProfile(std::move(profile)) {
+    : ControllerSession(parent), m_deviceProfile(std::move(profile)) {
     poll.setInterval(200);
     timeout.setSingleShot(true);
     timeout.setInterval(10000);

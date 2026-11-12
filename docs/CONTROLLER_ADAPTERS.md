@@ -1,6 +1,6 @@
 # Bewegungsplan und Controlleradapter
 
-Der [Mehrgeräteplan](MULTI_DEVICE_PLAN.md) trennt Beschreibung, Geometrie, Ausgabe und reale Verbindung. Der erste Teil von MD3 ist umgesetzt: Der vorhandene GRBL-Kodierer und sein Projektparameterschema liegen hinter einer Adapter-Schnittstelle. Andere Controller werden dadurch noch nicht unterstützt. Die reale Sitzungssteuerung verwendet weiterhin `GrblSession`; deren allgemeine Schnittstelle und weitere Protokolle bleiben offen.
+Der [Mehrgeräteplan](MULTI_DEVICE_PLAN.md) trennt Beschreibung, Geometrie, Ausgabe und reale Verbindung. Der erste Teil von MD3 ist umgesetzt: Der vorhandene GRBL-Kodierer und sein Projektparameterschema liegen hinter einer Adapter-Schnittstelle. Andere Controller werden dadurch noch nicht unterstützt. Die reale Sitzungssteuerung verwendet nun die gemeinsame Schnittstelle `ControllerSession`; deren bisher einzige Implementierung ist `GrblSession`. Weitere Protokolle bleiben offen.
 
 ## Getrennte Ergebnisse
 
@@ -42,6 +42,14 @@ Ein erhaltener schreibbarer Elementverweis darf die Zwischenspeicherung nicht um
 
 Einzel-, Materialtest- und CSV-GCode-Export prüfen den vollständigen Ausgabepuffer und sein Medienformat vor dem Schreiben. Fehlender Adapter erzeugt keine Datei, die lediglich einen Zeilenumbruch enthält. Bestehende Dateien und die atomare CSV-Veröffentlichung bleiben geschützt. Vor der Übertragung prüft die GRBL-Sitzung weiterhin Bereitschaft, Profil und physische G54-Grenzen sowie zusätzlich den Typ des erzeugten Programms. Ein gültiger Datenpuffer allein startet keinen Laser.
 
+## Verbindungsschnittstelle
+
+`Machine` besitzt eine `ControllerSession` und kennt weder GRBL-interne Felder noch serielle Bibliotheken. Die Sitzung stellt einen Statuswert mit Verbindung, Bereitschaft, Ausführung, Pause, Fokusausgabe, Position und Fortschritt bereit. Ein bereits gelesener Statuswert verändert sich nicht nach einer neuen Meldung. Protokollmeldungen werden getrennt als Kopie gelesen; Änderungen meldet das gemeinsame Qt-Signal. Die Schnittstelle umfasst Öffnen/Schließen, Auftrag, Pause/Fortsetzen, Stop, Jog, Referenzfahrt, Arbeitsnullpunkt, Fokus, Rahmen und Overrides. Sie stellt keine beliebigen Rohbefehle bereit.
+
+`ControllerSessions::create()` registriert bislang ausschließlich `grbl-serial` über `serial` mit bekanntem validiertem Projektparameterschema. Die Erzeugung öffnet oder durchsucht keine Anschlüsse. Unbekannte Kennungen, andere Transporte und ungültige Parameter erhalten keinen Ersatztreiber. Die getrennte Endpunktabfrage liefert für solche Profile keine Anschlüsse. Offline-Aufrufe unterbinden auch diese Abfrage weiterhin in `Machine`.
+
+Der konkrete GRBL-Adapter behält Handshake, Statusabfragen, Einheiten-/Leistungs-/Arbeitsraumprüfung, G54-Grenzen, gebundene Ausgabe, Fehlerbehandlung und keine automatische Fortsetzung. Die bestehende M3-Laufzeitgrenze gilt weiterhin vor einer echten Verbindung. Ein gemeinsamer Methodensatz liefert keine Fähigkeiten, die das jeweilige Profil und sein Adapter nicht unterstützen.
+
 ## Weitere Arbeit in MD3
 
-Die konkrete Sitzungssteuerung für Verbindung, Abfragen, Status, Jog, Fokus, Rahmenfahrt und Fehlerbehandlung muss noch eine gemeinsame Controller-Verbindungsschnittstelle erhalten. Ein weiterer Treiber benötigt sein eigenes Parameterschema, Medienformat, Protokoll und eigene Tests. Auch Ursprung, Achsen, Leistungseinheiten und Spezialfunktionen dürfen nicht durch Übernahme des M3-Verhaltens vorgetäuscht werden. Geräteverwaltung und Material-/Kalibrierzuordnung je Instanz folgen in MD4; reale Modellfreigaben bleiben MD5 und die tatsächlichen Geräteabnahmen.
+Die allgemeine Verbindungsschnittstelle ist implementiert; bislang gibt es nur den bestehenden GRBL-Adapter. Ein weiterer Treiber benötigt sein eigenes Parameterschema, Medienformat, Protokoll und eigene Tests. Auch Ursprung, Achsen, Leistungseinheiten und Spezialfunktionen dürfen nicht durch Übernahme des M3-Verhaltens vorgetäuscht werden. Geräteverwaltung und Material-/Kalibrierzuordnung je Instanz folgen in MD4; reale Modellfreigaben bleiben MD5 und die tatsächlichen Geräteabnahmen.

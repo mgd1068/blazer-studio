@@ -1,34 +1,33 @@
 #include "machine.h"
 #include "document.h"
 #include <QPointer>
-#include <QSerialPortInfo>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
     document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
-        return !self || (!self->busy() && !self->firing() && !self->grbl->connected());
+        return !self || (!self->busy() && !self->firing() &&
+                         (!self->session || !self->session->status().connected));
     });
     syncDeviceProfile();
     connect(d, &Document::deviceProfileChanged, this, &Machine::syncDeviceProfile);
 }
 void Machine::syncDeviceProfile() {
-    if (grbl &&
-        grbl->deviceProfile().outputFingerprint() == document->deviceProfile().outputFingerprint())
+    if (session && session->deviceProfile().outputFingerprint() ==
+                       document->deviceProfile().outputFingerprint())
         return;
     live = false;
-    grbl = std::make_unique<GrblSession>(nullptr, document->deviceProfile());
-    connect(grbl.get(), &GrblSession::changed, this, &Simulator::changed);
+    QString error;
+    session = ControllerSessions::create(document->deviceProfile(), error);
+    if (session)
+        connect(session.get(), &ControllerSession::changed, this, &Simulator::changed);
+    else
+        document->notify(error);
     Simulator::setDeviceProfile(document->deviceProfile());
     emit changed();
 }
 QStringList Machine::ports() const {
     if (hardwareAccess == HardwareAccess::Disabled)
         return {};
-    QStringList usb, other;
-    for (const auto &p : QSerialPortInfo::availablePorts())
-        (p.hasVendorIdentifier() ? usb : other).append(p.systemLocation());
-    usb.sort();
-    other.sort();
-    return usb + other;
+    return ControllerSessions::availableEndpoints(document->deviceProfile());
 }
 bool Machine::connectHardware(const QString &port) {
     if (hardwareAccess == HardwareAccess::Disabled) {
@@ -40,42 +39,47 @@ bool Machine::connectHardware(const QString &port) {
         document->notify(profileError);
         return false;
     }
+    if (!session) {
+        document->notify("Kein Verbindungsadapter für dieses Geräteprofil verfügbar.");
+        return false;
+    }
     if (busy() || firing())
         return false;
-    if (grbl->connected())
-        grbl->close();
+    if (session->status().connected)
+        session->close();
     Simulator::stop();
     live = true;
-    bool result = grbl->open(port);
+    bool result = session->open(port);
     emit changed();
     return result;
 }
 void Machine::useSimulator() {
-    grbl->close();
+    if (session)
+        session->close();
     live = false;
     emit changed();
 }
 void Machine::toggleConnection() {
     if (live)
-        grbl->close();
+        session->close();
     else
         Simulator::toggleConnection();
 }
 void Machine::jog(double x, double y) {
     if (live)
-        grbl->jog(x, y);
+        session->jog(x, y);
     else
         Simulator::jog(x, y);
 }
 void Machine::home() {
     if (live)
-        grbl->home();
+        session->home();
     else
         Simulator::home();
 }
 void Machine::focus(bool on) {
     if (live)
-        grbl->focus(on);
+        session->focus(on);
     else
         Simulator::focus(on);
 }
@@ -86,7 +90,7 @@ void Machine::frame(const QVariantMap &b) {
         return;
     }
     if (live)
-        grbl->frame(b);
+        session->frame(b);
     else
         Simulator::frame(b);
 }
@@ -107,7 +111,7 @@ void Machine::start() {
         return;
     }
     if (live)
-        grbl->start(job);
+        session->start(job);
     else {
         Simulator::setJob(job);
         Simulator::start();
@@ -115,19 +119,19 @@ void Machine::start() {
 }
 void Machine::pause() {
     if (live)
-        grbl->pause();
+        session->pause();
     else
         Simulator::pause();
 }
 void Machine::stop() {
     if (live)
-        grbl->stop();
+        session->stop();
     else
         Simulator::stop();
 }
 void Machine::disconnectFault() {
     if (live)
-        grbl->close();
+        session->close();
     else
         Simulator::disconnectFault();
 }

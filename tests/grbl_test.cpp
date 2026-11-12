@@ -163,6 +163,82 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void sessionRegistryRejectsUnknownAndMalformedProfiles() {
+        QString error;
+        const auto reference = DeviceProfile::m3Reference();
+        auto session = ControllerSessions::create(reference, error);
+        QVERIFY2(session, qPrintable(error));
+        QVERIFY(error.isEmpty());
+        QCOMPARE(session->deviceProfile().outputFingerprint(), reference.outputFingerprint());
+        QVERIFY(!session->status().connected);
+        QVERIFY(!session->status().ready);
+        for (int variant = 0; variant < 3; ++variant) {
+            auto json = reference.toJson();
+            auto driver = json["driver"].toObject();
+            if (variant == 0)
+                driver["id"] = "unregistered-controller";
+            else if (variant == 1)
+                driver["transport"] = "network";
+            else {
+                auto settings = driver["settings"].toObject();
+                settings["baudRate"] = "not a number";
+                driver["settings"] = settings;
+            }
+            json["driver"] = driver;
+            const auto profile = DeviceProfile::parse(QJsonDocument(json).toJson(), error);
+            QVERIFY2(profile, qPrintable(error));
+            QVERIFY(!ControllerSessions::create(*profile, error));
+            QVERIFY(!error.isEmpty());
+            // Rejected profiles never even enumerate real serial endpoints.
+            QVERIFY(ControllerSessions::availableEndpoints(*profile).isEmpty());
+        }
+    }
+    void genericSessionKeepsReadinessPauseStopAndNoResume() {
+        Controller controller;
+        QString error;
+        auto session = ControllerSessions::create(DeviceProfile::m3Reference(), error);
+        QVERIFY2(session, qPrintable(error));
+        QSignalSpy changes(session.get(), &ControllerSession::changed);
+        QVERIFY(session->open(controller.port));
+        QTRY_VERIFY(session->status().ready);
+        controller.machinePosition = {12, 18};
+        controller.report();
+        QTRY_COMPARE(session->status().position, QPointF(12, 18));
+        const auto snapshot = session->status();
+        controller.machinePosition = {20, 30};
+        controller.report();
+        QTRY_COMPARE(session->status().position, QPointF(20, 30));
+        QCOMPARE(snapshot.position, QPointF(12, 18));
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        controller.status = "Run";
+        session->start(document.job());
+        QTRY_VERIFY(session->status().executing);
+        QTRY_VERIFY(controller.commands.contains("M4 S800"));
+        session->pause();
+        QVERIFY(session->status().paused);
+        QVERIFY(!session->status().ready);
+        session->pause();
+        QVERIFY(!session->status().paused);
+        session->stop();
+        controller.status = "Idle";
+        QTRY_VERIFY(session->status().ready);
+        const auto afterStop = controller.commands.count("M4 S800");
+        session->close();
+        QVERIFY(!session->status().connected);
+        QVERIFY(!session->status().ready);
+        QVERIFY(snapshot.connected);
+        QVERIFY(session->open(controller.port));
+        QTRY_VERIFY(session->status().ready);
+        QCOMPARE(controller.commands.count("M4 S800"), afterStop);
+        QVERIFY(!session->status().executing);
+        QVERIFY(!session->logEntries().isEmpty());
+        QVERIFY(!changes.isEmpty());
+        QPointer<ControllerSession> lifetime = session.get();
+        session.reset();
+        QVERIFY(lifetime.isNull());
+    }
     void changedMovesCannotSendAnOlderCachedProgram() {
         Controller controller;
         GrblSession session;
