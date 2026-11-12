@@ -14,6 +14,7 @@ struct ControllerStatus {
     double progress = 0;
     QPointF position;
     QString state = "Getrennt";
+    bool verified = false;
 };
 class ControllerSession : public QObject {
     Q_OBJECT

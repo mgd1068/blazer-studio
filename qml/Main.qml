@@ -12,6 +12,7 @@ ApplicationWindow {
     title: (project.dirty ? "● " : "") + project.title + " — Blazer Studio"
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
+    readonly property bool grblVerified: !simulationMode && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
     property bool basic: true
     property bool proofConfirmed: false
     property string probeKey: ""
@@ -868,7 +869,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; spacing: 15
                                 RowLayout {
                                     Text { text: "Gerät & Positionierung"; color: win.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                                    ActionButton { text: machine.connected ? "Trennen" : "Verbinden"; dark: win.night; onClicked: machine.toggleConnection() }
+                                    ActionButton { text: win.simulationMode ? (machine.connected ? "Simulator trennen" : "Simulator verbinden") : "GRBL trennen"; dark: win.night; onClicked: machine.toggleConnection() }
                                 }
                                 Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : "GRBL / Blaze-X ESP32 · echte Hardwareverbindung · S-Max 1000 / Lasermodus werden geprüft."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 RowLayout {
@@ -881,8 +882,21 @@ ApplicationWindow {
                                         indicator: Text { x: serialPortChoice.width-width-8; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink }
                                     }
                                     ActionButton { text: "Suchen"; dark: win.night; onClicked: machine.refreshPorts() }
-                                    ActionButton { text: "GRBL verbinden"; dark: win.night; enabled: !machine.busy && serialPortChoice.count > 0; onClicked: machine.connectHardware(serialPortChoice.currentText) }
+                                    ActionButton {
+                                        objectName: "connectGrblButton"
+                                        text: win.grblVerified ? "GRBL verbunden" : (!win.simulationMode && machine.connected ? "GRBL wird geprüft …" : "GRBL verbinden")
+                                        primary: win.grblVerified; dark: win.night
+                                        enabled: win.grblVerified || (!machine.busy && !machine.firing && (win.simulationMode || !machine.connected) && serialPortChoice.count > 0)
+                                        hint: win.grblVerified ? "Verbindung und Controllerprüfung bestätigt. Ein Klick startet keinen neuen Reset oder Auftrag. Zum erneuten Verbinden zuerst trennen." : "Öffnet den USB-Anschluss und setzt den Controller zurück. Ein alter gepufferter Auftrag wird verworfen; Referenzierung und Position danach neu prüfen."
+                                        onClicked: if(win.simulationMode || !machine.connected)machine.connectHardware(serialPortChoice.currentText)
+                                    }
                                     ActionButton { text: "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
+                                }
+                                Text {
+                                    objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+                                    text: win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : machine.state + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
+                                    color: win.grblVerified ? "#209b76" : win.muted
+                                    Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 233; radius: 9; color: win.panel; border.color: win.line

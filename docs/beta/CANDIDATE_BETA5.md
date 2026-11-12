@@ -36,7 +36,7 @@ Diese X11-Prüfung zeigt die tatsächlich installierte Oberfläche. Ein virtuell
 
 Der letzte funktionale Stand 3338283 bestand lokal **20/20 normal (145,88 s)** und **20/20 ASan/UBSan (201,08 s, `detect_leaks=0`; keine Aussage über Leckfreiheit)**. Der Kandidaten-Freeze verändert nur Versions-/Dokumentationsdateien. Neue PTY-Fälle decken direkte Sitzungszerstörung ab; vier UI-Datenfälle prüfen je zwei Starts, Text/Modalität, Escape/Außenklick, echten Bestätigungsbutton sowie unveränderte Projekt-/Erststartdaten. Helle und kompakte dunkle Ansicht wurden zusätzlich visuell geprüft.
 
-Beide GitHub-Paketprüfungen der exakten Kandidatenrevision sind erfolgreich: [PR-Paket](https://github.com/mgd1068/blazer-studio/actions/runs/43244554738), [Arbeitszweig-Paket](https://github.com/mgd1068/blazer-studio/actions/runs/43244317811). Die vollständigen Regressionsläufe der Kandidatenrevision werden separat beobachtet: [PR-Regression](https://github.com/mgd1068/blazer-studio/actions/runs/43244554824), [Arbeitszweig-Regression](https://github.com/mgd1068/blazer-studio/actions/runs/43244317346).
+Beide GitHub-Paketprüfungen der exakten Kandidatenrevision sind erfolgreich: [PR-Paket](https://github.com/mgd1068/blazer-studio/actions/runs/43244554738), [Arbeitszweig-Paket](https://github.com/mgd1068/blazer-studio/actions/runs/43244317811). Auch beide vollständigen Regressionsläufe der Kandidatenrevision sind erfolgreich (PR:20/20normal124,07s,20/20ASan/UBSan139,98s,detect_leaks=0): [PR-Regression](https://github.com/mgd1068/blazer-studio/actions/runs/43244554824), [Arbeitszweig-Regression](https://github.com/mgd1068/blazer-studio/actions/runs/43244317346).
 
 ## Lokale Paketprüfsummen
 
@@ -50,3 +50,5 @@ Die vollständige Liste liegt als `SHA256SUMS` beim Kandidaten. Diese Summen bez
 ## Offene Freigaben
 
 Aktuelle beaufsichtigte Geräte-/USB-/KVM-/Schutzkontaktprüfungen, vollständiger Schnitt, Relief, Werkstückmaße/-qualität und beobachteter Einsteigerlauf U01 bleiben offen. Startwarnung und Softwareprüfungen ersetzen keinen dieser Nachweise. Weitere Controller/Modelle, Geräteverwaltung und vollständiger Funktionsumfang bleiben im [Produktionsplan](../PRODUCTION_READINESS.md), [Funktionskatalog](../FUNCTION_ACCEPTANCE.md) und [Mehrgeräteplan](../MULTI_DEVICE_PLAN.md). [Testprotokoll](TEST_PROTOCOL.md), [reale Materialbefunde](../HARDWARE_ACCEPTANCE.md). Keine Geräteaktion, kein Hostupgrade, Merge oder öffentlicher Release.
+
+Am12.11.2026 hat Mathias diesen Stand ausdrücklich als [öffentliche Softwarebeta](https://github.com/mgd1068/blazer-studio/releases/tag/v0.9.0-beta.5) mit prominent dokumentierten offenen Geräte-/Material-/Einsteigerabnahmen freigegeben. Dies ändert weder Paketrevision noch den Umfang der tatsächlichen Abnahmen. Der folgende Verbindungsfix beta.5.1 ist ein eigener Stand.

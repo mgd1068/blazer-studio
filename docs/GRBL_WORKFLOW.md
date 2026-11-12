@@ -2,6 +2,16 @@
 
 Blazer Studio startet im **Simulator**. Eine echte Verbindung entsteht erst im Bereich **Gerät** durch Auswahl des seriellen Anschlusses und **GRBL verbinden**. Es gibt keine automatische Verbindung, Referenzfahrt oder Jobausführung beim Start.
 
+## Neuer GRBL-Verbindungsaufbau ab beta.5.1
+
+Jedes bewusste Öffnen des seriellen Anschlusses sendet zuerst Feed Hold und Soft-Reset. Dadurch wird ein eventuell noch im Controller gepufferter Auftrag verworfen; alte Positions-/Konfigurationsfreigaben gelten nicht weiter. Es gibt keine automatische Fortsetzung, Referenzfahrt oder Entsperrung. Nach dem Verbinden Materiallage, Position und gegebenenfalls Referenzierung neu prüfen.
+
+Erst eine unterstützte Neustartmeldung erlaubt die neuen Firmware-/Konfigurationsabfragen. Vorher eintreffende alte Quittungen, Einstellungen und Statusmeldungen werden nicht als Freigabe verwendet. Anschließend gelten die bisherigen Prüfungen auf Einheiten, Arbeitsraum, Leistungsskala, G54, Position und Laser-Aus weiter. Alarm, Door oder ein weiter anstehender Hold werden weder mit Cycle Start noch mit $X übergangen.
+
+Der Button zeigt zunächst **GRBL wird geprüft …** und erst nach bestätigter Verbindung und Prüfung **GRBL verbunden** auf grünem Hintergrund. Ein bloß geöffneter Port reicht nicht. Die Verbindungsbestätigung bleibt von der Auftragsbereitschaft getrennt: Ein laufender oder pausierter Auftrag kann eine geprüfte Verbindung haben, darf aber nicht erneut gestartet werden. Der grüne Button löst keinen erneuten Reset aus; für eine neue Verbindung zuerst trennen. Der aktuelle Zustand beziehungsweise ein Verbindungsfehler steht direkt unter den Anschlussknöpfen.
+
+Der Reset ist eine Eigenschaft dieses GRBL-Adapters. Andere Controller benötigen ihr eigenes Verfahren; es werden keine GRBL-Bytes an unbekannte Adapter geschickt. Ein Software-Reset garantiert bei Kommunikations- oder Hardwareausfall kein physisches Laser-Aus. Die Startwarnung und ständige Aufsicht bleiben erforderlich.
+
 ## Projekt → Pfade → Vorschau → Ausgabe
 
 - Rechtecke, Ellipsen, Textkonturen und unterstützte SVG-Vektoren werden in geometrische Pfade umgewandelt. Text verwendet die gespeicherte Schriftwahl und dieselbe Pfadgeometrie wie der Editor.
