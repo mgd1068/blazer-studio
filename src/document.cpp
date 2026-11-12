@@ -57,6 +57,8 @@ Document::Document(QObject *p) : QAbstractListModel(p) {
     connect(&m_preparation, &JobPreparation::changed, this, &Document::changed);
     connect(&m_batch, &BatchExport::changed, this, &Document::changed);
     connect(&m_batch, &BatchExport::finished, this, &Document::notify);
+    connect(&m_imageExport, &ImageExport::changed, this, &Document::changed);
+    connect(&m_imageExport, &ImageExport::finished, this, &Document::notify);
     demo();
 }
 int Document::rowCount(const QModelIndex &p) const {

@@ -278,6 +278,18 @@ ApplicationWindow {
     FileDialog { id: openDialog; objectName: "openProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
     FileDialog { id: saveTemplateDialog; objectName: "saveTemplateDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Als Blazer-Vorlage speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazertemplate"; nameFilters: ["Blazer-Vorlage (*.blazertemplate)"]; onAccepted: project.saveTemplate(selectedFile) }
     FileDialog { id: openTemplateDialog; objectName: "openTemplateDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Neues Projekt aus Vorlage"; nameFilters: ["Blazer-Vorlage (*.blazertemplate)"]; onAccepted: if(project.newFromTemplate(selectedFile)) {win.proofConfirmed=false;win.probeKey="";win.page=0} }
+    FileDialog {
+        id: imageExport; objectName: "imageExportDialog"
+        property bool processed: true
+        property string imageId: ""
+        property var revision: 0
+        title: processed ? "Bearbeitetes Bild exportieren" : "Bild ohne aktuelle Korrekturen exportieren"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["PNG mit Transparenz (*.png)", "JPEG mit weißem Hintergrund (*.jpg *.jpeg)", "BMP mit weißem Hintergrund (*.bmp)"]
+        defaultSuffix: selectedNameFilter.index===1 ? "jpg" : selectedNameFilter.index===2 ? "bmp" : "png"
+        onVisibleChanged: if (visible) machine.focus(false)
+        onAccepted: project.exportImage(selectedFile,processed,imageId,revision)
+    }
     FileDialog { id: gcodeDialog; objectName: "exportGcodeDialog"; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: imageDialog; title: "Bild importieren"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: project.importImage(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: reliefDialog; title: "Relief-Tiefenkarte importieren"; nameFilters: ["Tiefenkarten (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: { if (project.importRelief(selectedFile)) win.page = 3 } onVisibleChanged: if (visible) machine.focus(false) }
@@ -869,7 +881,7 @@ ApplicationWindow {
                         }
                     }
                     ReliefPanel { dark: win.night; onImportRequested: reliefDialog.open(); onPhotoRequested: photoDepth.open() }
-                    ToolsPanel { dark: win.night; operation: win.operation; onOperationSelected: index=>win.operation=index; onNodesRequested: {win.page=0;canvas.nodes=true} onImportRequested: universalImport.open(); onExportRequested: vectorExport.open(); onCsvRequested: csvImport.open(); onCameraRequested: cameraPhoto.open() }
+                    ToolsPanel { dark: win.night; operation: win.operation; onOperationSelected: index=>win.operation=index; onNodesRequested: {win.page=0;canvas.nodes=true} onImportRequested: universalImport.open(); onExportRequested: vectorExport.open(); onImageExportRequested: processed=>{imageExport.processed=processed;imageExport.imageId=project.selection.id;imageExport.revision=project.historyRevision;imageExport.open()} onCsvRequested: csvImport.open(); onCameraRequested: cameraPhoto.open() }
                 }
                 Rectangle {
                     Layout.fillWidth: true; Layout.preferredHeight: 39; color: win.panel

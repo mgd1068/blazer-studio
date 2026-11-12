@@ -3,7 +3,7 @@
 The custom free-redistribution license applies to original Blazer Studio code and
 original documentation. It does not relicense third-party components.
 
-- **Qt 6 Core, Gui, Quick, QML, Quick Controls, SVG and Serial Port:** copyright
+- **Qt 6 Core, Gui, Quick, QML, Quick Controls, SVG, Image Formats and Serial Port:** copyright
   The Qt Company and their respective contributors. The Linux application links
   dynamically to system Qt libraries. LGPLv3 terms and relevant GPLv3 text are
   included in `LICENSES/`. Their commercial permissions and library modification,

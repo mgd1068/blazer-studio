@@ -39,3 +39,6 @@ Das ist eine technische Bedienprüfung. Ob ein völlig unerfahrener Mensch ohne 
 ![Basic im kleinen dunklen Fenster](../assets/basic-compact.png)
 
 ![Hilfetext bei Tastaturbedienung](../assets/tooltip.png)
+
+
+In Advanced unter **05 Werkzeuge → Bild** kann genau ein ausgewähltes Rasterbild mit oder ohne aktuelle Korrekturen als PNG, JPEG oder BMP exportiert werden. Neue Eingaben vorher übernehmen. PNG erhält Transparenz; JPEG und BMP verwenden einen weißen Hintergrund. [Bildexport und Prüfumfang](RASTER_EXPORTS.md) beschreiben die Details. Diese Funktion gehört zur Entwicklung beta.4-dev, noch nicht zum unveränderten beta.3-Paket.

@@ -6,7 +6,7 @@ if [[ "${BLAZER_INSTALL_DEPS:-0}" == 1 ]]; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install --no-install-recommends -y build-essential cmake ninja-build git pkg-config python3 python3-bs4 libglib2.0-bin shared-mime-info xdg-utils libfile-mimeinfo-perl \
-        qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-serialport-dev libqrcodegencpp-dev \
+        qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins qt6-serialport-dev libqrcodegencpp-dev \
         qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
         qml6-module-qtquick-dialogs qml6-module-qtquick-window qml6-module-qtquick-templates \
         qml6-module-qtqml-workerscript qml6-module-qtqml-models fonts-dejavu-core inkscape

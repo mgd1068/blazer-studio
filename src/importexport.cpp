@@ -348,3 +348,24 @@ bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &patt
                : result.error);
     return result.error.isEmpty() && !result.cancelled;
 }
+
+
+bool Document::exportImage(const QUrl &url, bool processed, const QString &expectedId,
+                           quint64 expectedRevision) {
+    if (m_selection.size()!=1 || m_selected<0 || m_items[m_selected].kind!="image") {
+        notify("Für den Bildexport genau ein Rasterbild auswählen.");
+        return false;
+    }
+    const auto &art=m_items[m_selected];
+    if (!expectedId.isEmpty() && (art.id!=expectedId || m_historyRevision!=expectedRevision)) {
+        notify("Bild oder Projekt wurde seit Öffnen des Exportdialogs geändert; Export erneut öffnen.");
+        return false;
+    }
+    QString error;
+    if(!m_imageExport.start({art.reliefAsset,art.style,art.bounds.size(),processed},url,error)) {
+        notify(error);
+        return false;
+    }
+    notify("Bildexport läuft aus dem angeforderten Bildstand …");
+    return true;
+}

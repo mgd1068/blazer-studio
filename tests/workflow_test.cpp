@@ -1,5 +1,6 @@
 #include "applicationservices.h"
 #include "document.h"
+#include "imageprocessing.h"
 #include "machine.h"
 #include "materiallibrary.h"
 #include "registration.h"
@@ -447,6 +448,34 @@ class WorkflowTest : public QObject {
             window->findChild<QObject *>("exportGcodeDialog")->property("visible").toBool());
         QVERIFY(chooseFile("exportGcodeDialog", gcodePath));
         QCOMPARE(read(gcodePath), (originalGcode.join('\n') + '\n').toUtf8());
+        QVERIFY(click(window,item("workflow4")));
+        QVERIFY(click(window,item("toolsImage")));
+        QVERIFY(click(window,item("exportProcessedImageButton")));
+        auto *imagePicker=window->findChild<QObject *>("imageExportDialog");
+        QVERIFY(imagePicker);
+        QTRY_VERIFY(imagePicker->property("visible").toBool());
+        QCOMPARE(imagePicker->property("processed").toBool(),true);
+        const auto processedPath=storage.filePath("processed.png");
+        QVERIFY(chooseFile("imageExportDialog",processedPath));
+        QTRY_VERIFY_WITH_TIMEOUT(!project.imageExportBusy(),5000);
+        QString imageError;
+        const auto expectedBitmap=ImageProcessing::apply(project.items()[1].reliefAsset->image,project.items()[1].style,imageError);
+        QVERIFY(imageError.isEmpty());
+        QCOMPARE(QImage(processedPath).convertToFormat(QImage::Format_ARGB32),expectedBitmap);
+        QCOMPARE(project.projectBytes(),originalBytes);
+        QVERIFY(!project.dirty());
+        QVERIFY(screenshot("processed-image-export"));
+        QVERIFY(click(window,item("exportSourceImageButton")));
+        QTRY_VERIFY(imagePicker->property("visible").toBool());
+        QCOMPARE(imagePicker->property("processed").toBool(),false);
+        const auto sourceExportPath=storage.filePath("source.bmp");
+        QVERIFY(chooseFile("imageExportDialog",sourceExportPath));
+        QTRY_VERIFY_WITH_TIMEOUT(!project.imageExportBusy(),5000);
+        QCOMPARE(QImage(sourceExportPath).convertToFormat(QImage::Format_ARGB32),project.items()[1].reliefAsset->image.convertToFormat(QImage::Format_ARGB32));
+        QCOMPARE(project.job().gcode(),originalGcode);
+        QVERIFY(!machine.busy());
+        window->findChild<QObject *>("toolsPanel")->setProperty("section",0);
+        QVERIFY(click(window,item("workflow0")));
         window->setProperty("basic", true);
         QVERIFY(click(window, item("startJobButton"))); // Preview, no machine job yet.
         QTRY_COMPARE(window->property("page").toInt(), 1);

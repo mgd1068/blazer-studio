@@ -1,6 +1,7 @@
 #pragma once
 #include "batchexport.h"
 #include "job.h"
+#include "imageexport.h"
 #include "jobpreparation.h"
 #include "relief.h"
 #include "svgasset.h"
@@ -14,6 +15,7 @@
 class Document : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QVariantMap beginnerSummary READ beginnerSummary NOTIFY changed)
+    Q_PROPERTY(bool imageExportBusy READ imageExportBusy NOTIFY changed)
     Q_PROPERTY(bool batchBusy READ batchBusy NOTIFY changed)
     Q_PROPERTY(QString planningState READ planningState NOTIFY changed)
     Q_PROPERTY(bool planningBusy READ planningBusy NOTIFY changed)
@@ -61,6 +63,9 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void retryPlanning();
     QString planningState() const;
     bool planningBusy() const;
+    bool imageExportBusy() const { return m_imageExport.busy(); }
+    Q_INVOKABLE bool exportImage(const QUrl &url, bool processed = true, const QString &expectedId = {}, quint64 expectedRevision = 0);
+    Q_INVOKABLE void cancelImageExport() { m_imageExport.cancel(); }
     bool batchBusy() const { return m_batch.busy(); }
     QImage imagePreview(const Artwork &item) const;
     QStringList pages() const { return m_pages; }
@@ -212,5 +217,6 @@ class Document : public QAbstractListModel {
     mutable std::optional<JobPlan> m_job;
     JobPreparation m_preparation;
     BatchExport m_batch;
+    ImageExport m_imageExport;
     bool m_background = false;
 };

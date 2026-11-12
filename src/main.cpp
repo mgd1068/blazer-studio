@@ -13,6 +13,7 @@
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMimeDatabase>
@@ -175,6 +176,13 @@ int main(int argc, char **argv) {
                     return;
                 }
                 svg.close();
+                for (const auto &extension : {"bmp", "tiff", "webp"}) {
+                    const auto file=transientRecovery.filePath(QString("sample.")+extension);
+                    if(!image.save(file) || QImage(file).size()!=image.size()) { fail("required raster codec"); return; }
+                }
+                const auto gif=QByteArray::fromHex("47494638396102000100800000000000ffffff2c0000000002000100000202440a003b");
+                const auto gifImage=QImage::fromData(gif,"GIF");
+                if(gifImage.size()!=QSize(2,1) || qGray(gifImage.pixel(0,0))!=0 || qGray(gifImage.pixel(1,0))!=255) { fail("GIF raster codec"); return; }
                 if (!document.importImage(QUrl::fromLocalFile(png)) ||
                     !document.importSvg(QUrl::fromLocalFile(svg.fileName())) ||
                     !QFontDatabase::families().contains("DejaVu Sans") || !simulator.simulation()) {

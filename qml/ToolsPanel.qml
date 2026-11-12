@@ -13,6 +13,7 @@ ScrollView {
     readonly property var op: project.layers[Math.min(operation,project.layers.length-1)] || ({})
     signal importRequested()
     signal exportRequested()
+    signal imageExportRequested(bool processed)
     signal cameraRequested()
     signal csvRequested()
     signal nodesRequested()
@@ -188,6 +189,11 @@ ScrollView {
             CheckBox { HelpBubble { target: parent } id: invert; text: "Bild invertieren" }
             CheckBox { HelpBubble { target: parent } id: ellipseMask; text: "Elliptische Maske" }
             ActionButton { objectName: "imageApply"; enabled: project.selection.kind==="image"; text: "Bildwerte übernehmen"; dark: tools.dark; onClicked: tools.apply("imageSettings",{imageMode:["dither","atkinson","threshold","grayscale"][imageMode.currentIndex],brightness:brightness.value,contrast:contrast.value,gamma:imageGamma.value,sharpness:sharpness.value,invert:invert.checked,ellipseMask:ellipseMask.checked}) }
+            ActionButton { objectName: "exportProcessedImageButton"; text: "Bearbeitetes Bild exportieren"; dark: tools.dark; enabled: project.selection.kind==="image" && !project.imageExportBusy; onClicked: tools.imageExportRequested(true) }
+            ActionButton { objectName: "exportSourceImageButton"; text: "Bild ohne Korrekturen exportieren"; dark: tools.dark; enabled: project.selection.kind==="image" && !project.imageExportBusy; onClicked: tools.imageExportRequested(false) }
+            Text { text: "Exportiert den übernommenen Bildstand. PNG erhält Transparenz; JPEG und BMP verwenden einen weißen Hintergrund. Änderungen in diesen Feldern zuerst übernehmen."; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 10 }
+            Text { text: "Bildexport läuft aus dem angeforderten Stand …"; visible: project.imageExportBusy; color: tools.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            ActionButton { objectName: "cancelImageExportButton"; text: "Bildexport abbrechen"; visible: project.imageExportBusy; dark: tools.dark; onClicked: project.cancelImageExport() }
             GridLayout { columns: 2; Layout.fillWidth: true
                 NumberField { id: cropX; label: "X"; value: 0; unit: "px"; decimals: 0; dark: tools.dark; onEdited: n=>value=n; Layout.fillWidth: true }
                 NumberField { id: cropY; label: "Y"; value: 0; unit: "px"; decimals: 0; dark: tools.dark; onEdited: n=>value=n; Layout.fillWidth: true }

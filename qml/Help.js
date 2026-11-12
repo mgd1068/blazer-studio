@@ -13,6 +13,8 @@ var actions = {
   "Speichern": "Speichert das Projekt zur späteren Weiterbearbeitung. Die vorige Datei wird als Sicherung erhalten.",
   "Beispiel": "Öffnet ein Übungsprojekt. Seine Werte sind keine geprüfte Materialempfehlung.",
   "Bild": "Lädt ein Foto oder eine Zeichnung. Das allein startet den Laser nicht.",
+  "Bearbeitetes Bild exportieren": "Speichert genau ein ausgewähltes Rasterbild einschließlich übernommener Korrekturen, Zuschnitt, Masken und Dithering. PNG erhält Transparenz; JPEG ist verlustbehaftet.",
+  "Bild ohne Korrekturen exportieren": "Exportiert die eingebettete Graustufenquelle ohne aktuelle Bildkorrekturen. Bereits eingebrannte Drehungen oder Masken bleiben erhalten.",
   "GCode": "Speichert die berechneten Fahr- und Laserbefehle. Das ist eine Ausgabedatei, keine Projektdatei.",
   "Gravieren": "Bearbeitet die Oberfläche oder füllt das Motiv mit Linien.",
   "Schneiden": "Fährt die Umrisse ab. Ob das Material durchtrennt wird, muss mit einer Materialprobe geprüft werden.",

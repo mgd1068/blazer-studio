@@ -46,7 +46,7 @@ SVGs mit DTD/Entities oder Bild-/Dateiverweisen werden in dieser ersten Version 
 Getestete Umgebung: Ubuntu 26.04, GCC 15, Qt 6.10.2.
 
 ```bash
-sudo apt-get install qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-serialport-dev libqrcodegencpp-dev \
+sudo apt-get install qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins qt6-serialport-dev libqrcodegencpp-dev \
   qml6-module-qtquick qml6-module-qtquick-window \
   qml6-module-qtquick-controls qml6-module-qtquick-layouts \
   qml6-module-qtquick-dialogs qml6-module-qtqml-workerscript
