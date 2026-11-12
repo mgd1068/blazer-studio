@@ -15,6 +15,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <numbers>
 class ExpansionTest : public QObject {
     Q_OBJECT
     QTemporaryDir temp;
@@ -35,6 +36,208 @@ class ExpansionTest : public QObject {
         return QUrl::fromLocalFile(path);
     }
   private slots:
+    void gcodeLaserFilteringAndBlockOrder() {
+        const auto result =
+            PlotImport::gcode("G21 G90 G17 G54 G94\nG0 X10 Y20\nM4 S0\nG1 X11 Y20 F1000\n"
+                              "G1 X21 S100\nG1 Y30 S500\nG1 X11 S0\nG1 Y40 S100\n"
+                              "G0 X50 Y60\nM5\nG1 X60 S100\nM3\nG1 X70\nM2\nM999 G28\n");
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.paths.size(), 3);
+        QCOMPARE(result.interpretation, QString("Laser-/Spindelpfade"));
+        const auto &p = result.paths[0];
+        QCOMPARE(p.elementCount(), 3);
+        QCOMPARE(QPointF(p.elementAt(0)), QPointF(0, 0));
+        QCOMPARE(QPointF(p.elementAt(1)), QPointF(10, 0));
+        QCOMPARE(QPointF(p.elementAt(2)), QPointF(10, 10));
+        QCOMPARE(result.paths[1].boundingRect(), QRectF(0, 10, 0, 10));
+        QCOMPARE(result.paths[2].boundingRect(), QRectF(49, 40, 10, 0));
+        const auto a = PlotImport::gcode("G0X0Y0\nG1X10S100M3\n");
+        const auto b = PlotImport::gcode("G0X0Y0\nM3S100G1X10\n");
+        QVERIFY(a.error.isEmpty());
+        QVERIFY(b.error.isEmpty());
+        QCOMPARE(a.paths, b.paths);
+        // Source power determines geometry visibility, never a copied operation.
+        QVERIFY(!PlotImport::gcode("G0X0Y0\nM3S0\nG1X10\n").error.isEmpty());
+        QVERIFY(!PlotImport::gcode("G0X0Y0\nS100\nG1X10\n").error.isEmpty());
+    }
+    void gcodeUnitsModesCommentsAndProgramEnd() {
+        const auto result =
+            PlotImport::gcode("%\r\nN1 G20 G90 G0 X+1. 0 Y2 (M3 S100 ignored)\r\n"
+                              "N2 G91 G1 X.5 Y.25\r\nN3 G21 G90 X50.8 Y63.5;M5 ignored\r\n"
+                              "G4 P.2\r\nM0\r\nM30\r\nG9999 [ignored tail]\r\n%\r\n");
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QVERIFY(result.interpretation.contains("ohne M/S"));
+        QCOMPARE(result.paths.size(), 1);
+        const auto &p = result.paths[0];
+        QCOMPARE(p.elementCount(), 3);
+        QVERIFY(QLineF(QPointF(p.elementAt(0)), QPointF(0, 0)).length() < 1e-8);
+        QVERIFY(QLineF(QPointF(p.elementAt(1)), QPointF(12.7, 6.35)).length() < 1e-8);
+        QVERIFY(QLineF(QPointF(p.elementAt(2)), QPointF(25.4, 12.7)).length() < 1e-8);
+        const auto separate = PlotImport::gcode("G0X10\nG0Y20\nG1X30\nG80\nG1Y30\n");
+        QVERIFY2(separate.error.isEmpty(), qPrintable(separate.error));
+        QCOMPARE(separate.paths[0].boundingRect(), QRectF(0, 0, 20, 10));
+        QVERIFY(PlotImport::gcode("%\nG0X0Y0\nG1X10\n").error.contains("Prozent"));
+        // No machine location is invented for a first drawing move.
+        QVERIFY(!PlotImport::gcode("G1X10Y20\n").error.isEmpty());
+        const auto relativeOnly =
+            PlotImport::gcode("G91\nT0\nM4\nM8\nG0X0Y0\nG1X5S1000F3000\nM9\nM5\nG0X-5Y0\nM2\n");
+        QVERIFY2(relativeOnly.error.isEmpty(), qPrintable(relativeOnly.error));
+        QCOMPARE(relativeOnly.paths[0].boundingRect(), QRectF(0, 0, 5, 0));
+        QVERIFY(!PlotImport::gcode("G91G1X5\nG90G0X10Y10\n").error.isEmpty());
+        const auto anchor = PlotImport::gcode("G91G0X5\nG90G0X10Y20\nG1X20\n");
+        QVERIFY2(anchor.error.isEmpty(), qPrintable(anchor.error));
+        QCOMPARE(anchor.paths[0].boundingRect(), QRectF(0, 0, 10, 0));
+        QVERIFY(!PlotImport::gcode("G0X10\nG91G1Y20\n").error.isEmpty());
+        QVERIFY(PlotImport::gcode(QByteArray("\xEF\xBB\xBF") + "G0X0Y0\nG1X10\n").error.isEmpty());
+        const auto ended = PlotImport::gcode("G0X0Y0\nG1X10\nM2\nM3S100\n");
+        QVERIFY(ended.error.isEmpty());
+        QVERIFY(ended.interpretation.contains("ohne M/S"));
+    }
+    void gcodeArcCentresRadiusDirectionAndTurns() {
+        const auto relative = PlotImport::gcode("G0X10Y0\nG3X0Y10I-10J0F100\n");
+        const auto absolute = PlotImport::gcode("G0X10Y0\nG90.1G3X0Y10I0J0\n");
+        const auto radius = PlotImport::gcode("G0X10Y0\nG3X0Y10R10\n");
+        QVERIFY2(relative.error.isEmpty(), qPrintable(relative.error));
+        QVERIFY2(absolute.error.isEmpty(), qPrintable(absolute.error));
+        QVERIFY2(radius.error.isEmpty(), qPrintable(radius.error));
+        QCOMPARE(relative.paths, absolute.paths);
+        const auto &p = relative.paths[0];
+        QCOMPARE(p.boundingRect(), QRectF(0, 0, 10, 10));
+        QVERIFY(p.elementAt(1).x < 10 && p.elementAt(1).y > 0);
+        QCOMPARE(QPointF(p.elementAt(p.elementCount() - 1)), QPointF(0, 10));
+        const auto longArc = PlotImport::gcode("G0X10Y0\nG3X0Y10R-10\n");
+        QVERIFY2(longArc.error.isEmpty(), qPrintable(longArc.error));
+        QVERIFY(longArc.paths[0].boundingRect().width() > 19.98);
+        QVERIFY(longArc.paths[0].boundingRect().height() > 19.98);
+        QVERIFY(longArc.paths[0].elementAt(1).x > longArc.paths[0].elementAt(0).x);
+        auto signedArea = [](const QPainterPath &path) {
+            double area = 0;
+            for (int i = 1; i < path.elementCount(); ++i) {
+                const auto a = path.elementAt(i - 1), b = path.elementAt(i);
+                area += (a.x * b.y - b.x * a.y) / 2;
+            }
+            return area;
+        };
+        const auto cw = PlotImport::gcode("G0X10Y0\nG2I-10J0\n");
+        const auto ccw = PlotImport::gcode("G0X10Y0\nG3I-10J0P2\n");
+        QVERIFY2(cw.error.isEmpty(), qPrintable(cw.error));
+        QVERIFY2(ccw.error.isEmpty(), qPrintable(ccw.error));
+        QVERIFY(std::abs(signedArea(cw.paths[0]) + 100 * std::numbers::pi) < 1.);
+        QVERIFY(std::abs(signedArea(ccw.paths[0]) - 200 * std::numbers::pi) < 2.);
+        QCOMPARE(QPointF(cw.paths[0].elementAt(0)),
+                 QPointF(cw.paths[0].elementAt(cw.paths[0].elementCount() - 1)));
+        const QList<QByteArray> invalid = {"G2X0Y10R1",        "G2X10Y0R10",       "G3I0J0",
+                                           "G90.1G3X0Y10I0",   "G3X0Y10I-10J0R10", "G3I-10J0P1.5",
+                                           "G3X0Y10.006I-10J0"};
+        for (const auto &bad : invalid)
+            QVERIFY2(!PlotImport::gcode("G0X10Y0\n" + bad + "\n").error.isEmpty(), bad.constData());
+    }
+    void gcodeActualBlazerOutputAndAtomicDocumentImport() {
+        Document source;
+        source.newProject();
+        source.addShape("rect");
+        source.setProperty("x", 20.);
+        source.setProperty("y", 30.);
+        source.setProperty("width", 10.);
+        source.setProperty("height", 5.);
+        const auto generated = source.job().gcode().join('\n').toUtf8();
+        Document d;
+        d.newProject();
+        QVERIFY(d.addPage("GCode"));
+        const auto empty = d.projectBytes();
+        QVERIFY2(d.importFile(write("blazer.NC", generated)), qPrintable(d.message()));
+        QCOMPARE(d.count(), 1);
+        QCOMPARE(d.items()[0].page, 1);
+        QCOMPARE(d.items()[0].bounds, QRectF(0, 0, 10, 5));
+        QCOMPARE(d.job().workLength, source.job().workLength);
+        const auto bytes = d.projectBytes();
+        const auto code = d.job().gcode();
+        Document restored;
+        QVERIFY(restored.restoreBytes(bytes));
+        QCOMPARE(restored.job().gcode(), code);
+        d.undo();
+        QCOMPARE(d.projectBytes(), empty);
+        d.redo();
+        QCOMPARE(d.projectBytes(), bytes);
+        const QList<QByteArray> invalid = {"G28",
+                                           "G53G0X0Y0",
+                                           "G55",
+                                           "G92X0",
+                                           "G10L20P1X0",
+                                           "G18",
+                                           "G41D1",
+                                           "G43H1",
+                                           "G81X1Y1",
+                                           "G1Z0",
+                                           "M6T1",
+                                           "M98P1",
+                                           "G1X#1",
+                                           "G1X[1+2]",
+                                           "G1X1e2",
+                                           "G1X10X20",
+                                           "G0G1X10",
+                                           "M3M5",
+                                           "G20G21",
+                                           "F0",
+                                           "S-1",
+                                           "N1.5G1X10",
+                                           "G1X2001",
+                                           "G4P1X10",
+                                           "G1X10*42",
+                                           "/G1X10",
+                                           "G1X10(unclosed",
+                                           "G1X10(nested(comment))",
+                                           "T1.5",
+                                           "T256"};
+        for (const auto &bad : invalid) {
+            const auto revision = d.historyRevision();
+            const auto parsed = PlotImport::gcode("G0X0Y0\nG1X10\n" + bad + "\n");
+            QVERIFY2(!parsed.error.isEmpty(), bad.constData());
+            QVERIFY(parsed.paths.isEmpty());
+            QVERIFY(!d.importFile(write("bad.gc", "G0X0Y0\nG1X10\n" + bad + "\n")));
+            QCOMPARE(d.projectBytes(), bytes);
+            QCOMPARE(d.historyRevision(), revision);
+        }
+        JobPlan raster;
+        raster.moves = {{{0, 0}, {10, 20}, 1000, 0, 0, true},
+                        {{10, 20}, {20, 20}, 1000, 20, 0, false},
+                        {{20, 20}, {30, 20}, 1000, 0, 0, false},
+                        {{30, 20}, {40, 20}, 1000, 50, 0, false}};
+        const auto inlinePower = PlotImport::gcode(raster.gcode().join('\n').toUtf8());
+        QVERIFY2(inlinePower.error.isEmpty(), qPrintable(inlinePower.error));
+        QCOMPARE(inlinePower.paths.size(), 2);
+        QCOMPARE(inlinePower.paths[0].boundingRect(), QRectF(0, 0, 10, 0));
+        QCOMPARE(inlinePower.paths[1].boundingRect(), QRectF(20, 0, 10, 0));
+    }
+    void gcodeResourceBudgets() {
+        QVERIFY(!PlotImport::gcode(QByteArray(16 * 1024 * 1024 + 1, ' ')).error.isEmpty());
+        QVERIFY(!PlotImport::gcode(QByteArray(4097, ' ')).error.isEmpty());
+        QVERIFY(!PlotImport::gcode(QByteArray(100001, '\n')).error.isEmpty());
+        const auto hidden = PlotImport::gcode("G0X1000Y0\nM4S0\nG3I-1000J0P1000\n");
+        QVERIFY2(hidden.error.contains("Unterteilung"), qPrintable(hidden.error));
+        QByteArray many = "G0X0Y0\n";
+        for (int i = 0; i < 2001; ++i)
+            many += "G0X0Y0\nG1X10\n";
+        const auto parsed = PlotImport::gcode(many);
+        QVERIFY2(parsed.error.isEmpty(), qPrintable(parsed.error));
+        QCOMPARE(parsed.paths.size(), 2001);
+        Document d;
+        d.newProject();
+        QVERIFY(d.importFile(write("many.gcode", many)));
+        QCOMPARE(d.count(), 1);
+        d.setProperty("y", 1.);
+        QVERIFY2(d.job().valid(), qPrintable(d.job().errors.join(";")));
+        QCOMPARE(d.job().workLength, 20010.);
+        QCOMPARE(d.items()[0].path.elementCount(), 4002);
+        const auto words = PlotImport::gcode(QByteArray("G0G21G90G17G54S0\n").repeated(83334));
+        QVERIFY2(words.error.contains("Wortanzahl"), qPrintable(words.error));
+        many = "G0X0Y0\n";
+        for (int i = 0; i < 99998; ++i)
+            many += i % 2 ? "G1X0\n" : "G1X10\n";
+        many += "G3I-1J0\n";
+        const auto elements = PlotImport::gcode(many);
+        QVERIFY2(elements.error.contains("Zu viele Pfadelemente"), qPrintable(elements.error));
+    }
     void hpglMillimetresOrientationAndModalCoordinates() {
         const auto result = PlotImport::hpgl("IN;SP1;PU400,800;PD1200,800,1200,1200;"
                                              "PU;PR-800,0;PD800,0;SP0;PD800,800;");

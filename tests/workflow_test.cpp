@@ -732,6 +732,32 @@ class WorkflowTest : public QObject {
         QVERIFY(click(window,item("historyClose")));
         QTRY_VERIFY(!historyDialog->property("visible").toBool());
         project.newProject();
+        // The actual picker handler imports GCode geometry with the selected
+        // Basic profile, without starting a machine job or copying source power.
+        window->setProperty("basic",true);
+        QVERIFY(project.applyBasicMaterial(sourceProfile));
+        const auto sourceGcodePath=storage.filePath("geometry.gcode");
+        QFile sourceGcode(sourceGcodePath);
+        QVERIFY(sourceGcode.open(QIODevice::WriteOnly));
+        sourceGcode.write("G21G90\nG0X10Y20\nM4S900\nG1X20F3333\nG1Y25\nM5\nG1X30\nM2\n");
+        sourceGcode.close();
+        QVERIFY(click(window,item("importMotifButton")));
+        auto *importPicker=window->findChild<QObject *>("importMotifDialog");
+        QVERIFY(importPicker);
+        QTRY_VERIFY(importPicker->property("visible").toBool());
+        QVERIFY(importPicker->property("nameFilters").toStringList().join(' ').contains("*.gcode"));
+        QVERIFY(chooseFile("importMotifDialog",sourceGcodePath));
+        QTRY_COMPARE(project.count(),1);
+        QCOMPARE(project.items()[0].bounds,QRectF(0,0,10,5));
+        QCOMPARE(project.items()[0].layer,0);
+        QCOMPARE(project.layers()[0].toMap()["power"].toDouble(),100.);
+        QCOMPARE(project.layers()[0].toMap()["speed"].toDouble(),5000.);
+        QVERIFY(!project.materialModified());
+        QVERIFY(project.message().contains("GCode"));
+        QVERIFY(!machine.running());
+        QVERIFY(!machine.paused());
+        QVERIFY(screenshot("gcode-import"));
+        project.newProject();
         QVERIFY(machine.simulation());
         QVERIFY(!machine.log().join('\n').contains("Baud geöffnet"));
         QVERIFY(window->close());

@@ -75,7 +75,7 @@ var actions = {
   "Abbrechen": "Beendet diesen Vorgang ohne automatische Laserfreigabe.",
   "Datei importieren": "Lädt eine unterstützte Grafik, ein Modell oder Geometrien aus einem Projekt.",
   "SVG exportieren": "Speichert die Vektoren des aktiven Blatts für andere Zeichenprogramme.",
-  "↓  Importieren": "Lädt eine unterstützte Grafik oder ein 3D-Modell. Größere Bilder behalten ihre Auflösung.",
+  "↓  Importieren": "Lädt eine unterstützte Grafik, GCode-Geometrie oder ein 3D-Modell. GCode wird als editierbarer Pfad eingefügt und nicht ausgeführt. Größere Bilder behalten ihre Auflösung.",
   "⌂  Referenzfahrt": "Fährt zu den Endschaltern, damit der Laser seine Position wieder kennt. Der Kopf bewegt sich.",
   "□  Rahmenfahrt": "Zeigt die äußeren Motivgrenzen durch eine Fahrt mit ausgeschaltetem Laser.",
   "◎  Halten für 2 %": "Fordert einen kurzen Laserpunkt an. Auch dieser Punkt ist echte Laserstrahlung.",

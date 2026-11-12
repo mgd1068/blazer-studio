@@ -61,24 +61,37 @@ bool Document::importFile(const QUrl &url) {
         return false;
     QList<Artwork> imported;
     const bool hpgl = ext == "hpgl" || ext == "plt";
-    if (hpgl) {
-        const auto result = PlotImport::hpgl(file.read(16 * 1024 * 1024 + 1));
+    const bool gcode = ext == "gc" || ext == "gcode" || ext == "nc";
+    QString plotInterpretation;
+    if (hpgl || gcode) {
+        const auto bytes = file.read(16 * 1024 * 1024 + 1);
+        const auto result = hpgl ? PlotImport::hpgl(bytes) : PlotImport::gcode(bytes);
         if (!result.error.isEmpty()) {
             notify(result.error);
             return false;
         }
-        for (const auto &path : result.paths) {
+        auto paths = result.paths;
+        if (gcode) {
+            // A raster job can contain thousands of disconnected strokes.
+            // Keep them as subpaths of one editable artwork, without bridges.
+            QPainterPath compound;
+            for (const auto &path : paths)
+                compound.addPath(path);
+            paths = {compound};
+        }
+        for (const auto &path : paths) {
             Artwork a;
             a.id = uid();
-            a.name = "HPGL " + QString::number(imported.size() + 1);
+            a.name = (hpgl ? "HPGL " : "GCode ") + QString::number(imported.size() + 1);
             a.layer = 1;
             a.page = m_activePage;
             if (!bakePath(a, path)) {
-                notify("HPGL-Geometrie ungültig; kein Teilimport.");
+                notify("Importgeometrie ungültig; kein Teilimport.");
                 return false;
             }
             imported.append(a);
         }
+        plotInterpretation = result.interpretation;
     } else if (ext == "dxf") {
         auto lines = QString::fromUtf8(file.readAll()).split('\n');
         struct Pair {
@@ -383,10 +396,14 @@ bool Document::importFile(const QUrl &url) {
     m_selection = {m_selected};
     endResetModel();
     refresh();
-    notify(QString::number(imported.size()) + (hpgl
-        ? " HPGL-Pfade importiert (40 Einheiten/mm, Y nach oben; gemeinsam links unten platziert). "
-          "Stifte als Geometrie übernommen; Bearbeitungsparameter neu prüfen."
-        : " Vektorobjekte importiert; Einheiten und Bearbeitungsparameter prüfen."));
+    notify(QString::number(imported.size()) +
+           (gcode ? " GCode-Pfadobjekt importiert (" + plotInterpretation +
+                        "). Gemeinsam links unten platziert; "
+                        "Leistung, Vorschub, Pausen und Schaltbefehle werden nicht übernommen."
+            : hpgl ? " HPGL-Pfade importiert (40 Einheiten/mm, Y nach oben; gemeinsam links unten "
+                     "platziert). "
+                     "Stifte als Geometrie übernommen; Bearbeitungsparameter neu prüfen."
+                   : " Vektorobjekte importiert; Einheiten und Bearbeitungsparameter prüfen."));
     return true;
 }
 bool Document::importProject(const QUrl &url) {
