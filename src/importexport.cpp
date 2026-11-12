@@ -405,7 +405,8 @@ bool Document::importProject(const QUrl &url) {
     }
     checkpoint();
     applySnapshot(*combined);
-    notify("Projekt mit eigenen Operationen eingefügt.");
+    notify("Projektinhalt mit eigenen Operationen eingefügt; Name und Notizen des geöffneten "
+           "Projekts bleiben erhalten.");
     return true;
 }
 bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &pattern) {

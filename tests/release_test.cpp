@@ -100,6 +100,7 @@ class ReleaseTest : public QObject {
         d.newProject();
         d.addShape("text");
         d.setProperty("text", "PRIVATE-TEXT-7ce8");
+        QVERIFY(d.setMetadata("PRIVATE-TITLE-7ce8", "PRIVATE-NOTES-7ce8"));
         const auto project = QUrl::fromLocalFile(storage.filePath("PRIVATE-PATH-7ce8.blazer"));
         QVERIFY(d.save(project));
         d.setBackgroundPlanning(true);

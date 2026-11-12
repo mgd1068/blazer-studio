@@ -20,7 +20,7 @@ Aktive Objekte außerhalb von 200 × 150 mm, nicht auswertbare Inhalte oder zu k
 
 **Materialtest** erzeugt ein neues bearbeitbares Projekt: 2–10 Stufen je Achse, 5-mm-Gravurfelder mit 8 mm Abstand ab X10/Y10. Zeilen von unten nach oben ändern die Geschwindigkeit; Spalten von links nach rechts die Leistung. Die einzelnen Zellen besitzen eigene Leistungs-/Geschwindigkeitswerte, die rechts sichtbar und editierbar sind. Erzeugung allein startet keinen Laser. Vorschau, Projektdatei und GCode-Export funktionieren wie bei anderen Projekten.
 
-Projektformat **7** speichert eigene Objektwerte und [Relief-Tiefenkarten](RELIEF.md). Formate 1–6 bleiben lesbar. Neu gespeicherte Dateien benötigen Version 0.7 oder neuer. Ein laufender übertragener Job bleibt unverändert, auch wenn der Editor danach geändert wird.
+Der Entwicklungsstand nach beta.2 speichert **Projektformat 8** mit [Projektnotizen](PROJECTS.md), eigenen Objektwerten und [Relief-Tiefenkarten](RELIEF.md). Formate 1–7 bleiben lesbar. Neu gespeicherte Dateien benötigen beta.3-dev oder neuer; beta.2 kann sie nicht öffnen. Ein laufender übertragener Job bleibt unverändert, auch wenn der Editor danach geändert wird.
 
 ![Bearbeitbare Materialtestmatrix](../assets/material-test.png)
 

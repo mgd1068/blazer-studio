@@ -20,7 +20,7 @@ Die Bibliothek liegt im Qt-Anwendungsdatenverzeichnis, auf diesem Rechner normal
 
 Ein Projekt speichert eine eigene Kopie des angewendeten Profils. Spätere Bibliotheksänderungen oder Löschen verändern diesen Stand nicht automatisch; erneutes Auswählen übernimmt den aktuellen Bibliotheksstand. Individuelle Bearbeitungsänderungen werden als Abweichung angezeigt. Die Profilübernahme ist im Projekt rückgängig zu machen; Bibliotheksänderungen selbst haben keinen Undo-Verlauf.
 
-Projektformat 7 speichert zusätzlich Relief-Tiefenkarten und eigene Objektwerte und weiterhin Objektgruppen und Mehrfachauswahl; Maße bleiben Millimeter mit Ursprung unten links. Projektdateien der Versionen 1, 2, 3, 4, 5 und 6 bleiben lesbar; Version 1 wird beim Öffnen umgerechnet. Profilrevisionen werden mitgeführt; eine vollständige Versionsverwaltung, Fotos, Suchfilter, Import/Export fremder Bibliotheken bleiben weitere Ausbauschritte; eine bearbeitbare Materialtestmatrix ist vorhanden.
+Projektformat 8 ergänzt [Projektnotizen](PROJECTS.md) und speichert weiterhin Relief-Tiefenkarten, eigene Objektwerte, Objektgruppen und Mehrfachauswahl; Maße bleiben Millimeter mit Ursprung unten links. Projektdateien der Versionen 1 bis 7 bleiben lesbar; Version 1 wird beim Öffnen umgerechnet. Profilrevisionen werden mitgeführt; eine vollständige Versionsverwaltung, Fotos, Suchfilter, Import/Export fremder Bibliotheken bleiben weitere Ausbauschritte; eine bearbeitbare Materialtestmatrix ist vorhanden.
 
 ![Materialprofil bearbeiten](../assets/material-editor.png)
 

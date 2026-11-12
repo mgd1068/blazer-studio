@@ -75,6 +75,12 @@ ApplicationWindow {
         if(action.length>0)win.performAction(action)
         return true
     }
+    ProjectDialog {
+        id: projectDetails
+        document: project
+        dark: win.night
+        onAboutToShow: machine.focus(false)
+    }
     OnboardingDialog {
         id: onboarding; onAboutToShow: machine.focus(false); dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
         onPracticeRequested: {
@@ -207,12 +213,12 @@ ApplicationWindow {
             }
         }
     }
-    Shortcut { sequences: [StandardKey.Save]; onActivated: saveDialog.open() }
-    Shortcut { sequences: [StandardKey.Open]; onActivated: win.requestAction("open") }
-    Shortcut { sequences: [StandardKey.Undo]; onActivated: project.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; onActivated: project.redo() }
-    Shortcut { sequence: "Ctrl+I"; onActivated: importDialog.open() }
-    Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible; onActivated: { machine.stop(); project.select(-1) } }
+    Shortcut { sequences: [StandardKey.Save]; enabled: !projectDetails.visible; onActivated: saveDialog.open() }
+    Shortcut { sequences: [StandardKey.Open]; enabled: !projectDetails.visible; onActivated: win.requestAction("open") }
+    Shortcut { sequences: [StandardKey.Undo]; enabled: !projectDetails.visible; onActivated: project.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; enabled: !projectDetails.visible; onActivated: project.redo() }
+    Shortcut { sequence: "Ctrl+I"; enabled: !projectDetails.visible; onActivated: importDialog.open() }
+    Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDetails.visible; onActivated: { machine.stop(); project.select(-1) } }
     FileDialog { id: importDialog; objectName: "importMotifDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: win.importMotif(selectedFile) }
     FileDialog { id: saveDialog; objectName: "saveProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: win.finishSave(selectedFile); onRejected: win.pendingAction="" }
     FileDialog { id: openDialog; objectName: "openProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
@@ -335,7 +341,18 @@ ApplicationWindow {
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: win.line }
             RowLayout {
                 anchors.fill: parent; anchors.leftMargin: 22; anchors.rightMargin: 20; spacing: 8
-                Text { Layout.maximumWidth: win.width<1280 ? 140 : 220; elide: Text.ElideRight; text: project.title; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                ActionButton {
+                    id: projectDetailsButton
+                    objectName: "projectDetailsButton"
+                    Layout.maximumWidth: win.width < 1280 ? 140 : 220
+                    Layout.minimumWidth: 60
+                    text: project.title + " ▾"
+                    dark: win.night
+                    compact: true
+                    hint: "Öffnet Projektname und Notizen. Änderungen werden mit der Projektdatei gespeichert."
+                    contentItem: Text { text: projectDetailsButton.text; textFormat: Text.PlainText; elide: Text.ElideRight; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold; verticalAlignment: Text.AlignVCenter }
+                    onClicked: projectDetails.open()
+                }
                 Text { text: project.dirty ? "●" : ""; color: "#d79b54"; font.pixelSize: 12 }
                 Text { text: "/  Blatt 01"; color: win.muted; font.pixelSize: 11 }
                 Item { Layout.fillWidth: true }

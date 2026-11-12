@@ -1,4 +1,4 @@
-# Paketbau 0.9.0-beta.2
+# Paketbau – Version aus cmake/Version.cmake
 
 Ziel: Ubuntu 26.04 amd64. Das DEB enthält die Anwendung, eigene Ressourcen, Hilfsprogramme, vollständige Dokumentation mit Abbildungen und Lizenztexte. Qt, Schriften und andere Laufzeitbibliotheken werden von Ubuntu installiert; keine Qt-Bibliotheken oder KI-Modelle sind gebündelt. Das Paket verlangt weder root zum Programmstart noch einen Compiler.
 

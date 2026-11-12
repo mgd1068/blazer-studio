@@ -15,6 +15,105 @@
 class CoreTest : public QObject {
     Q_OBJECT
   private slots:
+    void projectMetadataHistoryAndRoundtrip() {
+        QTemporaryDir dir;
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        const auto url = QUrl::fromLocalFile(dir.filePath("notes.blazer"));
+        QVERIFY(d.save(url));
+        const auto original = d.projectBytes();
+        const auto gcode = d.job().gcode();
+        const QString notes = "Kraftpapier 80 × 80 mm\nDicke unbekannt.\n<b>Kein HTML</b> – heiß.";
+        QVERIFY(d.setMetadata("  Versuch Ä  ", notes));
+        QCOMPARE(d.title(), QString("Versuch Ä"));
+        QCOMPARE(d.notes(), notes);
+        QVERIFY(d.dirty());
+        QCOMPARE(d.job().gcode(), gcode);
+        const auto edited = d.projectBytes();
+        QVERIFY(d.setMetadata(d.title(), d.notes())); // No extra history entry.
+        d.undo();
+        QCOMPARE(d.projectBytes(), original);
+        QVERIFY(!d.dirty());
+        d.redo();
+        QCOMPARE(d.projectBytes(), edited);
+        QVERIFY(d.save(url));
+        QVERIFY(!d.dirty());
+        Document loaded;
+        QVERIFY(loaded.open(url));
+        QCOMPARE(loaded.title(), d.title());
+        QCOMPARE(loaded.notes(), notes);
+        QCOMPARE(loaded.projectBytes(), edited);
+        QCOMPARE(loaded.job().gcode(), gcode);
+        QVERIFY(!loaded.dirty());
+        Document recovered;
+        QVERIFY(recovered.restoreBytes(edited));
+        QCOMPARE(recovered.notes(), notes);
+        QVERIFY(recovered.dirty());
+        Document destination;
+        destination.newProject();
+        QVERIFY(destination.setMetadata("Zielprojekt", "Eigene Angaben behalten"));
+        QVERIFY(destination.importProject(url));
+        QCOMPARE(destination.count(), 1);
+        QCOMPARE(destination.title(), QString("Zielprojekt"));
+        QCOMPARE(destination.notes(), QString("Eigene Angaben behalten"));
+        destination.undo();
+        QCOMPARE(destination.count(), 0);
+        QCOMPARE(destination.notes(), QString("Eigene Angaben behalten"));
+        destination.redo();
+        QCOMPARE(destination.count(), 1);
+        QCOMPARE(destination.notes(), QString("Eigene Angaben behalten"));
+        loaded.newProject();
+        QVERIFY(loaded.notes().isEmpty());
+        QVERIFY(loaded.setMetadata("Neu", "Keine alten Notizen"));
+        loaded.demo();
+        QVERIFY(loaded.notes().isEmpty());
+    }
+    void projectMetadataValidationIsAtomic() {
+        Document d;
+        const auto original = d.projectBytes();
+        for (const auto &title : {QString(), QString("   "), QString(1001, 'x'),
+                                  QString("Mehr\nZeilen"), QString("Mehr\rZeilen")}) {
+            QVERIFY(!d.setMetadata(title, "Notiz"));
+            QCOMPARE(d.projectBytes(), original);
+            QVERIFY(!d.dirty());
+        }
+        QVERIFY(!d.setMetadata("Gültig", QString(16001, 'x')));
+        QCOMPARE(d.projectBytes(), original);
+        QVERIFY(d.setMetadata(QString(1000, 'x'), QString(16000, 'n')));
+        const auto valid = d.projectBytes();
+        const auto root = QJsonDocument::fromJson(valid).object();
+        QCOMPARE(root["version"].toInt(), 8);
+        for (int variant = 0; variant < 4; ++variant) {
+            auto bad = root;
+            if (variant == 0)
+                bad.remove("notes");
+            if (variant == 1)
+                bad["notes"] = 42;
+            if (variant == 2)
+                bad["notes"] = QString(16001, 'x');
+            if (variant == 3)
+                bad["version"] = 9;
+            QVERIFY(!d.restoreBytes(QJsonDocument(bad).toJson()));
+            QCOMPARE(d.projectBytes(), valid);
+        }
+    }
+    void projectMetadataReadsLegacyWithoutNotes() {
+        Document d;
+        auto legacy = QJsonDocument::fromJson(d.projectBytes()).object();
+        legacy["version"] = 7;
+        legacy.remove("notes");
+        // Legacy names must roundtrip without silently normalizing old content.
+        for (const auto &title : {QString(), QString("Name\nmit Zeile")}) {
+            legacy["title"] = title;
+            QVERIFY(d.restoreBytes(QJsonDocument(legacy).toJson()));
+            QCOMPARE(d.title(), title);
+            QVERIFY(d.notes().isEmpty());
+            Document roundtrip;
+            QVERIFY(roundtrip.restoreBytes(d.projectBytes()));
+            QCOMPARE(roundtrip.title(), title);
+        }
+    }
     void beginnerProfileContract() {
         Document d;
         d.newProject();

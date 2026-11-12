@@ -216,3 +216,13 @@ Der vollständige Workflow lief zusätzlich mit `QT_SCALE_FACTOR=2` bei kompakte
 ## Kandidatenabnahme beta.2
 
 Der genaue Paketstand `18ce2e67e691d1d6f117132f22d4479e9243ec4d` bestand den sauberen Docker-Bau und die frische Laufzeitprüfung mit vorheriger beta.1-Installation, Upgrade, Manifestabgleich, Nicht-root-Start, Neuinstallation/Entfernung und Erhalt von Benutzerdaten. Alle 145 Quelldateien im Archiv sind bytegleich zum genannten Commit. 104 Dokumentationsverweise und alle Downloadprüfsummen bestanden. Beide GitHub-Pipelines für den Arbeitszweig sowie den PR sind grün. Details, Prüfsummen, Nachweise und verbleibende Freigaben stehen im [Kandidatenprotokoll](beta/CANDIDATE_BETA2.md). Keine Geräteaktion während der Nacht; keine 1.0-Freigabe.
+
+## Produktionsreife T05/F01 Projektangaben
+
+Der Entwicklungsstand `0.9.0-beta.3-dev` ergänzt bearbeitbare Projektnamen und Klartextnotizen. Beide gehören zu Dirty-Zustand, Undo/Redo, Dateispeicherung und Wiederherstellung. Reine Metadatenänderungen verändern weder Werkzeugwege noch GCode. Der technische Diagnoseexport bleibt ohne Namen und Notizen. Projektimport übernimmt Objekte/Operationen und bewahrt die Metadaten des Zielprojekts; Öffnen lädt dagegen den vollständigen Projektstand.
+
+Format 8 führt das erforderliche Notizfeld ein und liest weiterhin Formate 1–7. Historische Titel bleiben beim Lesen unverändert. Ungültige Eingaben, fehlende/überlange Notizen und künftige Formatversionen werden atomar abgelehnt. Die tatsächliche beta.2-Binärdatei aus dem geprüften DEB öffnete eine Format-7-Kontrolle und lehnte Format 8 mit Status 2 ohne Ausgabedatei ab. Der neue Leser öffnete dieselbe Format-8-Datei; der GCode war bytegleich zur Kontrolle. Es wurde kein Hostpaket installiert.
+
+Der normale Workflow prüft den Dialog in heller und kompakter dunkler Ansicht mit echten Tasten: Entwurf verwerfen, Escape ohne Abwahl im Hintergrund, gesperrte globale Projektshortcuts, Eingabegrenze, zweizeiliger Klartext mit sichtbaren HTML-Zeichen, Übernahme und Dateirundlauf. Die abschließende kompakte dunkle Aufnahme einschließlich Kompatibilitätshinweis wurde visuell geprüft. Kernfälle prüfen zusätzlich Legacy-Titel, Wiederherstellung und Import-Undo/Redo; der Diagnosetest schließt explizite private Titel/Notizen aus.
+
+Alle 13 CTest-Programme normal und mit ASan/UBSan bestanden (`detect_leaks=0`). Nach den letzten Dialog-/Importanpassungen wurden die vier betroffenen Programme core/ui/workflow/release in beiden Varianten erneut bestanden. 114 lokale Dokumentationsverweise sind gültig. Keine Geräteverbindung, Bewegung oder Emission. Der beta.2-Kandidat bleibt unverändert auf Revision `18ce2e6`; Vorlagen, Dateiverlauf und weitere Funktions-/Geräteabnahmen bleiben offen.

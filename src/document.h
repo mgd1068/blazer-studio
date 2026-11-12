@@ -27,6 +27,7 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QVariantList selectedRows READ selectedRows NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList layers READ layers NOTIFY changed)
     Q_PROPERTY(QString title READ title NOTIFY changed)
+    Q_PROPERTY(QString notes READ notes NOTIFY changed)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY changed)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY changed)
@@ -96,6 +97,8 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void scaleSelection(double percent);
     QVariantList layers() const { return m_layers; }
     QString title() const { return m_title; }
+    QString notes() const { return m_notes; }
+    Q_INVOKABLE bool setMetadata(const QString &title, const QString &notes);
     QString message() const { return m_message; }
     bool dirty() const { return m_dirty; }
     bool canUndo() const { return !m_undo.isEmpty(); }
@@ -155,6 +158,7 @@ class Document : public QAbstractListModel {
         QList<int> selection;
         QStringList pages;
         int activePage = 0;
+        QString notes;
     };
     Snapshot snapshot() const;
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
@@ -177,7 +181,7 @@ class Document : public QAbstractListModel {
     QList<int> m_selection;
     QStringList m_pages{"Blatt 01"};
     int m_activePage = 0;
-    QString m_title = "Werkstattschild", m_message;
+    QString m_title = "Werkstattschild", m_notes, m_message;
     bool m_dirty = false;
     Snapshot m_saved;
     QList<Snapshot> m_undo, m_redo;

@@ -24,6 +24,10 @@ QQuickItem *findItem(QQuickItem *root, const QString &name) {
             return found;
     return nullptr;
 }
+void typeText(QQuickWindow *window, const QByteArray &text) {
+    for (const char character : text)
+        QTest::keyClick(window, character);
+}
 bool click(QQuickWindow *window, QQuickItem *item) {
     if (!item || !item->isVisible() || !item->isEnabled())
         return false;
@@ -122,6 +126,52 @@ class WorkflowTest : public QObject {
             return QMetaObject::invokeMethod(dialog, "accepted") &&
                    QMetaObject::invokeMethod(dialog, "reject");
         };
+        // Project metadata is a modal draft. Editor shortcuts and Escape must
+        // not change the underlying selection, history or project files.
+        project.addShape("rect");
+        const auto beforeDetails = project.projectBytes();
+        const int beforeSelection = project.selected();
+        auto *details = window->findChild<QObject *>("projectDetailsDialog");
+        QVERIFY(details);
+        QVERIFY(click(window, item("projectDetailsButton")));
+        QTRY_VERIFY(details->property("visible").toBool());
+        QVERIFY(click(window, item("projectNotesEditor")));
+        typeText(window, "Discarded notes");
+        QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(project.projectBytes(), beforeDetails);
+        QTest::keyClick(window, Qt::Key_S, Qt::ControlModifier);
+        QTest::keyClick(window, Qt::Key_O, Qt::ControlModifier);
+        QVERIFY(!window->findChild<QObject *>("saveProjectDialog")->property("visible").toBool());
+        QVERIFY(!window->findChild<QObject *>("openProjectDialog")->property("visible").toBool());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!details->property("visible").toBool());
+        QCOMPARE(project.projectBytes(), beforeDetails);
+        QCOMPARE(project.selected(), beforeSelection);
+        QVERIFY(click(window, item("projectDetailsButton")));
+        QTRY_VERIFY(details->property("visible").toBool());
+        QVERIFY(item("projectNotesEditor")->property("text").toString().isEmpty());
+        item("projectNotesEditor")->setProperty("text", QString(16001, 'x'));
+        QTRY_VERIFY(!item("applyProjectDetails")->isEnabled());
+        QVERIFY(click(window, item("cancelProjectDetails")));
+        QCOMPARE(project.projectBytes(), beforeDetails);
+        project.newProject();
+        QVERIFY(click(window, item("projectDetailsButton")));
+        QTRY_VERIFY(details->property("visible").toBool());
+        QVERIFY(click(window, item("projectNameEditor")));
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        typeText(window, "Rasterversuch");
+        QVERIFY(click(window, item("projectNotesEditor")));
+        typeText(window, "Kraftpapier 80 x 80 mm.");
+        QTest::keyClick(window, Qt::Key_Return);
+        typeText(window, "<b>Oberflaeche pruefen.</b>");
+        const QString expectedNotes = "Kraftpapier 80 x 80 mm.\n<b>Oberflaeche pruefen.</b>";
+        QCOMPARE(item("projectNotesEditor")->property("text").toString(), expectedNotes);
+        QVERIFY(screenshot("project"));
+        QVERIFY(click(window, item("applyProjectDetails")));
+        QTRY_VERIFY(!details->property("visible").toBool());
+        QCOMPARE(project.title(), QString("Rasterversuch"));
+        QCOMPARE(project.notes(), expectedNotes);
+        QVERIFY(project.dirty());
         const int sourceRow = library.indexOf("vendor-m3pro-5w-engrave-1");
         QVERIFY(sourceRow >= 0);
         const auto sourceProfile = library.profileAt(sourceRow);
@@ -267,6 +317,8 @@ class WorkflowTest : public QObject {
         QVERIFY(chooseFile("openProjectDialog", projectPath));
         QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy() && project.job().valid(), 5000);
         QCOMPARE(project.projectBytes(), originalBytes);
+        QCOMPARE(project.title(), QString("Rasterversuch"));
+        QCOMPARE(project.notes(), expectedNotes);
         QCOMPARE(project.job().gcode(), originalGcode);
         QCOMPARE(library.profileAt(sourceRow), sourceProfile);
         QVERIFY(machine.simulation());

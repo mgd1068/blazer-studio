@@ -32,6 +32,10 @@ bool number(const QJsonObject &o, const QString &key, double minimum, double max
 bool text(const QJsonObject &o, const QString &key, int max = 1000) {
     return o[key].isString() && o[key].toString().size() <= max;
 }
+bool validMetadata(const QString &title, const QString &notes) {
+    return !title.trimmed().isEmpty() && title.size() <= 1000 && !title.contains('\n') &&
+           !title.contains('\r') && notes.size() <= 16000;
+}
 QVariantMap layer(QString name, QString mode, double speed, double power) {
     return {{"name", name}, {"mode", mode},    {"speed", speed}, {"power", power},
             {"passes", 1},  {"enabled", true}, {"interval", .1}};
@@ -305,11 +309,12 @@ void Document::notify(const QString &s) {
     emit messageChanged();
 }
 Document::Snapshot Document::snapshot() const {
-    return {m_items, m_layers, m_title, m_selected, m_material, m_selection, m_pages, m_activePage};
+    return {m_items, m_layers, m_title, m_selected, m_material, m_selection, m_pages, m_activePage,
+            m_notes};
 }
 bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
     return a.items == b.items && a.layers == b.layers && a.title == b.title &&
-           a.material == b.material && a.pages == b.pages;
+           a.material == b.material && a.pages == b.pages && a.notes == b.notes;
 }
 void Document::refresh(int row) {
     m_job.reset();
@@ -330,6 +335,7 @@ void Document::applySnapshot(const Snapshot &s) {
     m_items = s.items;
     m_layers = s.layers;
     m_title = s.title;
+    m_notes = s.notes;
     m_selected = s.selected;
     m_selection = s.selection;
     m_material = s.material;
@@ -342,6 +348,7 @@ void Document::applySnapshot(const Snapshot &s) {
 void Document::demo() {
     beginResetModel();
     m_title = "Werkstattschild";
+    m_notes.clear();
     m_pages = {"Blatt 01"};
     m_activePage = 0;
     m_layers = {layer("01 · Gravieren", "Gravur", 3000, 20),
@@ -381,6 +388,24 @@ void Document::checkpoint() {
     while (m_undo.size() > 50)
         m_undo.removeFirst();
     m_redo.clear();
+}
+bool Document::setMetadata(const QString &title, const QString &notes) {
+    if (!validMetadata(title, notes)) {
+        notify("Bitte einen einzeiligen Projektnamen mit 1–1000 Zeichen und höchstens 16000 "
+               "Zeichen Notizen eingeben.");
+        return false;
+    }
+    const auto name = title.trimmed();
+    if (m_title == name && m_notes == notes)
+        return true;
+    checkpoint();
+    m_title = name;
+    m_notes = notes;
+    // Metadata is saved/recovered and undoable, but does not change toolpaths.
+    m_dirty = !sameContent(snapshot(), m_saved);
+    emit changed();
+    notify("Projektangaben übernommen; zum dauerhaften Sichern das Projekt speichern.");
+    return true;
 }
 void Document::undo() {
     finishMove();
@@ -764,12 +789,13 @@ QByteArray Document::serialize() const {
              a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
     return QJsonDocument(QJsonObject{{"format", "blazer-studio"},
-                                     {"version", 7},
+                                     {"version", 8},
                                      {"units", "mm"},
                                      {"origin", "bottom-left"},
                                      {"pages", QJsonArray::fromStringList(m_pages)},
                                      {"activePage", m_activePage},
                                      {"title", m_title},
+                                     {"notes", m_notes},
                                      {"selected", m_selected},
                                      {"selectedRows", QJsonArray::fromVariantList(selectedRows())},
                                      {"objects", objects},
@@ -784,7 +810,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 7) ||
+        !number(root, "version", 1, 8) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -797,6 +823,11 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
         return {};
     Snapshot state;
     state.title = root["title"].toString();
+    if (version >= 8) {
+        if (!text(root, "notes", 16000))
+            return {};
+        state.notes = root["notes"].toString();
+    }
     state.pages = {"Blatt 01"};
     if (version >= 6) {
         if (!root["pages"].isArray() || !number(root, "activePage", 0, 99) ||
