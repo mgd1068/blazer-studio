@@ -2,7 +2,7 @@
 #include "document.h"
 #include <QSerialPortInfo>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
-    : Simulator(p), document(d), hardwareAccess(access) {
+    : Simulator(p), document(d), grbl(nullptr, d->deviceProfile()), hardwareAccess(access) {
     connect(&grbl, &GrblSession::changed, this, &Simulator::changed);
 }
 QStringList Machine::ports() const {
@@ -73,6 +73,10 @@ void Machine::start() {
     if (busy() || firing())
         return;
     const auto &job = document->job();
+    if (job.deviceProfile().outputFingerprint() != document->deviceProfile().outputFingerprint()) {
+        document->notify("Geräteprofil des Auftrags ist veraltet; bitte neu berechnen.");
+        return;
+    }
     if (!job.valid()) {
         document->notify(job.errors.join("; "));
         return;

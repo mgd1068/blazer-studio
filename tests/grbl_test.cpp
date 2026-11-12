@@ -1,6 +1,7 @@
 #include "document.h"
 #include "grbl.h"
 #include "machine.h"
+#include <QJsonDocument>
 #include <QSocketNotifier>
 #include <QtTest>
 #include <fcntl.h>
@@ -155,6 +156,86 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void foreignJobProfilesNeverSendTheirCachedCommands() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        const auto base = document.deviceProfile().toJson();
+        QList<QJsonObject> profiles;
+        for (const QString field : {"powerScale", "baudRate", "originCode"}) {
+            auto changed = base;
+            auto driver = changed["driver"].toObject();
+            auto settings = driver["settings"].toObject();
+            settings[field] = field == "powerScale" ? 255 : field == "baudRate" ? 250000 : 1;
+            driver["settings"] = settings;
+            changed["driver"] = driver;
+            profiles.append(changed);
+        }
+        auto changed = base;
+        auto workspace = changed["workspace"].toObject();
+        workspace["width"] = 600;
+        changed["workspace"] = workspace;
+        profiles.append(changed);
+        changed = base;
+        auto laser = changed["laser"].toObject();
+        laser["nominalPowerW"] = 10;
+        changed["laser"] = laser;
+        profiles.append(changed);
+        changed = base;
+        auto capabilities = changed["capabilities"].toObject();
+        capabilities["rotary"] = true;
+        changed["capabilities"] = capabilities;
+        profiles.append(changed);
+        for (const auto &descriptor : profiles) {
+            QString error;
+            const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+            QVERIFY2(profile, qPrintable(error));
+            auto input = document.jobInput();
+            input.deviceProfile = *profile;
+            auto plan = JobPlanner::build(input);
+            QVERIFY2(plan.valid(), qPrintable(plan.errors.join(";")));
+            plan.cacheCommands();
+            QVERIFY(!plan.cachedCommands().isEmpty());
+            const auto before = controller.commands.size();
+            session.start(plan);
+            QTest::qWait(10);
+            QCOMPARE(controller.commands.size(), before);
+            QVERIFY(session.ready());
+            QVERIFY(session.log.first().contains("Geräteprofil des Auftrags"));
+        }
+        changed = base;
+        changed["name"] = "Anderer Anzeigename";
+        changed["provenance"] = QJsonObject{{"note", "Nur Metadaten"}};
+        QString error;
+        const auto renamed = DeviceProfile::parse(QJsonDocument(changed).toJson(), error);
+        QVERIFY(renamed);
+        auto input = document.jobInput();
+        input.deviceProfile = *renamed;
+        session.start(JobPlanner::build(input));
+        QTRY_VERIFY(controller.commands.contains("M4 S800"));
+    }
+    void unwiredProfileCannotOpenEvenAVirtualPort() {
+        Controller controller;
+        auto descriptor = DeviceProfile::m3Reference().toJson();
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        GrblSession session(nullptr, *profile);
+        QVERIFY(!session.open(controller.port));
+        QVERIFY(!session.connected());
+        QTest::qWait(20);
+        QVERIFY(controller.commands.isEmpty());
+        QVERIFY(!controller.banner);
+    }
     void jobBoundsIncludeWorkOffset_data() {
         QTest::addColumn<QPointF>("offset");
         QTest::addColumn<QPointF>("current");

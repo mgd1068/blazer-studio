@@ -1468,7 +1468,8 @@ void Document::setObjectSetting(const QString &key, double value) {
 }
 bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPower,
                                   double maxPower, int steps, double moduleW) {
-    const auto plan = JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps);
+    const auto plan =
+        JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps, m_deviceProfile);
     if (!plan.valid() || !std::isfinite(moduleW) || moduleW < .1 || moduleW > 100) {
         notify("Ungültige Materialtest-Parameter.");
         return false;
@@ -1582,7 +1583,8 @@ void Document::setReliefSetting(const QString &key, const QVariant &value) {
 
 bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
                                   double minPower, double maxPower, int steps) {
-    auto plan = JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps);
+    auto plan =
+        JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps, m_deviceProfile);
     if (!url.isLocalFile() || !plan.valid()) {
         notify(plan.errors.join("; "));
         return false;
@@ -1698,7 +1700,7 @@ void Document::setBackgroundPlanning(bool enabled) {
     emit changed();
 }
 JobInput Document::jobInput() const {
-    JobInput result{m_items, m_layers, m_activePage};
+    JobInput result{m_items, m_layers, m_activePage, m_deviceProfile};
     // Do not transfer GUI-owned QSvgRenderer instances, even by shared_ptr.
     QHash<const SvgAsset *, std::shared_ptr<const SvgAsset>> assets;
     for (auto &art : result.items)

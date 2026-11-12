@@ -8,7 +8,8 @@
 class GrblSession : public QObject {
     Q_OBJECT
   public:
-    explicit GrblSession(QObject *parent = nullptr);
+    explicit GrblSession(QObject *parent = nullptr,
+                         DeviceProfile profile = DeviceProfile::m3Reference());
     bool open(const QString &port);
     void close();
     bool connected() const { return serial.isOpen(); }
@@ -47,6 +48,7 @@ class GrblSession : public QObject {
     void append(const QString &message);
     void handshake();
     bool insideMachineBed(const QPointF &workPoint) const;
+    const DeviceProfile m_deviceProfile;
     QSerialPort serial;
     QTimer poll, timeout, focusTimer;
     QByteArray input;

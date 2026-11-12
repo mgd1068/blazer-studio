@@ -35,6 +35,9 @@ class DeviceProfile {
 };
 
 namespace DeviceBackends {
+// Parameters needed by the currently implemented GRBL motion encoder only.
+// This validates offline encoding, never connection or device availability.
+QString grblOutputError(const DeviceProfile &profile);
 // Temporary migration boundary: only the existing M3 configuration is wired
 // through every runtime consumer. Other valid descriptors remain non-executable
 // until planner/editor/driver binding is implemented and tested for them.

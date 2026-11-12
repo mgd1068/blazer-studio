@@ -7,6 +7,7 @@
 #include "recovery.h"
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonDocument>
 #include <QLockFile>
 #include <QProcess>
 #include <QSemaphore>
@@ -32,6 +33,73 @@ class StabilityTest : public QObject {
         return f.readAll();
     }
   private slots:
+    void workerCannotPublishAValidPlanForADifferentProfile() {
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        auto input = document.jobInput();
+        const auto oldInput = input;
+        auto descriptor = input.deviceProfile.toJson();
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        input.deviceProfile = *profile;
+        JobPreparation preparation(nullptr,
+                                   [oldInput](const JobInput &, const Cancellation &cancel) {
+                                       return JobPlanner::build(oldInput, cancel);
+                                   });
+        preparation.submit(input);
+        QTRY_COMPARE_WITH_TIMEOUT(preparation.state(), QString("failed"), 5000);
+        QVERIFY(!preparation.plan().valid());
+        QVERIFY(preparation.plan().moves.isEmpty());
+        QVERIFY(preparation.plan().cachedCommands().isEmpty());
+        QVERIFY(preparation.plan().errors.join(";").contains("abweichendes Geräteprofil"));
+        QCOMPARE(preparation.plan().deviceProfile().outputFingerprint(),
+                 profile->outputFingerprint());
+    }
+    void asynchronousProfileChangesDropOldPlansAndBindTheCommandCache() {
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        auto input = document.jobInput();
+        std::atomic_bool started = false;
+        JobPreparation preparation(nullptr,
+                                   [&](const JobInput &snapshot, const Cancellation &cancel) {
+                                       if (snapshot.deviceProfile.outputFingerprint() ==
+                                           DeviceProfile::m3Reference().outputFingerprint()) {
+                                           started = true;
+                                           while (!isCancelled(cancel))
+                                               QThread::msleep(1);
+                                       }
+                                       return JobPlanner::build(snapshot, cancel);
+                                   });
+        preparation.submit(input);
+        QTRY_VERIFY(started.load());
+        auto descriptor = input.deviceProfile.toJson();
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        input.deviceProfile = *profile;
+        preparation.submit(input);
+        input.deviceProfile = document.deviceProfile();
+        QVERIFY(!preparation.plan().valid());
+        QTRY_COMPARE_WITH_TIMEOUT(preparation.state(), QString("ready"), 5000);
+        QCOMPARE(preparation.plan().deviceProfile().outputFingerprint(),
+                 profile->outputFingerprint());
+        QVERIFY(!preparation.plan().cachedCommands().isEmpty());
+        QVERIFY(preparation.plan().gcode().contains("M4 S204"));
+        QVERIFY(!preparation.plan().gcode().contains("M4 S800"));
+    }
     void asynchronousMatchesReferenceAndOwnsSnapshot() {
         Document d;
         d.newProject();
@@ -44,7 +112,7 @@ class StabilityTest : public QObject {
         QVERIFY(!preparation.plan().valid());
         QTRY_COMPARE_WITH_TIMEOUT(preparation.state(), QString("ready"), 5000);
         QCOMPARE(preparation.plan().gcode(), expected);
-        QVERIFY(!preparation.plan().commands.isEmpty());
+        QVERIFY(!preparation.plan().cachedCommands().isEmpty());
         QVERIFY(preparation.plan().gcode() != d.job().gcode());
     }
     void cancellationKeepsEventLoopResponsiveAndDropsOldGenerations() {

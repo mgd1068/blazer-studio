@@ -1,6 +1,7 @@
 #pragma once
 #include <QPointF>
 #include <QRectF>
+#include <QSizeF>
 #include <algorithm>
 #include <cmath>
 
@@ -17,9 +18,9 @@ inline bool validBounds(const QRectF &r) {
            r.height() >= minimumSize && r.width() <= coordinateLimit &&
            r.height() <= coordinateLimit;
 }
-inline bool insideBed(const QRectF &r) {
-    return validBounds(r) && r.left() >= 0 && r.top() >= 0 && r.right() <= bedWidth &&
-           r.bottom() <= bedHeight;
+inline bool insideBed(const QRectF &r, QSizeF bed = {bedWidth, bedHeight}) {
+    return validBounds(r) && r.left() >= 0 && r.top() >= 0 && r.right() <= bed.width() &&
+           r.bottom() <= bed.height();
 }
 // Both arguments use mm. QRectF's minimum y represents the lower edge in world space.
 inline QPointF worldToCanvas(QPointF world) {

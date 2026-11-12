@@ -2,11 +2,159 @@
 #include "job.h"
 #include <QFile>
 #include <QImage>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QtTest>
 class JobTest : public QObject {
     Q_OBJECT
   private slots:
+    void alternativePowerScaleKeepsInlineChangesAndZeroOutput() {
+        auto descriptor = DeviceProfile::m3Reference().toJson();
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        JobPlan plan(*profile);
+        plan.moves = {{{0, 0}, {1, 0}, 3000, 0, 0, false},
+                      {{1, 0}, {2, 0}, 3000, 2, 0, false},
+                      {{2, 0}, {3, 0}, 3000, 50, 0, false},
+                      {{3, 0}, {4, 0}, 3000, 100, 0, false},
+                      {{4, 0}, {5, 0}, 3000, 0, 0, false}};
+        const auto lines = plan.gcode();
+        QVERIFY(lines.contains("M4 S0"));
+        QVERIFY(lines.contains("G1 X2.000 Y0.000 S5"));
+        QVERIFY(lines.contains("G1 X3.000 Y0.000 S128"));
+        QVERIFY(lines.contains("G1 X4.000 Y0.000 S255"));
+        QVERIFY(lines.contains("G1 X5.000 Y0.000 S0"));
+        QVERIFY(lines.contains("M5 S0"));
+        plan.cacheCommands();
+        QCOMPARE(plan.gcode(), lines);
+        QCOMPARE(plan.cachedCommands(), lines);
+        const auto matrix = JobPlanner::materialTest(1000, 2000, 50, 100, 3, *profile);
+        QVERIFY(matrix.valid());
+        QCOMPARE(matrix.deviceProfile().outputFingerprint(), profile->outputFingerprint());
+        QVERIFY(matrix.gcode().join("\n").contains("S255"));
+    }
+    void jobUsesFrozenDeviceAreaAndPowerScale() {
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        document.setProperty("x", 10.);
+        document.setProperty("y", 20.);
+        document.setProperty("width", 30.);
+        document.setProperty("height", 10.);
+        auto input = document.jobInput();
+        const auto oldPlan = JobPlanner::build(input);
+        QCOMPARE(oldPlan.deviceProfile().outputFingerprint(),
+                 document.deviceProfile().outputFingerprint());
+        auto descriptor = input.deviceProfile.toJson();
+        auto workspace = descriptor["workspace"].toObject();
+        workspace["width"] = 600;
+        workspace["height"] = 400;
+        descriptor["workspace"] = workspace;
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY2(profile, qPrintable(error));
+        input.deviceProfile = *profile;
+        input.items.first().bounds.moveTopLeft({400, 300});
+        const auto plan = JobPlanner::build(input);
+        QVERIFY2(plan.valid(), qPrintable(plan.errors.join(";")));
+        QCOMPARE(plan.deviceProfile().workArea(), QSizeF(600, 400));
+        QCOMPARE(plan.workLength, 80.);
+        QVERIFY(plan.gcode().contains("M4 S204")); // 80% of 255, independent of wattage.
+        QVERIFY2(plan.gcode().join("\n").contains("G1 X430.000 Y300.000"),
+                 qPrintable(plan.gcode().join("\n")));
+        QVERIFY(plan.gcode().join("\n").contains(" F600"));
+        QVERIFY(plan.gcode().join("\n").contains("$30=255"));
+        QVERIFY(oldPlan.gcode().contains("M4 S800"));
+        QCOMPARE(oldPlan.deviceProfile().workArea(), QSizeF(200, 150));
+        input.deviceProfile = document.deviceProfile();
+        QVERIFY(!JobPlanner::build(input).valid());
+        input.deviceProfile = *profile;
+        input.items.first().bounds.moveLeft(580);
+        QVERIFY(!JobPlanner::build(input).valid());
+        auto cached = plan;
+        cached.cacheCommands();
+        input.deviceProfile = document.deviceProfile();
+        QCOMPARE(cached.gcode(), plan.gcode());
+        QCOMPARE(cached.summary()["outputFingerprint"].toString(),
+                 QString::fromLatin1(profile->outputFingerprint()));
+        auto laser = descriptor["laser"].toObject();
+        laser["nominalPowerW"] = 10;
+        descriptor["laser"] = laser;
+        const auto otherHead = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(otherHead);
+        input.deviceProfile = *otherHead;
+        input.items.first().bounds.moveTopLeft({400, 300});
+        const auto otherPlan = JobPlanner::build(input);
+        QVERIFY(otherPlan.valid());
+        QCOMPARE(otherPlan.gcode(), plan.gcode()); // Wattage is never a digital scale multiplier.
+        QVERIFY(otherPlan.deviceProfile().outputFingerprint() !=
+                plan.deviceProfile().outputFingerprint());
+    }
+    void profileLimitsApplyToOverscanMaterialTestsAndEncoding() {
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        auto input = document.jobInput();
+        input.items.first().bounds = {400, 300, 30, 10};
+        input.items.first().layer = 0;
+        auto layer = input.layers[0].toMap();
+        layer["overscan"] = 2.;
+        input.layers[0] = layer;
+        auto descriptor = input.deviceProfile.toJson();
+        descriptor["workspace"] = QJsonObject{
+            {"units", "mm"}, {"origin", "bottom-left"}, {"width", 430}, {"height", 400}};
+        QString error;
+        auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        input.deviceProfile = *profile;
+        QVERIFY(!JobPlanner::build(input).valid()); // Two-mm overscan leaves this bed.
+        auto workspace = descriptor["workspace"].toObject();
+        workspace["width"] = 600;
+        descriptor["workspace"] = workspace;
+        profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        input.deviceProfile = *profile;
+        const auto plan = JobPlanner::build(input);
+        QVERIFY2(plan.valid(), qPrintable(plan.errors.join(";")));
+        bool outsideM3 = false;
+        for (const auto &move : plan.moves) {
+            QVERIFY(move.to.x() <= 432.00001);
+            QVERIFY(move.to.x() >= 397.99999);
+            outsideM3 |= move.to.y() > 150;
+        }
+        QVERIFY(outsideM3);
+        workspace["width"] = 20;
+        workspace["height"] = 20;
+        descriptor["workspace"] = workspace;
+        profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        QVERIFY(!JobPlanner::materialTest(1000, 2000, 10, 20, 3, *profile).valid());
+        descriptor["workspace"] = QJsonObject{
+            {"units", "mm"}, {"origin", "bottom-left"}, {"width", 600}, {"height", 400}};
+        descriptor["driver"] =
+            QJsonObject{{"id", "test-galvo"}, {"transport", "usb"}, {"settings", QJsonObject{}}};
+        profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        input.deviceProfile = *profile;
+        const auto unsupported = JobPlanner::build(input);
+        QVERIFY(!unsupported.valid());
+        QVERIFY(unsupported.moves.isEmpty());
+        QVERIFY(unsupported.gcode().isEmpty());
+        JobPlan manual(*profile);
+        manual.moves = plan.moves;
+        QVERIFY(manual.gcode().isEmpty()); // No accidental GRBL encoding for another driver.
+    }
     void rasterPowerChangesStayOnMotion() {
         JobPlan plan;
         plan.moves = {{{0, 0}, {7, 0}, 5000, 0, 0, false},

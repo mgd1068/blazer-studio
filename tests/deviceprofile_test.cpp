@@ -34,6 +34,33 @@ class DeviceProfileTest : public QObject {
         return QJsonDocument::fromJson(process.readAllStandardOutput()).object();
     }
   private slots:
+    void grblEncoderRequiresItsOwnParametersAndCapabilities() {
+        const auto base = DeviceProfile::m3Reference().toJson();
+        for (const QJsonValue value :
+             QList<QJsonValue>{0, 2.5, 1000000001., true, "1000", QJsonValue::Null}) {
+            auto descriptor = base;
+            auto driver = descriptor["driver"].toObject();
+            auto settings = driver["settings"].toObject();
+            settings["powerScale"] = value;
+            driver["settings"] = settings;
+            descriptor["driver"] = driver;
+            QString error;
+            const auto profile = DeviceProfile::parse(bytes(descriptor), error);
+            QVERIFY2(profile, qPrintable(error));
+            QVERIFY(!DeviceBackends::grblOutputError(*profile).isEmpty());
+            QVERIFY(!DeviceBackends::runtimeSupportError(*profile).isEmpty());
+        }
+        for (const QString capability : {"motion-xy", "dynamic-power"}) {
+            auto descriptor = base;
+            auto capabilities = descriptor["capabilities"].toObject();
+            capabilities[capability] = false;
+            descriptor["capabilities"] = capabilities;
+            QString error;
+            const auto profile = DeviceProfile::parse(bytes(descriptor), error);
+            QVERIFY(profile);
+            QVERIFY(!DeviceBackends::grblOutputError(*profile).isEmpty());
+        }
+    }
     void currentLegacyProfileKeepsUiAndHasIndependentIdentity() {
         QString error;
         const auto source = legacy();

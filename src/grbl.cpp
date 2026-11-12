@@ -20,7 +20,8 @@ bool point(const QByteArray &v, QPointF &p) {
     return true;
 }
 } // namespace
-GrblSession::GrblSession(QObject *parent) : QObject(parent) {
+GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
+    : QObject(parent), m_deviceProfile(std::move(profile)) {
     poll.setInterval(200);
     timeout.setSingleShot(true);
     timeout.setInterval(10000);
@@ -61,14 +62,19 @@ bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
     constexpr double epsilon = .0000001;
     return std::isfinite(machinePoint.x()) && std::isfinite(machinePoint.y()) &&
            machinePoint.x() >= -epsilon && machinePoint.y() >= -epsilon &&
-           machinePoint.x() <= Geometry::bedWidth + epsilon &&
-           machinePoint.y() <= Geometry::bedHeight + epsilon;
+           machinePoint.x() <= m_deviceProfile.workArea().width() + epsilon &&
+           machinePoint.y() <= m_deviceProfile.workArea().height() + epsilon;
 }
 bool GrblSession::open(const QString &port) {
     if (port.isEmpty() || connected())
         return false;
+    const auto profileError = DeviceBackends::runtimeSupportError(m_deviceProfile);
+    if (!profileError.isEmpty()) {
+        append(profileError);
+        return false;
+    }
     serial.setPortName(port);
-    serial.setBaudRate(115200);
+    serial.setBaudRate(m_deviceProfile.driverSettings()["baudRate"].toInt());
     serial.setDataBits(QSerialPort::Data8);
     serial.setParity(QSerialPort::NoParity);
     serial.setStopBits(QSerialPort::OneStop);
@@ -96,7 +102,9 @@ bool GrblSession::open(const QString &port) {
             handshake();
     });
     poll.start();
-    append("115200 Baud geöffnet; GRBL 1.1, $30=1000 und $32=1 werden geprüft.");
+    append(QString("%1 Baud geöffnet; GRBL 1.1, $30=%2 und $32=1 werden geprüft.")
+               .arg(m_deviceProfile.driverSettings()["baudRate"].toInt())
+               .arg(m_deviceProfile.driverSettings()["powerScale"].toDouble(), 0, 'f', 0));
     return true;
 }
 void GrblSession::handshake() {
@@ -240,15 +248,16 @@ void GrblSession::line(const QByteArray &s) {
     if (s.startsWith("$13="))
         reportMm = s.mid(4).trimmed() == "0";
     if (s.startsWith("$130="))
-        bedWidth = std::abs(s.mid(5).toDouble() - 200) < .0001;
+        bedWidth = std::abs(s.mid(5).toDouble() - m_deviceProfile.workArea().width()) < .0001;
     if (s.startsWith("$131="))
-        bedHeight = std::abs(s.mid(5).toDouble() - 150) < .0001;
+        bedHeight = std::abs(s.mid(5).toDouble() - m_deviceProfile.workArea().height()) < .0001;
     if (s.startsWith("[GC:"))
         coordinateSystem = QRegularExpression("(?:^| )G54(?: |$)")
                                .match(QString::fromLatin1(s.mid(4, s.size() - 5)))
                                .hasMatch();
     if (s.startsWith("$30="))
-        powerScale = std::abs(s.mid(4).toDouble() - 1000) < .0001;
+        powerScale = std::abs(s.mid(4).toDouble() -
+                              m_deviceProfile.driverSettings()["powerScale"].toDouble()) < .0001;
     if (s.startsWith("$31=")) {
         bool valid;
         const double value = s.mid(4).toDouble(&valid);
@@ -486,6 +495,10 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     return connected() && busy();
 }
 void GrblSession::start(const JobPlan &job) {
+    if (job.deviceProfile().outputFingerprint() != m_deviceProfile.outputFingerprint()) {
+        append("Geräteprofil des Auftrags passt nicht zur geprüften Verbindung.");
+        return;
+    }
     if (!insideMachineBed(position)) {
         append("Aktuelle Maschinenposition oder Arbeitsnullpunkt nicht freigegeben.");
         return;
@@ -580,7 +593,7 @@ void GrblSession::zero() {
 void GrblSession::frame(const QVariantMap &b) {
     QRectF r(b.value("x").toDouble(), b.value("y").toDouble(), b.value("width").toDouble(),
              b.value("height").toDouble());
-    if (!b.value("valid").toBool() || !Geometry::insideBed(r)) {
+    if (!b.value("valid").toBool() || !Geometry::insideBed(r, m_deviceProfile.workArea())) {
         append("Ungültige Rahmenfahrt.");
         return;
     }
@@ -608,7 +621,10 @@ void GrblSession::focus(bool on) {
     if (!insideMachineBed(position))
         return;
     // Send the finite pulse and its shutdown together, within the 128-byte RX buffer.
-    if (!commands({"M5\nG21\nG90\nG1 F1 M3 S20\nG4 P0.2\nM5 S0\nG0"}))
+    const auto settings = m_deviceProfile.driverSettings();
+    const auto output =
+        qRound64(settings["focusPower"].toDouble() * settings["powerScale"].toDouble() / 100.);
+    if (!commands({"M5\nG21\nG90\nG1 F1 M3 S" + QString::number(output) + "\nG4 P0.2\nM5 S0\nG0"}))
         return;
     firing = true;
     focusTimer.start();

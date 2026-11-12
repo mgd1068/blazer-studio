@@ -57,7 +57,7 @@ Ein Testname belegt nur seinen beschriebenen Fall. **Teilumfang** bedeutet vorha
 | F37 | Manuelle Maß-/Scanparameter, G54 und vorläufiges Referenzfoto | Maschinenkonfiguration sichern/wiederherstellen, unabhängige Maß- und Scanabnahme ergänzen |
 | F38 | Serielle Verbindung, Alarme, Homing und Jog: `grbl` | Gespeicherte Positionen und kontrollierte reale Fehlerfallabnahme offen |
 | F39 | G90/G54, Arbeitsnullpunkt und [laserfreie Rahmenfahrt für Auftrag, Auswahl oder T1/T2](FRAMING.md); geplante Weggrenzen und physische Offsetgrenzen geprüft | Relative/auswahlbezogene Startursprünge und Auswahl anfahren vervollständigen |
-| F40 | Eingefrorene Jobs, RX-Kredite, Pause/Stop und neue Idle-Bestätigung: `grbl`, `workflow` | Neuer Treiberstand am Gerät, USB-/KVM-Fälle und Gerätespeicher soweit vorhanden abnehmen |
+| F40 | Eingefrorene Jobs mit Geräteprofil-/Fingerprintbindung, RX-Kredite, Pause/Stop und neue Idle-Bestätigung: `grbl`, `workflow`, `stability`; fremde Profile vor dem ersten Befehl abgewiesen | Neuer Treiberstand am Gerät, USB-/KVM-Fälle und Gerätespeicher soweit vorhanden abnehmen; wechselbare Dokumentprofile und weitere Controller bleiben in MD2–MD5 offen |
 | F41 | Ausgelesene Konfiguration und begrenzter Ereignisverlauf | Bedienbare Konsole/Makros sowie Settings-Rundlauf mit eindeutigen Zustandsregeln fehlen |
 | F42 | Serielle Geräteerkennung vorhanden | Netzwerktransport und Bridge benötigen geklärtes Herstellerprotokoll; nicht eingerichtet |
 | F43 | Expliziter begrenzter 2-%-Puls: `finiteFocusAndAlarm`, `focusInterlocks` | Optische Wirkung und Abschaltung am Gerät offen; Host kann Abschaltung bei verlorenem Transport nicht garantieren |

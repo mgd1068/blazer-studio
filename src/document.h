@@ -64,6 +64,7 @@ class Document : public QAbstractListModel {
     void setBackgroundPlanning(bool enabled);
     bool backgroundPlanning() const { return m_background; }
     JobInput jobInput() const;
+    const DeviceProfile &deviceProfile() const { return m_deviceProfile; }
     Q_INVOKABLE void cancelPlanning();
     Q_INVOKABLE void retryPlanning();
     QString planningState() const;
@@ -221,6 +222,7 @@ class Document : public QAbstractListModel {
     static bool bakePath(Artwork &item, const QPainterPath &path);
     void appendArtwork(const Artwork &item);
     QList<Artwork> m_items;
+    const DeviceProfile m_deviceProfile = DeviceProfile::m3Reference();
     QVariantList m_layers;
     QVariantMap m_material;
     int m_selected = -1;

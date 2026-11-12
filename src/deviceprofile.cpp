@@ -206,6 +206,16 @@ QVariantMap DeviceProfile::legacyUiProperties() const {
         result[i.key()] = i.value();
     return result.toVariantMap();
 }
+QString DeviceBackends::grblOutputError(const DeviceProfile &profile) {
+    if (profile.driverId() != "grbl-serial" || profile.transport() != "serial")
+        return "Für dieses Profil ist kein GRBL-Ausgabeadapter vorhanden.";
+    const auto scale = profile.driverSettings()["powerScale"];
+    if (!number(scale, 1, 1000000000) || std::floor(scale.toDouble()) != scale.toDouble())
+        return "GRBL-Ausgabe benötigt eine ganzzahlige Leistungsskala von 1 bis 1000000000.";
+    if (!profile.declares("motion-xy") || !profile.declares("dynamic-power"))
+        return "Der vorhandene GRBL-Ausgabeadapter benötigt XY und dynamische Leistung.";
+    return {};
+}
 QString DeviceBackends::runtimeSupportError(const DeviceProfile &profile) {
     if (profile.driverId() != "grbl-serial")
         return "Für diesen Controller ist noch kein aktiver Treiber eingebunden.";
