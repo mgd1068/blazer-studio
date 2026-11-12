@@ -8,7 +8,9 @@ class Machine : public Simulator {
     Q_PROPERTY(QVariantList capabilities READ capabilities CONSTANT)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
   public:
-    explicit Machine(Document *document, QObject *parent = nullptr);
+    enum class HardwareAccess { Allowed, Disabled };
+    explicit Machine(Document *document, QObject *parent = nullptr,
+                     HardwareAccess access = HardwareAccess::Allowed);
     bool simulation() const { return !live; }
     QStringList ports() const;
     QVariantList capabilities() const;
@@ -50,4 +52,5 @@ class Machine : public Simulator {
     Document *document;
     GrblSession grbl;
     bool live = false;
+    const HardwareAccess hardwareAccess;
 };

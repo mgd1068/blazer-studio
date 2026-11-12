@@ -57,14 +57,12 @@ int main(int argc, char **argv) {
             return 3;
         return app.exec();
     }
-    MaterialLibrary materialLibrary(app.arguments().contains("--self-test")
-                                        ? transientRecovery.filePath("materials.json")
-                                        : QString());
-    Machine simulator(&document);
+    MaterialLibrary materialLibrary(transient ? transientRecovery.filePath("materials.json")
+                                             : QString());
+    Machine simulator(&document, nullptr, transient ? Machine::HardwareAccess::Disabled
+                                                  : Machine::HardwareAccess::Allowed);
     ApplicationServices services(&document, &simulator,
-                                 app.arguments().contains("--self-test")
-                                     ? transientRecovery.filePath("settings.ini")
-                                     : QString());
+                                 transient ? transientRecovery.filePath("settings.ini") : QString());
     QFile f(":/profiles/blaze-x-m3.json");
     if (!f.open(QIODevice::ReadOnly))
         return 1;

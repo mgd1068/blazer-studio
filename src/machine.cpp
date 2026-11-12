@@ -1,10 +1,13 @@
 #include "machine.h"
 #include "document.h"
 #include <QSerialPortInfo>
-Machine::Machine(Document *d, QObject *p) : Simulator(p), document(d) {
+Machine::Machine(Document *d, QObject *p, HardwareAccess access)
+    : Simulator(p), document(d), hardwareAccess(access) {
     connect(&grbl, &GrblSession::changed, this, &Simulator::changed);
 }
 QStringList Machine::ports() const {
+    if (hardwareAccess == HardwareAccess::Disabled)
+        return {};
     QStringList usb, other;
     for (const auto &p : QSerialPortInfo::availablePorts())
         (p.hasVendorIdentifier() ? usb : other).append(p.systemLocation());
@@ -13,6 +16,10 @@ QStringList Machine::ports() const {
     return usb + other;
 }
 bool Machine::connectHardware(const QString &port) {
+    if (hardwareAccess == HardwareAccess::Disabled) {
+        document->notify("Hardwareanschluss in diesem Offline-Lauf deaktiviert.");
+        return false;
+    }
     if (busy() || firing())
         return false;
     if (grbl.connected())

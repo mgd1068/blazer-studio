@@ -206,10 +206,10 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Redo]; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; onActivated: importDialog.open() }
     Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible; onActivated: { machine.stop(); project.select(-1) } }
-    FileDialog { id: importDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: win.importMotif(selectedFile) }
+    FileDialog { id: importDialog; objectName: "importMotifDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik oder Modell importieren"; nameFilters: ["Grafiken und Modelle (*.svg *.dxf *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2)"]; onAccepted: win.importMotif(selectedFile) }
     FileDialog { id: saveDialog; objectName: "saveProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "blazer"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: win.finishSave(selectedFile); onRejected: win.pendingAction="" }
-    FileDialog { id: openDialog; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
-    FileDialog { id: gcodeDialog; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
+    FileDialog { id: openDialog; objectName: "openProjectDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Blazer-Projekt öffnen"; nameFilters: ["Blazer-Projekt (*.blazer)"]; onAccepted: project.open(selectedFile) }
+    FileDialog { id: gcodeDialog; objectName: "exportGcodeDialog"; title: "GRBL-GCode exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "gcode"; nameFilters: ["GRBL-GCode (*.gcode)"]; onAccepted: project.exportGcode(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: imageDialog; title: "Bild importieren"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: project.importImage(selectedFile); onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: reliefDialog; title: "Relief-Tiefenkarte importieren"; nameFilters: ["Tiefenkarten (*.png *.jpg *.jpeg *.bmp)"]; onAccepted: { if (project.importRelief(selectedFile)) win.page = 3 } onVisibleChanged: if (visible) machine.focus(false) }
     FileDialog { id: cameraPhoto; title: "Referenzfoto des Arbeitsraums"; nameFilters: ["Bilder (*.png *.jpg *.jpeg)"]; onAccepted: {if(!cameraRegistration.load(selectedFile))project.notify("Referenzfoto ungültig.")} }
@@ -334,12 +334,12 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 ActionButton { text: "Neu"; dark: win.night; compact: true; onClicked: win.requestAction("new") }
                 ActionButton { text: "Beispiel"; dark: win.night; compact: true; onClicked: win.requestAction("demo") }
-                ActionButton { text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
-                ActionButton { text: win.basic ? "Motiv laden" : "↓  Importieren"; hint: "Lädt ein Bild oder eine Vektorzeichnung als Motiv. Das allein startet noch keinen Laser."; dark: win.night; compact: true; onClicked: importDialog.open() }
+                ActionButton { objectName: "openProjectButton"; text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
+                ActionButton { objectName: "importMotifButton"; text: win.basic ? "Motiv laden" : "↓  Importieren"; hint: "Lädt ein Bild oder eine Vektorzeichnung als Motiv. Das allein startet noch keinen Laser."; dark: win.night; compact: true; onClicked: importDialog.open() }
                 ActionButton { objectName: "importImageButton"; visible: !win.basic; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
                 ActionButton { objectName: "exportGcodeButton"; text: "GCode"; visible: !win.basic; dark: win.night; compact: true; enabled: project.jobSummary.valid; onClicked: gcodeDialog.open() }
                 ActionButton { objectName: "betaHelpButton"; text: "Hilfe / Beta"; compact: true; dark: win.night; hint: "Öffnet Einführung, bekannte Einschränkungen, Versionsdaten und den freiwilligen Diagnoseexport."; onClicked: betaHelp.open() }
-                ActionButton { text: "Speichern"; dark: win.night; compact: true; onClicked: saveDialog.open() }
+                ActionButton { objectName: "saveProjectButton"; text: "Speichern"; dark: win.night; compact: true; onClicked: saveDialog.open() }
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
                     objectName: "startJobButton"; text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
@@ -731,9 +731,9 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 8
-                                    ActionButton { text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.frame(project.activeBounds) }
-                                    ActionButton { text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
-                                    ActionButton { text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
+                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.frame(project.activeBounds) }
+                                    ActionButton { objectName: "pauseJobButton"; text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
+                                    ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }
                                 ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
                                 RowLayout {

@@ -22,6 +22,7 @@ RowLayout {
     Text { id: labelText; text: field.label; color: field.dark ? "#a8b7c2" : "#708290"; font.pixelSize: 12; Layout.preferredWidth: Math.max(14,labelText.implicitWidth) }
     TextField {
         id: input
+        objectName: "numericEditor"
         HelpBubble { target: input; description: field.hint }
         Layout.fillWidth: true
         implicitHeight: 34

@@ -1,7 +1,12 @@
 #include "applicationservices.h"
+#include "machine.h"
+#include "materiallibrary.h"
 #include "recovery.h"
 #include <QFile>
+#include <QDir>
 #include <QJsonDocument>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -13,6 +18,64 @@ class ReleaseTest : public QObject {
         return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
     }
   private slots:
+    void offlineCliLeavesUserLibraryUntouched_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("screenshot") << QString("screenshot");
+        QTest::newRow("gcode-export") << QString("export");
+        QTest::newRow("self-test") << QString("self-test");
+    }
+    void offlineCliLeavesUserLibraryUntouched() {
+        QFETCH(QString, mode);
+        QTemporaryDir isolated;
+        const auto data = isolated.filePath("data");
+        const auto libraryDirectory = data + "/BlazerStudio/Blazer Studio";
+        QVERIFY(QDir().mkpath(libraryDirectory));
+        const auto libraryPath = libraryDirectory + "/materials.json";
+        const auto original = QJsonDocument::fromVariant(
+            QVariantMap{{"schemaVersion", 1}, {"profiles", QVariantList{MaterialLibrary::example()}}})
+                                  .toJson();
+        QFile library(libraryPath);
+        QVERIFY(library.open(QIODevice::WriteOnly));
+        QCOMPARE(library.write(original), original.size());
+        library.close();
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("XDG_DATA_HOME", data);
+        environment.insert("XDG_CONFIG_HOME", isolated.filePath("config"));
+        environment.insert("XDG_CACHE_HOME", isolated.filePath("cache"));
+        environment.insert("QT_QPA_PLATFORM", "offscreen");
+        environment.insert("QT_QUICK_BACKEND", "software");
+        QStringList arguments;
+        if (mode == "screenshot")
+            arguments = {"--new", "--screenshot", isolated.filePath("window.png")};
+        else if (mode == "self-test")
+            arguments = {"--self-test"};
+        else {
+            Document d;
+            d.newProject();
+            d.addShape("rect");
+            const auto project = isolated.filePath("input.blazer");
+            QVERIFY(d.save(QUrl::fromLocalFile(project)));
+            arguments = {"--open-project", project, "--export-gcode", isolated.filePath("output.gcode")};
+        }
+        QProcess process;
+        process.setProcessEnvironment(environment);
+        process.start(QStringLiteral(BLAZER_APP), arguments);
+        QVERIFY(process.waitForStarted(5000));
+        QVERIFY(process.waitForFinished(15000));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+        QCOMPARE(read(libraryPath), original);
+        QVERIFY(!QFile::exists(libraryPath + ".before-manufacturer-v1.bak"));
+    }
+    void offlineModeCannotSelectHardware() {
+        Document d;
+        Machine machine(&d, nullptr, Machine::HardwareAccess::Disabled);
+        QVERIFY(machine.ports().isEmpty());
+        QVERIFY(!machine.connectHardware("/must-not-be-opened-by-tests"));
+        QVERIFY(machine.simulation());
+        QVERIFY(machine.ready());
+        QVERIFY(!machine.firing());
+    }
     void onboardingPersistsOnlyAfterCompletion() {
         const auto ini = storage.filePath("onboarding.ini");
         Document d;

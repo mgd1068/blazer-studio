@@ -51,3 +51,5 @@ Für den ausdrücklich zugesagten Produktumfang müssen die zugehörigen Funktio
 - 12.11.2026, T02 abgeschlossen für Software: Nullpunktwechsel gegen alte WCO-Meldung abgesichert; 32 GRBL-Fälle normal/ASan grün. Der vollständige vorherige Grenzprüfungsstand hatte zehn grüne Programme in beiden Varianten. T03 beginnt; T06 bleibt echte Geräteabnahme.
 
 - 12.11.2026, T03: Geräte-/Materialprotokoll und aktuelle Beta-Anweisungen berichtigt, Herstellerdateien unverändert, Kern/UI/Katalog normal und mit ASan grün. T04 startet. Weiterführende Dokumentationslinks müssen auch im installierten Paket und Downloadarchiv auflösbar sein (T09).
+
+- 12.11.2026, T04: Durchgängiger Simulator-/Dateirundlauf in zwei Ansichten und Offline-Isolation ergänzt; elf Programme normal/ASan grün. Sichtprüfung zeigt noch die Anzeige einer deaktivierten Operation nach Profilwahl im leeren Basic-Projekt; vor Abschluss mit Regression beheben. Native Dateiauswahl und echte Hardware bleiben separat.
