@@ -2,8 +2,7 @@
 
 Getestete Paketplattform: **Ubuntu 26.04, x86_64**. Andere Linux-Versionen sind noch nicht als Paketplattform bestätigt. Es handelt sich um einen Software-Testkandidaten; Geräte-/Materialabnahme und externe Bedienungstests sind offen.
 
-Bei jedem normalen Programmstart erscheint ein zweisprachiger Sicherheitshinweis, auch nach abgeschlossener Einführung und vor einer Wiederherstellungsentscheidung. **Laser niemals unbeaufsichtigt betreiben / Never operate the laser unattended.** Ein Verbindungsabbruch oder hängender Controller kann den Laser eingeschaltet lassen; Software kann dann kein Laser-Aus garantieren. Während der gesamten Bearbeitung am Gerät bleiben und bereit sein, die Stromversorgung direkt am Gerät zu unterbrechen. Mit **Verstanden / I understand** bestätigen; eine dauerhafte Abschaltung dieses Hinweises gibt es nicht. Diese Ergänzung gehört zur Entwicklung beta.5-dev und noch nicht zum eingefrorenen beta.4-Paket.
-
+Bei jedem normalen Programmstart erscheint ein zweisprachiger Sicherheitshinweis, auch nach abgeschlossener Einführung und vor einer Wiederherstellungsentscheidung. **Laser niemals unbeaufsichtigt betreiben / Never operate the laser unattended.** Ein Verbindungsabbruch oder hängender Controller kann den Laser eingeschaltet lassen; Software kann dann kein Laser-Aus garantieren. Während der gesamten Bearbeitung am Gerät bleiben und bereit sein, die Stromversorgung direkt am Gerät zu unterbrechen. Mit **Verstanden / I understand** bestätigen; eine dauerhafte Abschaltung dieses Hinweises gibt es nicht. Diese Ergänzung gehört zum beta.5-Kandidaten und noch nicht zum unveränderten beta.4-Paket.
 
 ## Installation
 

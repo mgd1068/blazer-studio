@@ -14,4 +14,4 @@
 - Ein Prozessabsturz während CSV-Veröffentlichung kann einen vollständigen Teilstapel hinterlassen. Bestehende Ausgaben werden beim Wiederholen nicht überschrieben.
 - Die erste Paketplattform ist Ubuntu 26.04 x86_64. Unterstützung weiterer Systeme folgt erst nach Prüfung.
 
-Der eingefrorene beta.4-Kandidat enthält noch eine nachträglich im virtuellen Controller nachgewiesene Verbindungslücke bei direkter Zerstörung einer aktiven Sitzung. Die Entwicklung beta.5-dev führt diesen Fall durch die vorhandene Schließlogik; der [beta.4-Bericht](CANDIDATE_BETA4.md) nennt die genaue Grenze. Ein neuer geprüfter Kandidat ist vor öffentlicher Gerätebeta erforderlich.
+Der eingefrorene beta.4-Kandidat enthält noch eine nachträglich im virtuellen Controller nachgewiesene Verbindungslücke bei direkter Zerstörung einer aktiven Sitzung. Der beta.5-Kandidat führt diesen Fall durch die vorhandene Schließlogik; der [beta.4-Bericht](CANDIDATE_BETA4.md) nennt die genaue Grenze. Der neue Kandidat benötigt seinen eigenen Liefernachweis; reale Geräte- und Einsteigerabnahme bleiben erforderlich.
