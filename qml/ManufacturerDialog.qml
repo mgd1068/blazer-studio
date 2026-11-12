@@ -64,7 +64,7 @@ Dialog {
         }
         Text {
             Layout.fillWidth: true
-            text: dialog.selectedTable && dialog.selectedTable.modulePowerW === 1 ? "1 W: Laut Hersteller nicht zum Schneiden empfohlen." : "Herstellervorgaben · keine eigenen Materialtests. Gravur-Durchgänge werden in der Quelle nicht angegeben."
+            text: dialog.selectedTable && dialog.selectedTable.modulePowerW === 1 ? "1 W: Laut Hersteller nicht zum Schneiden empfohlen." : "Unveränderte Herstellerwerte · keine allgemeine Materialfreigabe. Gravur-Durchgänge fehlen in der Quelle."
             wrapMode: Text.WordWrap; color: dialog.muted; font.pixelSize: 10
         }
         Text {

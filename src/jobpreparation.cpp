@@ -58,18 +58,23 @@ void JobPreparation::startPending() {
     m_state = "running";
     m_watcher.setFuture(QtConcurrent::run(&m_pool, [input = std::move(input), flag, revision,
                                                     builder]() {
-        JobPlan plan;
+        JobPlan plan(input.deviceProfile);
         try {
             plan = builder(input, flag);
+            if (plan.deviceProfile().outputFingerprint() !=
+                input.deviceProfile.outputFingerprint()) {
+                plan = JobPlan(input.deviceProfile);
+                plan.errors = {"Auftragsberechnung lieferte ein abweichendes Geräteprofil."};
+            }
             if (plan.valid() && !isCancelled(flag))
-                plan.commands = plan.gcode(flag);
+                plan.cacheCommands(flag);
         } catch (const std::exception &) {
             plan.errors = {"Auftrag konnte nicht berechnet werden (Ressourcen- oder Datenfehler)."};
         } catch (...) {
             plan.errors = {"Unerwarteter Fehler bei der Auftragsberechnung."};
         }
         if (isCancelled(flag)) {
-            plan = {};
+            plan = JobPlan(input.deviceProfile);
             plan.cancelled = true;
         }
         return Result{revision, std::move(plan)};

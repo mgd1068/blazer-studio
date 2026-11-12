@@ -32,6 +32,10 @@ bool number(const QJsonObject &o, const QString &key, double minimum, double max
 bool text(const QJsonObject &o, const QString &key, int max = 1000) {
     return o[key].isString() && o[key].toString().size() <= max;
 }
+bool validMetadata(const QString &title, const QString &notes) {
+    return !title.trimmed().isEmpty() && title.size() <= 1000 && !title.contains('\n') &&
+           !title.contains('\r') && notes.size() <= 16000;
+}
 QVariantMap layer(QString name, QString mode, double speed, double power) {
     return {{"name", name}, {"mode", mode},    {"speed", speed}, {"power", power},
             {"passes", 1},  {"enabled", true}, {"interval", .1}};
@@ -53,6 +57,8 @@ Document::Document(QObject *p) : QAbstractListModel(p) {
     connect(&m_preparation, &JobPreparation::changed, this, &Document::changed);
     connect(&m_batch, &BatchExport::changed, this, &Document::changed);
     connect(&m_batch, &BatchExport::finished, this, &Document::notify);
+    connect(&m_imageExport, &ImageExport::changed, this, &Document::changed);
+    connect(&m_imageExport, &ImageExport::finished, this, &Document::notify);
     demo();
 }
 int Document::rowCount(const QModelIndex &p) const {
@@ -69,11 +75,13 @@ QVariant Document::data(const QModelIndex &i, int role) const {
     case KindRole:
         return a.kind;
     case ColorRole:
-        return layerColor(a.layer);
+        return a.toolLayer == 1 ? QColor("#d18228") : a.toolLayer == 2 ? QColor("#ad63b0") : layerColor(a.layer);
     case VisibleRole:
         return a.visible;
     case LayerRole:
         return a.layer;
+    case ToolLayerRole:
+        return a.toolLayer;
     case GroupRole:
         return a.groupId;
     case GroupNameRole:
@@ -91,7 +99,7 @@ QHash<int, QByteArray> Document::roleNames() const {
             {ColorRole, "artColor"},         {VisibleRole, "artVisible"},
             {LayerRole, "artLayer"},         {GroupRole, "artGroup"},
             {GroupNameRole, "artGroupName"}, {GroupFirstRole, "artGroupFirst"},
-            {OnPageRole, "artOnPage"}};
+            {OnPageRole, "artOnPage"}, {ToolLayerRole, "artToolLayer"}};
 }
 QColor Document::layerColor(int n) const {
     static const QList<QColor> colors{"#cb713c", "#4c7bd9", "#209b76",
@@ -119,6 +127,7 @@ QVariantMap Document::selection() const {
     const auto &a = m_items[m_selected];
     const auto bounds = selectionBounds();
     int layer = a.layer;
+    int toolLayer = a.toolLayer;
     bool visible = true;
     bool group = !a.groupId.isEmpty();
     int groupCount = 0;
@@ -128,6 +137,7 @@ QVariantMap Document::selection() const {
     for (int row : m_selection) {
         if (m_items[row].layer != layer)
             layer = -1;
+        if (m_items[row].toolLayer != toolLayer) toolLayer = -1;
         visible &= m_items[row].visible;
         group &= m_items[row].groupId == a.groupId;
     }
@@ -146,6 +156,7 @@ QVariantMap Document::selection() const {
             {"width", bounds.width()},
             {"height", bounds.height()},
             {"layer", layer},
+            {"toolLayer", toolLayer},
             {"visible", visible},
             {"count", m_selection.size()},
             {"grouped", group},
@@ -220,7 +231,7 @@ void Document::groupSelection() {
         return;
     if (selection()["grouped"].toBool())
         return;
-    checkpoint();
+    checkpoint("Gruppieren");
     beginResetModel();
     const QString group = id(), name = QString("Gruppe %1").arg(m_items.size());
     QList<Artwork> grouped, others;
@@ -257,7 +268,7 @@ void Document::ungroupSelection() {
             groups.insert(m_items[row].groupId);
     if (groups.isEmpty())
         return;
-    checkpoint();
+    checkpoint("Gruppen auflösen");
     for (auto &a : m_items)
         if (groups.contains(a.groupId)) {
             a.groupId.clear();
@@ -287,7 +298,7 @@ bool Document::transformSelection(const QRectF &target, bool history) {
         result.append(r);
     }
     if (history)
-        checkpoint();
+        checkpoint("Position / Größe");
     for (int i = 0; i < m_selection.size(); ++i)
         m_items[m_selection[i]].bounds = result[i];
     refresh();
@@ -305,11 +316,16 @@ void Document::notify(const QString &s) {
     emit messageChanged();
 }
 Document::Snapshot Document::snapshot() const {
-    return {m_items, m_layers, m_title, m_selected, m_material, m_selection, m_pages, m_activePage};
+    return {m_items,         m_layers,        m_title,        m_selected, m_material,
+            m_selection,     m_pages,         m_activePage,   m_notes,    m_guides,
+            m_guidesVisible, m_guideSnapping, m_deviceProfile};
 }
 bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
     return a.items == b.items && a.layers == b.layers && a.title == b.title &&
-           a.material == b.material && a.pages == b.pages;
+           a.material == b.material && a.pages == b.pages && a.notes == b.notes &&
+           a.guides == b.guides && a.guidesVisible == b.guidesVisible &&
+           a.guideSnapping == b.guideSnapping &&
+           a.deviceProfile.toJson() == b.deviceProfile.toJson();
 }
 void Document::refresh(int row) {
     m_job.reset();
@@ -324,29 +340,85 @@ void Document::refresh(int row) {
 void Document::markClean() {
     m_saved = snapshot();
     m_dirty = false;
+    ++m_historyRevision;
+}
+void Document::setFileUrl(const QUrl &url) {
+    if (m_fileUrl == url)
+        return;
+    m_fileUrl = url;
+    emit fileUrlChanged();
+}
+bool Document::canApplyDeviceProfile(const DeviceProfile &profile) {
+    if (profile.outputFingerprint() == m_deviceProfile.outputFingerprint())
+        return true;
+    if (m_batch.busy() || std::any_of(m_profileGuards.cbegin(), m_profileGuards.cend(),
+                                      [](const auto &guard) { return !guard(); })) {
+        notify("Geräteprofilwechsel gesperrt: Verbindung schließen und laufenden Auftrag, Fokus "
+               "oder Export beenden.");
+        return false;
+    }
+    return true;
+}
+bool Document::setDeviceProfile(const DeviceProfile &profile) {
+    QString error;
+    const auto clean = DeviceBackends::projectProfile(profile, error);
+    if (!clean) {
+        notify(error);
+        return false;
+    }
+    if (clean->toJson() == m_deviceProfile.toJson())
+        return true;
+    if (!canApplyDeviceProfile(*clean))
+        return false;
+    finishMove();
+    checkpoint("Geräteprofil");
+    const bool outputChanged = clean->outputFingerprint() != m_deviceProfile.outputFingerprint();
+    m_deviceProfile = *clean;
+    if (outputChanged)
+        m_material.clear();
+    emit deviceProfileChanged();
+    refresh();
+    notify("Projektprofil übernommen; Maße und Bearbeitungswerte bleiben unverändert. "
+           "Materialparameter für dieses Gerät prüfen.");
+    return true;
 }
 void Document::applySnapshot(const Snapshot &s) {
+    const bool profileChanged = m_deviceProfile.toJson() != s.deviceProfile.toJson();
     beginResetModel();
+    m_deviceProfile = s.deviceProfile;
     m_items = s.items;
     m_layers = s.layers;
     m_title = s.title;
+    m_notes = s.notes;
     m_selected = s.selected;
     m_selection = s.selection;
     m_material = s.material;
     m_pages = s.pages;
     m_activePage = s.activePage;
+    m_guides = s.guides;
+    m_guidesVisible = s.guidesVisible;
+    m_guideSnapping = s.guideSnapping;
     m_beforeMove.reset();
     endResetModel();
+    if (profileChanged)
+        emit deviceProfileChanged();
     refresh();
 }
 void Document::demo() {
+    m_guides.clear();
+    m_guidesVisible = m_guideSnapping = true;
+    setFileUrl({});
     beginResetModel();
     m_title = "Werkstattschild";
+    m_notes.clear();
     m_pages = {"Blatt 01"};
     m_activePage = 0;
     m_layers = {layer("01 · Gravieren", "Gravur", 3000, 20),
                 layer("02 · Schneiden", "Schnitt", 600, 80)};
-    m_material = MaterialLibrary::example();
+    m_material =
+        m_deviceProfile.outputFingerprint() == DeviceProfile::m3Reference().outputFingerprint()
+            ? MaterialLibrary::example()
+            : QVariantMap{};
     m_items = {
         {id(), "Schildkontur", "rect", "", QRectF(30, 35, 140, 80), 1, true, {}},
         {id(), "Bohrung links", "ellipse", "", QRectF(37, 104, 4, 4), 1, true, {}},
@@ -355,8 +427,7 @@ void Document::demo() {
         {id(), "Unterzeile", "text", "ZEIT FÜR GUTE IDEEN", QRectF(55, 48, 90, 7), 0, true, {}}};
     m_selected = 0;
     m_selection = {0};
-    m_undo.clear();
-    m_redo.clear();
+    clearHistory();
     m_beforeMove.reset();
     markClean();
     endResetModel();
@@ -375,26 +446,97 @@ void Document::newProject() {
     refresh();
     notify("Neues Projekt · SVG importieren oder Formen hinzufügen.");
 }
-void Document::checkpoint() {
+void Document::clearHistory() {
+    m_clipboardPasteHash.clear();
+    m_clipboardPastePage=-1;
+    m_clipboardPasteCount=0;
+    m_undo.clear();
+    m_redo.clear();
+    ++m_historyRevision;
+}
+void Document::checkpoint(const QString &label) {
     finishMove();
-    m_undo.append(snapshot());
+    m_undo.append({snapshot(), label});
     while (m_undo.size() > 50)
         m_undo.removeFirst();
     m_redo.clear();
+    ++m_historyRevision;
+}
+QVariantList Document::history() const {
+    QVariantList result;
+    const auto current = snapshot();
+    auto append = [&](const Snapshot &state, const QString &label, int position) {
+        result.append(QVariantMap{{"position", position}, {"label", label},
+                                  {"current", position == m_undo.size()},
+                                  {"saved", !m_fileUrl.isEmpty() && sameContent(state, m_saved)},
+                                  {"objects", state.items.size()}, {"pages", state.pages.size()},
+                                  {"activePage", state.activePage}});
+    };
+    const QString oldest = "Ältester verfügbarer Stand";
+    for (int i = 0; i < m_undo.size(); ++i)
+        append(m_undo[i].state, i ? m_undo[i - 1].label : oldest, i);
+    append(current, m_undo.isEmpty() ? oldest : m_undo.last().label, m_undo.size());
+    for (int i = m_redo.size() - 1; i >= 0; --i)
+        append(m_redo[i].state, m_redo[i].label, result.size());
+    return result;
+}
+bool Document::restoreHistory(int position, quint64 revision) {
+    if (m_beforeMove || revision != m_historyRevision || position < 0 ||
+        position > m_undo.size() + m_redo.size()) {
+        notify("Der Verlauf hat sich geändert oder die Bearbeitung läuft noch. Bitte neu wählen.");
+        return false;
+    }
+    if (position == m_undo.size())
+        return true;
+    const auto &target = position < m_undo.size()
+                             ? m_undo[position].state
+                             : m_redo[m_redo.size() - 1 - (position - m_undo.size() - 1)].state;
+    if (!canApplyDeviceProfile(target.deviceProfile))
+        return false;
+    auto current = snapshot();
+    while (m_undo.size() > position) {
+        auto previous = m_undo.takeLast();
+        m_redo.append({std::move(current), previous.label});
+        current = std::move(previous.state);
+    }
+    while (m_undo.size() < position) {
+        auto next = m_redo.takeLast();
+        m_undo.append({std::move(current), next.label});
+        current = std::move(next.state);
+    }
+    ++m_historyRevision;
+    applySnapshot(current); // One model reset and one new plan for the whole jump.
+    return true;
+}
+bool Document::setMetadata(const QString &title, const QString &notes) {
+    if (!validMetadata(title, notes)) {
+        notify("Bitte einen einzeiligen Projektnamen mit 1–1000 Zeichen und höchstens 16000 "
+               "Zeichen Notizen eingeben.");
+        return false;
+    }
+    const auto name = title.trimmed();
+    if (m_title == name && m_notes == notes)
+        return true;
+    checkpoint("Projektangaben");
+    m_title = name;
+    m_notes = notes;
+    // Metadata is saved/recovered and undoable, but does not change toolpaths.
+    m_dirty = !sameContent(snapshot(), m_saved);
+    emit changed();
+    notify("Projektangaben übernommen; zum dauerhaften Sichern das Projekt speichern.");
+    return true;
 }
 void Document::undo() {
     finishMove();
     if (m_undo.isEmpty())
         return;
-    m_redo.append(snapshot());
-    applySnapshot(m_undo.takeLast());
+    restoreHistory(m_undo.size() - 1, m_historyRevision);
 }
 void Document::redo() {
     finishMove();
     if (m_redo.isEmpty())
         return;
-    m_undo.append(snapshot());
-    applySnapshot(m_redo.takeLast());
+    restoreHistory(m_undo.size() + 1, m_historyRevision);
 }
 bool Document::canAppend(const Artwork &a) {
     if (m_items.size() >= Geometry::objectLimit) {
@@ -426,7 +568,12 @@ bool Document::canAppend(const Artwork &a) {
 void Document::appendArtwork(const Artwork &a) {
     if (!canAppend(a))
         return;
-    checkpoint();
+    static const QMap<QString, QString> labels{{"rect", "Rechteck hinzufügen"},
+        {"ellipse", "Ellipse hinzufügen"}, {"text", "Text hinzufügen"},
+        {"svg", "Vektor importieren"}, {"image", "Bild importieren"},
+        {"relief", "Relief importieren"}, {"path", "Pfad hinzufügen"}};
+    checkpoint(a.style.value("qr", false).toBool() ? QString("QR-Code hinzufügen")
+                                                   : labels.value(a.kind, "Objekt hinzufügen"));
     const int row = m_items.size();
     beginInsertRows({}, row, row);
     auto item = a;
@@ -452,9 +599,12 @@ void Document::addShape(const QString &kind) {
                    {}});
 }
 void Document::removeSelected() {
+    removeSelection("Objekte löschen");
+}
+void Document::removeSelection(const QString &label) {
     if (m_selection.isEmpty())
         return;
-    checkpoint();
+    checkpoint(label);
     beginResetModel();
     int next = m_selection.first();
     for (auto it = m_selection.crbegin(); it != m_selection.crend(); ++it)
@@ -502,7 +652,7 @@ void Document::duplicateSelected() {
     }
     if (bytes > maxEmbeddedBytes || pixels > maxReliefPixels)
         return;
-    checkpoint();
+    checkpoint("Objekte kopieren");
     beginResetModel();
     int first = m_items.size();
     m_items.append(copies);
@@ -517,7 +667,7 @@ void Document::duplicateSelected() {
 void Document::toggleVisible(int row) {
     if (row < 0 || row >= m_items.size())
         return;
-    checkpoint();
+    checkpoint("Sichtbarkeit");
     m_items[row].visible = !m_items[row].visible;
     refresh(row);
 }
@@ -533,7 +683,7 @@ void Document::setProperty(const QString &key, const QVariant &value) {
                 return;
             if (m_items[m_selected].groupName == value.toString())
                 return;
-            checkpoint();
+            checkpoint("Gruppenname");
             for (int row : m_selection)
                 m_items[row].groupName = value.toString();
             emit dataChanged(index(0), index(m_items.size() - 1));
@@ -543,7 +693,7 @@ void Document::setProperty(const QString &key, const QVariant &value) {
         const auto &a = m_items[m_selected];
         if ((key == "name" ? a.name : a.text) == value.toString())
             return;
-        checkpoint();
+        checkpoint(key == "name" ? "Objektname" : "Text");
         if (key == "name")
             m_items[m_selected].name = value.toString();
         else
@@ -579,12 +729,14 @@ void Document::setLayer(int layerIndex) {
         }
     bool change = false;
     for (int row : m_selection)
-        change |= m_items[row].layer != layerIndex;
+        change |= m_items[row].layer != layerIndex || m_items[row].toolLayer != 0;
     if (!change)
         return;
-    checkpoint();
-    for (int row : m_selection)
+    checkpoint("Bearbeitung zuweisen");
+    for (int row : m_selection) {
         m_items[row].layer = layerIndex;
+        m_items[row].toolLayer = 0;
+    }
     emit dataChanged(index(0), index(m_items.size() - 1));
     refresh();
 }
@@ -600,7 +752,7 @@ void Document::setLayerSetting(int layerIndex, const QString &key, const QVarian
             return;
         if (key == "mode" && value == "Schnitt")
             for (const auto &a : m_items)
-                if (a.kind == "relief" &&
+                if ((a.kind == "relief" || a.kind == "image") &&
                     (a.layer == layerIndex || a.extraOperations.contains(layerIndex)))
                     return;
         canonical = value;
@@ -637,7 +789,7 @@ void Document::setLayerSetting(int layerIndex, const QString &key, const QVarian
     }
     if (map[key] == canonical)
         return;
-    checkpoint();
+    checkpoint("Operationswerte");
     map[key] = canonical;
     m_layers[layerIndex] = map;
     refresh();
@@ -651,7 +803,7 @@ bool Document::applyMaterial(const QVariantMap &profile) {
     auto updated = materialLayers(m_layers, profile);
     if (m_material == profile && m_layers == updated)
         return true;
-    checkpoint();
+    checkpoint("Materialprofil");
     m_layers = updated;
     m_material = profile;
     for (auto &item : m_items)
@@ -672,6 +824,7 @@ bool Document::materialModified() const {
                 return true;
     }
     for (const auto &a : m_items) {
+        if (a.toolLayer != 0) continue;
         auto expected = m_material[a.layer == 0 ? "engrave" : "cut"].toMap();
         for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
             if (expected.contains(it.key()) && expected[it.key()] != it.value())
@@ -694,10 +847,11 @@ void Document::finishMove() {
     if (!m_beforeMove)
         return;
     if (!sameContent(*m_beforeMove, snapshot())) {
-        m_undo.append(*m_beforeMove);
+        m_undo.append({*m_beforeMove, "Ziehen"});
         while (m_undo.size() > 50)
             m_undo.removeFirst();
         m_redo.clear();
+        ++m_historyRevision;
     }
     m_beforeMove.reset();
     emit changed();
@@ -718,9 +872,9 @@ bool Document::importSvg(const QUrl &url) {
                     file.fileName().section('/', -1),
                     "svg",
                     "",
-                    QRectF((Geometry::bedWidth - asset->sizeMm.width()) / 2,
-                           (Geometry::bedHeight - asset->sizeMm.height()) / 2,
-                           asset->sizeMm.width(), asset->sizeMm.height()),
+                    QRectF((bedWidth() - asset->sizeMm.width()) / 2,
+                           (bedHeight() - asset->sizeMm.height()) / 2, asset->sizeMm.width(),
+                           asset->sizeMm.height()),
                     0,
                     true,
                     asset};
@@ -731,8 +885,12 @@ bool Document::importSvg(const QUrl &url) {
     return true;
 }
 QByteArray Document::serialize() const {
+    return serialize(snapshot());
+}
+QByteArray Document::serialize(const Snapshot &state) const {
+    const bool hasProfile = state.deviceProfile.toJson() != DeviceProfile::m3Reference().toJson();
     QJsonArray objects;
-    for (const auto &a : m_items)
+    for (const auto &a : state.items)
         objects.append(QJsonObject{
             {"id", a.id},
             {"name", a.name},
@@ -763,19 +921,45 @@ QByteArray Document::serialize() const {
             {"depthMap",
              a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
-    return QJsonDocument(QJsonObject{{"format", "blazer-studio"},
-                                     {"version", 7},
-                                     {"units", "mm"},
-                                     {"origin", "bottom-left"},
-                                     {"pages", QJsonArray::fromStringList(m_pages)},
-                                     {"activePage", m_activePage},
-                                     {"title", m_title},
-                                     {"selected", m_selected},
-                                     {"selectedRows", QJsonArray::fromVariantList(selectedRows())},
-                                     {"objects", objects},
-                                     {"layers", QJsonArray::fromVariantList(m_layers)},
-                                     {"material", QJsonObject::fromVariantMap(m_material)}})
-        .toJson();
+    const bool hasTools = std::any_of(state.items.cbegin(), state.items.cend(), [](const Artwork &a){return a.toolLayer!=0;});
+    if (hasTools || hasProfile)
+        for (int i=0;i<objects.size();++i) {auto object=objects[i].toObject();object["toolLayer"]=state.items[i].toolLayer;objects[i]=object;}
+    QJsonObject root{{"format", "blazer-studio"},
+                     {"version", 8},
+                     {"units", "mm"},
+                     {"origin", "bottom-left"},
+                     {"pages", QJsonArray::fromStringList(state.pages)},
+                     {"activePage", state.activePage},
+                     {"title", state.title},
+                     {"notes", state.notes},
+                     {"selected", state.selected},
+                     {"selectedRows",
+                      [&state] {
+                          QJsonArray rows;
+                          for (int row : state.selection)
+                              rows.append(row);
+                          return rows;
+                      }()},
+                     {"objects", objects},
+                     {"layers", QJsonArray::fromVariantList(state.layers)},
+                     {"material", QJsonObject::fromVariantMap(state.material)}};
+    if (hasProfile || hasTools || !state.guides.isEmpty() || !state.guidesVisible ||
+        !state.guideSnapping) {
+        root["version"] = hasProfile ? 11 : hasTools ? 10 : 9;
+        if (hasProfile)
+            root["deviceProfile"] = state.deviceProfile.toJson();
+        root["guidesVisible"] = state.guidesVisible;
+        root["guideSnapping"] = state.guideSnapping;
+        QJsonArray guides;
+        for (const auto &guide : state.guides)
+            guides.append(QJsonObject{{"id", guide.id},
+                                      {"axis", guide.axis},
+                                      {"position", guide.position},
+                                      {"page", guide.page},
+                                      {"locked", guide.locked}});
+        root["guides"] = guides;
+    }
+    return QJsonDocument(root).toJson();
 }
 std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const {
     if (bytes.size() > maxProjectBytes)
@@ -784,7 +968,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 7) ||
+        !number(root, "version", 1, 11) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -796,7 +980,26 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     if (objects.size() > Geometry::objectLimit || layers.size() < 2 || layers.size() > 64)
         return {};
     Snapshot state;
+    if (version >= 11) {
+        if (!root["deviceProfile"].isObject())
+            return {};
+        QString profileError;
+        const auto profile = DeviceProfile::parse(
+            QJsonDocument(root["deviceProfile"].toObject()).toJson(), profileError);
+        if (!profile)
+            return {};
+        const auto clean = DeviceBackends::projectProfile(*profile, profileError);
+        if (!clean)
+            return {};
+        state.deviceProfile = *clean;
+    } else if (root.contains("deviceProfile"))
+        return {};
     state.title = root["title"].toString();
+    if (version >= 8) {
+        if (!text(root, "notes", 16000))
+            return {};
+        state.notes = root["notes"].toString();
+    }
     state.pages = {"Blatt 01"};
     if (version >= 6) {
         if (!root["pages"].isArray() || !number(root, "activePage", 0, 99) ||
@@ -814,6 +1017,33 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
             state.activePage >= state.pages.size())
             return {};
     }
+    if (version >= 9) {
+        if (!root["guides"].isArray() || root["guides"].toArray().size() > 1000 ||
+            !root["guidesVisible"].isBool() || !root["guideSnapping"].isBool())
+            return {};
+        state.guidesVisible = root["guidesVisible"].toBool();
+        state.guideSnapping = root["guideSnapping"].toBool();
+        QSet<QString> ids;
+        for (const auto &value : root["guides"].toArray()) {
+            if (!value.isObject())
+                return {};
+            auto guide = value.toObject();
+            if (!text(guide, "id", 100) || guide["id"].toString().isEmpty() ||
+                ids.contains(guide["id"].toString()) ||
+                !QStringList{"vertical", "horizontal"}.contains(guide["axis"].toString()) ||
+                !number(guide, "position", -2000, 2000) ||
+                !number(guide, "page", 0, state.pages.size() - 1) ||
+                std::floor(guide["page"].toDouble()) != guide["page"].toDouble() ||
+                !guide["locked"].isBool())
+                return {};
+            ids.insert(guide["id"].toString());
+            state.guides.append({guide["id"].toString(), guide["axis"].toString(),
+                                 guide["position"].toDouble(), guide["page"].toInt(),
+                                 guide["locked"].toBool()});
+        }
+    } else if (root.contains("guides") || root.contains("guidesVisible") ||
+               root.contains("guideSnapping"))
+        return {};
     for (int i = 0; i < layers.size(); ++i) {
         auto l = layers[i].toObject();
         if (!text(l, "name") || !text(l, "mode") ||
@@ -882,6 +1112,10 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
                   o["layer"].toInt(),
                   o["visible"].toBool(),
                   {}};
+        if (version >= 10) {
+            if (!number(o,"toolLayer",0,2) || std::floor(o["toolLayer"].toDouble()) != o["toolLayer"].toDouble()) return {};
+            a.toolLayer=o["toolLayer"].toInt();
+        } else if(o.contains("toolLayer")) return {};
         if (!QStringList{"rect", "ellipse", "text", "svg", "relief", "path", "image"}.contains(
                 a.kind))
             return {};
@@ -1079,6 +1313,15 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
 }
 bool Document::save(const QUrl &url) {
     finishMove();
+    const QFileInfo target(url.toLocalFile());
+    const auto isTemplate = [](const QFileInfo &file) {
+        return file.suffix().compare("blazertemplate", Qt::CaseInsensitive) == 0;
+    };
+    if (isTemplate(target) || isTemplate(QFileInfo(target.canonicalFilePath()))) {
+        notify("Bitte das neue Projekt als .blazer speichern. Eine Vorlage wird nur über "
+               "Als Vorlage speichern geändert.");
+        return false;
+    }
     if (!url.isLocalFile()) {
         notify("Bitte einen lokalen Dateipfad wählen.");
         return false;
@@ -1094,8 +1337,10 @@ bool Document::save(const QUrl &url) {
         return false;
     }
     markClean();
+    setFileUrl(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     emit changed();
     notify("Projekt gespeichert.");
+    emit projectFileUsed(m_fileUrl);
     return true;
 }
 bool Document::open(const QUrl &url) {
@@ -1109,12 +1354,71 @@ bool Document::open(const QUrl &url) {
         notify("Keine gültige Blazer-Studio-Projektdatei; aktuelles Projekt bleibt erhalten.");
         return false;
     }
+    if (!canApplyDeviceProfile(state->deviceProfile))
+        return false;
+    clearHistory();
     applySnapshot(*state);
-    m_undo.clear();
-    m_redo.clear();
     markClean();
+    setFileUrl(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     emit changed();
     notify("Projekt geöffnet.");
+    emit projectFileUsed(m_fileUrl);
+    return true;
+}
+bool Document::saveTemplate(const QUrl &url) {
+    if (!url.isLocalFile() ||
+        QFileInfo(url.toLocalFile()).suffix().compare("blazertemplate", Qt::CaseInsensitive) != 0) {
+        notify("Bitte eine lokale .blazertemplate-Datei für die Vorlage wählen.");
+        return false;
+    }
+    finishMove();
+    auto root = QJsonDocument::fromJson(serialize()).object();
+    root["format"] = "blazer-studio-template";
+    root["templateVersion"] = 1;
+    const auto bytes = QJsonDocument(root).toJson();
+    if (bytes.size() > maxProjectBytes) {
+        notify("Vorlage ist größer als 64 MiB; Speichern abgebrochen.");
+        return false;
+    }
+    QString error;
+    if (!AtomicFile::write(url.toLocalFile(), bytes, error, ".bak")) {
+        notify(error);
+        return false;
+    }
+    notify(m_dirty ? "Vorlage gespeichert; Projektänderungen sind weiterhin ungespeichert."
+                   : "Vorlage gespeichert.");
+    return true;
+}
+bool Document::newFromTemplate(const QUrl &url) {
+    QFile file(url.toLocalFile());
+    if (!url.isLocalFile() || !file.open(QIODevice::ReadOnly) || file.size() > maxProjectBytes) {
+        notify("Vorlage konnte nicht gelesen werden.");
+        return false;
+    }
+    QJsonParseError error;
+    const auto json = QJsonDocument::fromJson(file.read(maxProjectBytes + 1), &error);
+    auto root = json.object();
+    if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio-template" ||
+        root["templateVersion"] != 1) {
+        notify("Keine unterstützte Blazer-Vorlage; das aktuelle Projekt bleibt erhalten.");
+        return false;
+    }
+    root["format"] = "blazer-studio";
+    root.remove("templateVersion");
+    const auto state = parse(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    if (!state) {
+        notify("Vorlage enthält kein gültiges Projekt; das aktuelle Projekt bleibt erhalten.");
+        return false;
+    }
+    if (!canApplyDeviceProfile(state->deviceProfile))
+        return false;
+    // A template starts an independent, unsaved document with fresh history.
+    // Its source is never treated as the project's ordinary save destination.
+    clearHistory();
+    m_saved = Snapshot{};
+    setFileUrl({});
+    applySnapshot(*state);
+    notify("Neues Projekt aus Vorlage; bitte unter eigenem Projektnamen speichern.");
     return true;
 }
 QPainterPath Document::outline(const Artwork &a) {
@@ -1152,7 +1456,7 @@ QStringList Document::issues() const {
     for (const auto &a : m_items)
         if (outputs(a)) {
             ++count;
-            if (!Geometry::insideBed(a.bounds))
+            if (!Geometry::insideBed(a.bounds, workArea()))
                 result << a.name + ": außerhalb des Arbeitsraums";
         }
     if (!count)
@@ -1172,13 +1476,22 @@ bool Document::exportGcode(const QUrl &url) {
         notify(job().errors.join("\n"));
         return false;
     }
-    const auto bytes = (job().gcode().join("\n") + "\n").toUtf8();
+    const auto program = job().encodedProgram();
+    if (!program.valid() || program.mediaType() != "text/x-gcode") {
+        notify(program.errors().isEmpty()
+                   ? QString("Für dieses Profil ist kein GCode-Export verfügbar.")
+                   : program.errors().join("; "));
+        return false;
+    }
+    const auto bytes = program.payload();
     QSaveFile f(url.toLocalFile());
     if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size() || !f.commit()) {
         notify("GCode konnte nicht gespeichert werden.");
         return false;
     }
-    notify("GRBL-GCode exportiert · G21/G90, M4, S-Max 1000.");
+    notify("GRBL-GCode exportiert · G21/G90, M4, S-Max " +
+           QString::number(m_deviceProfile.driverSettings()["powerScale"].toDouble(), 'f', 0) +
+           ".");
     return true;
 }
 bool Document::importImage(const QUrl &url) {
@@ -1224,7 +1537,7 @@ void Document::setObjectSetting(const QString &key, double value) {
         changed |= m_items[row].settings.value(key) != value;
     if (!changed)
         return;
-    checkpoint();
+    checkpoint("Objektwerte");
     for (int row : m_selection) {
         if (m_items[row].settings.value(key) != value)
             m_items[row].relief.depthPerPass = 0;
@@ -1234,13 +1547,14 @@ void Document::setObjectSetting(const QString &key, double value) {
 }
 bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPower,
                                   double maxPower, int steps, double moduleW) {
-    const auto plan = JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps);
+    const auto plan =
+        JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps, m_deviceProfile);
     if (!plan.valid() || !std::isfinite(moduleW) || moduleW < .1 || moduleW > 100) {
         notify("Ungültige Materialtest-Parameter.");
         return false;
     }
     newProject();
-    checkpoint();
+    checkpoint("Materialtest");
     beginResetModel();
     m_title = "Materialtest";
     m_material = MaterialLibrary::example();
@@ -1341,14 +1655,15 @@ void Document::setReliefSetting(const QString &key, const QVariant &value) {
         result.cleanupEvery != m_items[m_selected].relief.cleanupEvery ||
         result.cleanupPower != m_items[m_selected].relief.cleanupPower)
         result.depthPerPass = 0;
-    checkpoint();
+    checkpoint("Reliefwerte");
     m_items[m_selected].relief = result;
     refresh();
 }
 
 bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
                                   double minPower, double maxPower, int steps) {
-    auto plan = JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps);
+    auto plan =
+        JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps, m_deviceProfile);
     if (!url.isLocalFile() || !plan.valid()) {
         notify(plan.errors.join("; "));
         return false;
@@ -1361,7 +1676,14 @@ bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSp
             .arg(maxSpeed)
             .arg(minPower)
             .arg(maxPower);
-    auto bytes = (guide + plan.gcode().join("\n") + "\n").toUtf8();
+    const auto program = plan.encodedProgram();
+    if (!program.valid() || program.mediaType() != "text/x-gcode") {
+        notify(program.errors().isEmpty()
+                   ? QString("Für dieses Profil ist kein GCode-Export verfügbar.")
+                   : program.errors().join("; "));
+        return false;
+    }
+    auto bytes = guide.toUtf8() + program.payload();
     QSaveFile file(url.toLocalFile());
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
         notify("Materialtest konnte nicht gespeichert werden.");
@@ -1392,7 +1714,7 @@ bool Document::validBudget(const QList<Artwork> &items) {
 QVariantMap Document::beginnerSummary() const {
     bool advanced = false;
     for (const auto &a : m_items)
-        if (a.page == m_activePage)
+        if (a.page == m_activePage && a.toolLayer == 0)
             advanced |= a.layer >= 2 || !a.extraOperations.isEmpty() || a.kind == "relief";
     for (int i = 0; i < 2; ++i) {
         const auto values = m_layers[i].toMap();
@@ -1438,7 +1760,7 @@ bool Document::applyBasicMaterial(const QVariantMap &profile) {
             change |= !a.settings.isEmpty() || (engrave != cut && a.layer != (engrave ? 0 : 1));
     if (change) {
         if (!profileChanges)
-            checkpoint();
+            checkpoint("Profilwerte übernehmen");
         for (auto &a : m_items)
             if (a.page == m_activePage) {
                 a.settings.clear();
@@ -1464,7 +1786,7 @@ void Document::setBackgroundPlanning(bool enabled) {
     emit changed();
 }
 JobInput Document::jobInput() const {
-    JobInput result{m_items, m_layers, m_activePage};
+    JobInput result{m_items, m_layers, m_activePage, m_deviceProfile};
     // Do not transfer GUI-owned QSvgRenderer instances, even by shared_ptr.
     QHash<const SvgAsset *, std::shared_ptr<const SvgAsset>> assets;
     for (auto &art : result.items)

@@ -13,6 +13,8 @@ var actions = {
   "Speichern": "Speichert das Projekt zur späteren Weiterbearbeitung. Die vorige Datei wird als Sicherung erhalten.",
   "Beispiel": "Öffnet ein Übungsprojekt. Seine Werte sind keine geprüfte Materialempfehlung.",
   "Bild": "Lädt ein Foto oder eine Zeichnung. Das allein startet den Laser nicht.",
+  "Bearbeitetes Bild exportieren": "Speichert genau ein ausgewähltes Rasterbild einschließlich übernommener Korrekturen, Zuschnitt, Masken und Dithering. PNG erhält Transparenz; JPEG ist verlustbehaftet.",
+  "Bild ohne Korrekturen exportieren": "Exportiert die eingebettete Graustufenquelle ohne aktuelle Bildkorrekturen. Bereits eingebrannte Drehungen oder Masken bleiben erhalten.",
   "GCode": "Speichert die berechneten Fahr- und Laserbefehle. Das ist eine Ausgabedatei, keine Projektdatei.",
   "Gravieren": "Bearbeitet die Oberfläche oder füllt das Motiv mit Linien.",
   "Schneiden": "Fährt die Umrisse ab. Ob das Material durchtrennt wird, muss mit einer Materialprobe geprüft werden.",
@@ -62,7 +64,7 @@ var actions = {
   "Rasterprobe": "Erzeugt Vergleichsflächen mit verschiedenen Linienabständen.",
   "Fokusmarken": "Erzeugt Marken für getrennte manuelle Fokusproben. Es gibt keine automatische Höhenverstellung.",
   "Foto laden": "Lädt ein Referenzfoto für die Ausrichtung auf der Zeichenfläche.",
-  "Kalibrieren": "Ordnet die vier angeklickten Foto-Ecken dem 200 × 150-mm-Arbeitsraum zu.",
+  "Kalibrieren": "Ordnet die vier angeklickten Foto-Ecken dem Arbeitsraum des Projektprofils zu.",
   "Foto einblenden": "Blendet das registrierte Referenzfoto als Positionierhilfe ein oder aus.",
   "Letzte Sicherung wiederherstellen": "Stellt die letzte automatische Sicherung wieder her. Anschließend separat speichern.",
   "GRBL verbinden": "Öffnet die Verbindung zum ausgewählten Laser und prüft dessen Konfiguration. Keine automatische Bewegung.",
@@ -75,7 +77,7 @@ var actions = {
   "Abbrechen": "Beendet diesen Vorgang ohne automatische Laserfreigabe.",
   "Datei importieren": "Lädt eine unterstützte Grafik, ein Modell oder Geometrien aus einem Projekt.",
   "SVG exportieren": "Speichert die Vektoren des aktiven Blatts für andere Zeichenprogramme.",
-  "↓  Importieren": "Lädt eine unterstützte Grafik oder ein 3D-Modell. Größere Bilder behalten ihre Auflösung.",
+  "↓  Importieren": "Lädt eine unterstützte Grafik, GCode-Geometrie oder ein 3D-Modell. GCode wird als editierbarer Pfad eingefügt und nicht ausgeführt. RDWorks-Jobs werden ebenfalls nur als Geometrie gelesen. MillMage übernimmt unterstützte Grafikobjekte ohne Fräsoperationen. Größere Bilder behalten ihre Auflösung.",
   "⌂  Referenzfahrt": "Fährt zu den Endschaltern, damit der Laser seine Position wieder kennt. Der Kopf bewegt sich.",
   "□  Rahmenfahrt": "Zeigt die äußeren Motivgrenzen durch eine Fahrt mit ausgeschaltetem Laser.",
   "◎  Halten für 2 %": "Fordert einen kurzen Laserpunkt an. Auch dieser Punkt ist echte Laserstrahlung.",
@@ -111,8 +113,8 @@ function numeric(label,unit,control) {
  var meanings={
   "Links": "Abstand des linken Motivrandes vom linken Rand der Arbeitsfläche.",
   "Unten": "Abstand des unteren Motivrandes vom unteren Rand der Arbeitsfläche.",
-  "Breite": "Breite der Auswahl in Millimetern.",
-  "Höhe": "Höhe der Auswahl in Millimetern.",
+  "Breite": "Breite der Auswahl in der angezeigten Einheit.",
+  "Höhe": "Höhe der Auswahl in der angezeigten Einheit.",
   "v": "Geschwindigkeit: Wie schnell sich der Kopf bewegt. Langsamer kann mehr Material abtragen.",
   "P": "Leistung: Angeforderter Anteil der Laserleistung. Ein höherer Wert kann mehr Material abtragen.",
   "×": "Anzahl der Wiederholungen. Mehr Durchgänge können die Bearbeitung vertiefen.",
@@ -133,6 +135,7 @@ function numeric(label,unit,control) {
 function describe(control) {
  if(!control)return ""
  var named={
+  "editorUnitChoice": "Maßeinheit für Längenfelder, Lineale und Fangraster: mm oder Zoll (in). Projekt und GCode bleiben in Millimetern. Längen können auch mit mm oder in eingegeben werden.",
   "toolHeadChoice": "Wähle die Nennleistung des tatsächlich eingebauten Laserkopfs. Danach zeigt die Materialliste nur passende Profile. Der Kopf wird nicht automatisch erkannt.",
   "materialChoice": "Wähle das tatsächliche Material und seine Dicke. Die Werte stammen aus dem Profil; Herstellerwerte müssen am eigenen Gerät geprüft werden.",
   "objectNameInput": "Name des ausgewählten Objekts. Eingabe oder Verlassen des Feldes übernimmt die Änderung.",

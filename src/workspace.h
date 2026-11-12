@@ -14,6 +14,11 @@ class Workspace : public QQuickPaintedItem {
     Q_PROPERTY(bool preview READ preview WRITE setPreview NOTIFY previewChanged)
     Q_PROPERTY(bool dark READ dark WRITE setDark NOTIFY darkChanged)
     Q_PROPERTY(bool nodes READ nodeMode WRITE setNodeMode NOTIFY nodeModeChanged)
+    Q_PROPERTY(QString selectedGuideId READ selectedGuideId WRITE setSelectedGuideId NOTIFY
+                   selectedGuideChanged)
+    Q_PROPERTY(bool guideDragging READ guideDragging NOTIFY selectedGuideChanged)
+    Q_PROPERTY(bool imperial READ imperial WRITE setImperial NOTIFY imperialChanged)
+    Q_PROPERTY(double snapStep READ snapStep NOTIFY imperialChanged)
     Q_PROPERTY(double zoom READ zoom NOTIFY zoomChanged)
   public:
     explicit Workspace(QQuickItem *p = nullptr);
@@ -22,6 +27,8 @@ class Workspace : public QQuickPaintedItem {
         if (m_registration)
             disconnect(m_registration, nullptr, this, nullptr);
         m_registration = r;
+        if (r && m_document)
+            r->setDeviceProfile(m_document->deviceProfile());
         if (r)
             connect(r, &Registration::changed, this, [this] { update(); });
         emit registrationChanged();
@@ -33,6 +40,8 @@ class Workspace : public QQuickPaintedItem {
     void setSimulator(Simulator *s);
     bool preview() const { return m_preview; }
     void setPreview(bool p) {
+        if (p)
+            cancelGuideDrag();
         m_preview = p;
         update();
         emit previewChanged();
@@ -49,6 +58,19 @@ class Workspace : public QQuickPaintedItem {
         update();
         emit nodeModeChanged();
     }
+    bool imperial() const { return m_imperial; }
+    double snapStep() const { return m_imperial ? .025 * 25.4 : .5; }
+    void setImperial(bool value) {
+        if (m_imperial == value)
+            return;
+        m_imperial = value;
+        emit imperialChanged();
+        update();
+    }
+    QString selectedGuideId() const { return m_selectedGuide; }
+    void setSelectedGuideId(const QString &id);
+    bool guideDragging() const { return m_guideDraft.has_value(); }
+    Q_INVOKABLE void cancelGuideDrag();
     double zoom() const { return m_zoom; }
     Q_INVOKABLE void fit() {
         m_zoom = 1;
@@ -67,6 +89,8 @@ class Workspace : public QQuickPaintedItem {
     void previewChanged();
     void darkChanged();
     void zoomChanged();
+    void imperialChanged();
+    void selectedGuideChanged();
     void nodeModeChanged();
 
   protected:
@@ -78,6 +102,13 @@ class Workspace : public QQuickPaintedItem {
     void mouseUngrabEvent() override;
 
   private:
+    QSizeF workArea() const {
+        return m_document ? m_document->workArea() : DeviceProfile::m3Reference().workArea();
+    }
+    QPointF worldToCanvas(QPointF point) const;
+    QRectF worldToCanvas(QRectF rect) const;
+    void syncDeviceProfile();
+    QByteArray m_profileFingerprint;
     double scale() const;
     QPointF origin() const;
     QPointF toWorld(QPointF p) const;
@@ -85,9 +116,18 @@ class Workspace : public QQuickPaintedItem {
     QPointer<Document> m_document;
     QPointer<Simulator> m_simulator;
     bool m_preview = false, m_dark = false, m_drag = false, m_panning = false;
-    bool m_nodes = false;
+    bool m_nodes = false, m_imperial = false;
     int m_dragNode = -1;
     double m_zoom = 1;
     QPointF m_pan, m_last, m_offset;
     QCache<QString, QPainterPath> m_textPaths{128};
+    QString m_selectedGuide;
+    struct GuideDraft {
+        QString id, axis;
+        double position = 0;
+        int page = 0;
+    };
+    std::optional<GuideDraft> m_guideDraft;
+    std::optional<double> m_alignmentX, m_alignmentY;
+    void paintGuides(QPainter *p);
 };

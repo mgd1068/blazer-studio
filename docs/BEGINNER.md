@@ -18,6 +18,8 @@ Die Positions- und Fokusfunktionen wirken bei echter Geräteverbindung am Laser.
 
 Basic übernimmt **Geschwindigkeit, Leistung, Durchgänge, Linienabstand und aktivierte Bearbeitung** aus dem ausgewählten Profil. Die rechte Seite zeigt die tatsächlich verwendeten Werte mit Einheiten. Ein reines Gravurprofil ordnet vorhandene Objekte des aktiven Blatts der Gravur zu; ein Schnittprofil entsprechend dem Schnitt. Neue Formen erhalten ebenfalls die passende Zuordnung. Ein Motivimport in ein unverändertes Basic-Projekt übernimmt diese Zuordnung auch dann, wenn das Material schon vorher gewählt wurde. Fotos benötigen ein Gravurprofil.
 
+Ab dem Entwicklungsstand beta.4-dev lädt **Motiv laden** auch begrenzte HPGL/PLT-, GCode-, RDWorks-Job- und unterstützte MillMage-Geometrie. RDWorks-Jobs werden als Pfade gelesen; ihre Maschinen- und Leistungswerte werden nicht übernommen. MillMage-Fräsoperationen werden nicht übernommen. Bei GCode entsteht ein editierbares Pfadobjekt; seine ursprünglichen Leistungen und Vorschübe werden nicht als Materialwerte übernommen. Die Datei wird nicht ausgeführt. [Unterstützte Befehle, Einheiten und Importgrenzen](VECTOR_IMPORTS.md) stehen separat. Diese Erweiterung ist noch nicht im unveränderten beta.3-Paket enthalten.
+
 **Profilwerte übernehmen** entfernt individuelle Parameterabweichungen der Objekte auf dem aktiven Blatt; die Änderung lässt sich rückgängig machen. Die bloße Umschaltung des Modus tut das nicht. Erweiterte Werte wie Schnittfugenkorrektur, Einlauf, Überlauf oder Kreuzschraffur werden nicht versteckt als einfacher Standard ausgegeben; solche Projekte benötigen Advanced. Der Basic-Hardwarestart bleibt bei erkannten Profilabweichungen, erweiterten Einstellungen oder einem abweichenden ausgewählten Kopf gesperrt. Die Bildschirmprobe bleibt möglich. Die kleine ausdrücklich vorbereitete Probe ist auch ohne vorherige Materialbestätigung möglich.
 
 Herstellerprofile sind **Ausgangswerte**, keine automatisch ermittelten Materialmessungen. Die Quelle steht im geführten Bereich und in der Bibliothek. Die vorhandenen Herstellerangaben betreffen M3 Pro, das eingerichtete Gerät heißt M3; diese Zuordnung ist weiter offen. Fehlende Gravur-Durchgänge werden sichtbar mit dem eigenen Anfangswert **1** ergänzt. Der anfängliche Gravurlinienabstand ist **0,1 mm** (254 dpi). Diese Ergänzungen sind keine Herstellerangaben. Eigene Profile lassen sich weiterhin bearbeiten.
@@ -37,3 +39,14 @@ Das ist eine technische Bedienprüfung. Ob ein völlig unerfahrener Mensch ohne 
 ![Basic im kleinen dunklen Fenster](../assets/basic-compact.png)
 
 ![Hilfetext bei Tastaturbedienung](../assets/tooltip.png)
+
+
+In Advanced unter **05 Werkzeuge → Bild** kann genau ein ausgewähltes Rasterbild mit oder ohne aktuelle Korrekturen als PNG, JPEG oder BMP exportiert werden. Neue Eingaben vorher übernehmen. PNG erhält Transparenz; JPEG und BMP verwenden einen weißen Hintergrund. [Bildexport und Prüfumfang](RASTER_EXPORTS.md) beschreiben die Details. Diese Funktion gehört zur Entwicklung beta.4-dev, noch nicht zum unveränderten beta.3-Paket.
+
+
+Unter der Objektliste stehen **Kopieren** und **Einfügen** bereit. Auf der Arbeitsfläche gelten Strg+C/X/V, Strg+Umschalt+V fügt Blazer-Objekte an der ursprünglichen Position ein. Native Kopien erhalten ihre zugeordneten Bearbeitungen; diese vor der Ausgabe prüfen. Textfelder behalten ihre eigenen Kürzel. [Zwischenablage und Grenzen](CLIPBOARD.md) gehören zur Entwicklung beta.4-dev, noch nicht zum beta.3-Paket.
+
+
+Unten rechts im Editor kann die Längeneinheit zwischen **mm** und **in** wechseln. Längenfelder akzeptieren auch ausdrückliche Angaben wie `1,25 in` oder `25.4 mm`. Reines Umschalten ändert das Motiv und die Laserparameter nicht. [Einheiten, Raster und Genauigkeit](EDITOR_UNITS.md) gehören zur Entwicklung beta.4-dev; Geschwindigkeiten und Herstellerreferenzen behalten ihre ausgewiesenen Einheiten.
+
+Hilfslinien für die Platzierung findest du unter [Werkzeuge → Hilfslinien](GUIDES.md). Sie werden gespeichert und niemals gelasert.

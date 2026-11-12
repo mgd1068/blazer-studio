@@ -7,6 +7,7 @@
 #include "recovery.h"
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonDocument>
 #include <QLockFile>
 #include <QProcess>
 #include <QSemaphore>
@@ -32,6 +33,73 @@ class StabilityTest : public QObject {
         return f.readAll();
     }
   private slots:
+    void workerCannotPublishAValidPlanForADifferentProfile() {
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        auto input = document.jobInput();
+        const auto oldInput = input;
+        auto descriptor = input.deviceProfile.toJson();
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        input.deviceProfile = *profile;
+        JobPreparation preparation(nullptr,
+                                   [oldInput](const JobInput &, const Cancellation &cancel) {
+                                       return JobPlanner::build(oldInput, cancel);
+                                   });
+        preparation.submit(input);
+        QTRY_COMPARE_WITH_TIMEOUT(preparation.state(), QString("failed"), 5000);
+        QVERIFY(!preparation.plan().valid());
+        QVERIFY(preparation.plan().moves.isEmpty());
+        QVERIFY(preparation.plan().cachedCommands().isEmpty());
+        QVERIFY(preparation.plan().errors.join(";").contains("abweichendes Geräteprofil"));
+        QCOMPARE(preparation.plan().deviceProfile().outputFingerprint(),
+                 profile->outputFingerprint());
+    }
+    void asynchronousProfileChangesDropOldPlansAndBindTheCommandCache() {
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        auto input = document.jobInput();
+        std::atomic_bool started = false;
+        JobPreparation preparation(nullptr,
+                                   [&](const JobInput &snapshot, const Cancellation &cancel) {
+                                       if (snapshot.deviceProfile.outputFingerprint() ==
+                                           DeviceProfile::m3Reference().outputFingerprint()) {
+                                           started = true;
+                                           while (!isCancelled(cancel))
+                                               QThread::msleep(1);
+                                       }
+                                       return JobPlanner::build(snapshot, cancel);
+                                   });
+        preparation.submit(input);
+        QTRY_VERIFY(started.load());
+        auto descriptor = input.deviceProfile.toJson();
+        auto driver = descriptor["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] = 255;
+        driver["settings"] = settings;
+        descriptor["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(descriptor).toJson(), error);
+        QVERIFY(profile);
+        input.deviceProfile = *profile;
+        preparation.submit(input);
+        input.deviceProfile = document.deviceProfile();
+        QVERIFY(!preparation.plan().valid());
+        QTRY_COMPARE_WITH_TIMEOUT(preparation.state(), QString("ready"), 5000);
+        QCOMPARE(preparation.plan().deviceProfile().outputFingerprint(),
+                 profile->outputFingerprint());
+        QVERIFY(!preparation.plan().cachedCommands().isEmpty());
+        QVERIFY(preparation.plan().gcode().contains("M4 S204"));
+        QVERIFY(!preparation.plan().gcode().contains("M4 S800"));
+    }
     void asynchronousMatchesReferenceAndOwnsSnapshot() {
         Document d;
         d.newProject();
@@ -44,7 +112,7 @@ class StabilityTest : public QObject {
         QVERIFY(!preparation.plan().valid());
         QTRY_COMPARE_WITH_TIMEOUT(preparation.state(), QString("ready"), 5000);
         QCOMPARE(preparation.plan().gcode(), expected);
-        QVERIFY(!preparation.plan().commands.isEmpty());
+        QVERIFY(!preparation.plan().cachedCommands().isEmpty());
         QVERIFY(preparation.plan().gcode() != d.job().gcode());
     }
     void cancellationKeepsEventLoopResponsiveAndDropsOldGenerations() {
@@ -236,6 +304,95 @@ class StabilityTest : public QObject {
         Document restored;
         QVERIFY(restored.restoreBytes(read(a.location())));
         QCOMPARE(restored.items()[0].bounds.width(), 20.);
+    }
+    void startupDocumentCannotReplaceUnresolvedRecovery() {
+        const auto folder = temp.filePath("unresolved-recovery");
+        QString path;
+        {
+            Document old;
+            Recovery recovery(&old, folder);
+            old.addShape("rect");
+            old.setProperty("width", 21.);
+            QVERIFY(recovery.save());
+            old.setProperty("width", 31.);
+            QVERIFY(recovery.save());
+            path = recovery.location();
+        }
+        const auto current = read(path), previous = read(path + ".previous");
+        QVERIFY(current != previous);
+        Document incoming;
+        Recovery recovery(&incoming, folder);
+        QVERIFY(recovery.pendingDecision());
+        incoming.addShape("text");
+        QTest::qWait(1800);
+        QCOMPARE(read(path), current);
+        QCOMPARE(read(path + ".previous"), previous);
+        QVERIFY(!recovery.save());
+        recovery.closeSession();
+        incoming.addShape("ellipse");
+        QTest::qWait(1800);
+        QCOMPARE(read(path), current);
+        QCOMPARE(read(path + ".previous"), previous);
+    }
+    void recoveryDecisionReleasesAutosaveOnlyAfterSuccess() {
+        const auto folder = temp.filePath("recovery-decisions");
+        QString path;
+        {
+            Document old;
+            old.newProject();
+            Recovery recovery(&old, folder);
+            old.addShape("rect");
+            old.setProperty("width", 43.);
+            QVERIFY(recovery.save());
+            path = recovery.location();
+        }
+        {
+            Document incoming;
+            Recovery recovery(&incoming, folder);
+            incoming.addShape("text");
+            QVERIFY(recovery.pendingDecision());
+            QVERIFY(recovery.restore());
+            QVERIFY(!recovery.pendingDecision());
+            QCOMPARE(incoming.items()[0].bounds.width(), 43.);
+            incoming.setProperty("width", 47.);
+            QTest::qWait(1800);
+            Document check;
+            QVERIFY(check.restoreBytes(read(path)));
+            QCOMPARE(check.items()[0].bounds.width(), 47.);
+        }
+        {
+            Document incoming;
+            Recovery recovery(&incoming, folder);
+            incoming.addShape("ellipse");
+            const auto expected = incoming.projectBytes();
+            QVERIFY(recovery.pendingDecision());
+            recovery.clear();
+            QVERIFY(!recovery.pendingDecision());
+            QTest::qWait(1800);
+            QCOMPARE(read(path), expected);
+            recovery.closeSession();
+            QVERIFY(!QFile::exists(path));
+            incoming.addShape("rect");
+            QTest::qWait(1800);
+            QVERIFY(!QFile::exists(path));
+            QVERIFY(!recovery.save());
+        }
+        // An unremovable entry must not silently acknowledge the decision.
+        QVERIFY(QDir().mkpath(path));
+        QVERIFY(!put("recovery-decisions/autosave.blazer/keep", "sentinel").isEmpty());
+        Document incoming;
+        Recovery recovery(&incoming, folder);
+        incoming.addShape("text");
+        QVERIFY(recovery.pendingDecision());
+        QVERIFY(!recovery.restore());
+        recovery.clear();
+        QVERIFY(recovery.pendingDecision());
+        QVERIFY(!recovery.save());
+        QCOMPARE(read(path + "/keep"), QByteArray("sentinel"));
+        QVERIFY(QDir(path).removeRecursively());
+        recovery.clear();
+        QVERIFY(!recovery.pendingDecision());
+        QVERIFY(recovery.save());
     }
     void killedProcessRecoversAndReleasesItsLock() {
         auto folder = temp.filePath("crash-recovery");

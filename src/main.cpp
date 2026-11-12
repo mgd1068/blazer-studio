@@ -1,6 +1,8 @@
 #include "applicationservices.h"
+#include "blazer_version.h"
 #include "depthservice.h"
 #include "document.h"
+#include "deviceprofile.h"
 #include "machine.h"
 #include "materiallibrary.h"
 #include "recovery.h"
@@ -8,11 +10,14 @@
 #include "workspace.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMimeDatabase>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -20,7 +25,52 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <cstdio>
+namespace {
+int validateDeviceProfile(int argc, char **argv) {
+    QCoreApplication application(argc, argv);
+    const auto args = application.arguments();
+    QString path, error;
+    if (args.size() == 3 && args[1] == "--validate-device-profile")
+        path = args[2];
+    else if (args.size() == 2 && args[1].startsWith("--validate-device-profile="))
+        path = args[1].mid(QString("--validate-device-profile=").size());
+    QJsonObject result{{"valid", false}, {"scope", "descriptor"}, {"runtimeSupported", false}};
+    std::optional<DeviceProfile> profile;
+    if (path.isEmpty())
+        error = "Aufruf: blazer-studio --validate-device-profile DATEI";
+    else {
+        QFile input(path);
+        if (!input.open(QIODevice::ReadOnly))
+            error = "Geräteprofil konnte nicht gelesen werden.";
+        else
+            profile = DeviceProfile::parse(input.read(64 * 1024 + 1), error);
+    }
+    if (profile) {
+        const auto reason = DeviceBackends::runtimeSupportError(*profile);
+        result["valid"] = true;
+        result["id"] = profile->id();
+        result["name"] = profile->name();
+        result["driver"] = profile->driverId();
+        result["width"] = profile->workArea().width();
+        result["height"] = profile->workArea().height();
+        result["outputFingerprint"] = QString::fromLatin1(profile->outputFingerprint());
+        result["runtimeSupported"] = reason.isEmpty();
+        result["runtimeReason"] = reason;
+    } else
+        result["error"] = error;
+    QFile output;
+    if (!output.open(stdout, QIODevice::WriteOnly))
+        return 2;
+    const auto bytes = QJsonDocument(result).toJson();
+    if (output.write(bytes) != bytes.size())
+        return 2;
+    return profile ? 0 : 2;
+}
+} // namespace
 int main(int argc, char **argv) {
+    for (int i = 1; i < argc; ++i)
+        if (QByteArray(argv[i]).startsWith("--validate-device-profile"))
+            return validateDeviceProfile(argc, argv);
     for (int i = 1; i < argc; ++i)
         if (QByteArray(argv[i]) == "--version") {
             fprintf(stdout, "Blazer Studio %s\n", BLAZER_VERSION);
@@ -57,18 +107,24 @@ int main(int argc, char **argv) {
             return 3;
         return app.exec();
     }
-    MaterialLibrary materialLibrary(app.arguments().contains("--self-test")
-                                        ? transientRecovery.filePath("materials.json")
-                                        : QString());
-    Machine simulator(&document);
-    ApplicationServices services(&document, &simulator,
-                                 app.arguments().contains("--self-test")
-                                     ? transientRecovery.filePath("settings.ini")
-                                     : QString());
+    MaterialLibrary materialLibrary(transient ? transientRecovery.filePath("materials.json")
+                                              : QString());
     QFile f(":/profiles/blaze-x-m3.json");
     if (!f.open(QIODevice::ReadOnly))
         return 1;
-    auto profile = QJsonDocument::fromJson(f.readAll()).toVariant();
+    QString profileError;
+    const auto descriptor = DeviceProfile::parse(f.readAll(), profileError);
+    if (!descriptor ||
+        !(profileError = DeviceBackends::runtimeSupportError(*descriptor)).isEmpty()) {
+        qCritical().noquote() << "Geräteprofil nicht verwendbar:" << profileError;
+        return 1;
+    }
+    const auto profile = descriptor->legacyUiProperties();
+    Machine simulator(&document, nullptr,
+                      transient ? Machine::HardwareAccess::Disabled
+                                : Machine::HardwareAccess::Allowed);
+    ApplicationServices services(
+        &document, &simulator, transient ? transientRecovery.filePath("settings.ini") : QString());
     QFile materials(":/profiles/manufacturer-materials.json");
     if (!materials.open(QIODevice::ReadOnly))
         return 1;
@@ -108,8 +164,17 @@ int main(int argc, char **argv) {
         if (auto *tools = root->findChild<QObject *>("toolsPanel"))
             tools->setProperty("section", args[toolsSection + 1].toInt());
     // Desktop Exec supplies an optional positional .blazer file; an empty %f means normal startup.
-    if (args.size() == 2 && !args[1].startsWith('-') &&
-        !document.open(QUrl::fromLocalFile(args[1])))
+    if (args.size() == 2 && !args[1].startsWith('-')) {
+        const auto file = QUrl::fromLocalFile(args[1]);
+        const bool isTemplate =
+            QFileInfo(args[1]).suffix().compare("blazertemplate", Qt::CaseInsensitive) == 0;
+        if (!(isTemplate ? document.newFromTemplate(file) : document.open(file)))
+            return 2;
+    }
+    int templateIndex = args.indexOf("--new-from-template");
+    if (templateIndex >= 0 &&
+        (templateIndex + 1 >= args.size() ||
+         !document.newFromTemplate(QUrl::fromLocalFile(args[templateIndex + 1]))))
         return 2;
     int opened = args.indexOf("--open-project");
     if (opened >= 0 &&
@@ -164,6 +229,13 @@ int main(int argc, char **argv) {
                     return;
                 }
                 svg.close();
+                for (const auto &extension : {"bmp", "tiff", "webp"}) {
+                    const auto file=transientRecovery.filePath(QString("sample.")+extension);
+                    if(!image.save(file) || QImage(file).size()!=image.size()) { fail("required raster codec"); return; }
+                }
+                const auto gif=QByteArray::fromHex("47494638396102000100800000000000ffffff2c0000000002000100000202440a003b");
+                const auto gifImage=QImage::fromData(gif,"GIF");
+                if(gifImage.size()!=QSize(2,1) || qGray(gifImage.pixel(0,0))!=0 || qGray(gifImage.pixel(1,0))!=255) { fail("GIF raster codec"); return; }
                 if (!document.importImage(QUrl::fromLocalFile(png)) ||
                     !document.importSvg(QUrl::fromLocalFile(svg.fileName())) ||
                     !QFontDatabase::families().contains("DejaVu Sans") || !simulator.simulation()) {
@@ -176,6 +248,14 @@ int main(int argc, char **argv) {
                     !services.exportDiagnostics(
                         QUrl::fromLocalFile(transientRecovery.filePath("diagnostics.json")))) {
                     fail("project roundtrip or diagnostics");
+                    return;
+                }
+                const auto templateFile =
+                    QUrl::fromLocalFile(transientRecovery.filePath("reusable.blazertemplate"));
+                if (!document.saveTemplate(templateFile) ||
+                    !document.newFromTemplate(templateFile) || !document.dirty() ||
+                    document.count() != 3) {
+                    fail("project template roundtrip");
                     return;
                 }
                 auto *poll = new QTimer(&app);
@@ -195,12 +275,18 @@ int main(int argc, char **argv) {
                             return;
                         }
                         const auto output =
-                            QJsonDocument(QJsonObject{{"selfTest", "passed"},
-                                                      {"version", services.version()},
-                                                      {"revision", services.revision()},
-                                                      {"simulation", true},
-                                                      {"objects", document.count()},
-                                                      {"hardwareTested", false}})
+                            QJsonDocument(
+                                QJsonObject{{"selfTest", "passed"},
+                                            {"version", services.version()},
+                                            {"revision", services.revision()},
+                                            {"simulation", true},
+                                            {"objects", document.count()},
+                                            {"templateMimeType",
+                                             QMimeDatabase()
+                                                 .mimeTypeForFile("example.blazertemplate",
+                                                                  QMimeDatabase::MatchExtension)
+                                                 .name()},
+                                            {"hardwareTested", false}})
                                 .toJson();
                         fwrite(output.constData(), 1, output.size(), stdout);
                         app.exit(0);

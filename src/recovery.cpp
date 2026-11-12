@@ -15,9 +15,12 @@ Recovery::Recovery(Document *d, const QString &directory, QObject *parent)
     lock = std::make_unique<QLockFile>(dir + "/session.lock");
     lock->setStaleLockTime(0);
     lock->tryLock(0);
+    decisionPending = available();
     timer.setSingleShot(true);
     timer.setInterval(1500);
     connect(d, &Document::changed, this, [this] {
+        if (decisionPending || sessionClosed)
+            return;
         if (document->dirty())
             timer.start();
         else if (written || restored)
@@ -29,7 +32,7 @@ bool Recovery::available() const {
     return writable() && (QFile::exists(path) || QFile::exists(path + ".previous"));
 }
 bool Recovery::save() {
-    if (!writable())
+    if (!writable() || decisionPending || sessionClosed)
         return false;
     if (!document->dirty())
         return true;
@@ -48,7 +51,7 @@ bool Recovery::save() {
     return ok;
 }
 bool Recovery::restore() {
-    if (!writable())
+    if (!writable() || sessionClosed)
         return false;
     for (const QString &candidate : {path, path + ".previous"}) {
         QFile f(candidate);
@@ -56,6 +59,9 @@ bool Recovery::restore() {
             document->restoreBytes(f.read(ImageLimits::projectBytes + 1))) {
             preservePrevious = candidate != path;
             restored = true;
+            decisionPending = false;
+            timer.start();
+            emit changed();
             document->notify(
                 candidate == path
                     ? "Automatische Sicherung wiederhergestellt; bitte speichern."
@@ -69,14 +75,24 @@ void Recovery::clear() {
     if (!writable())
         return;
     timer.stop();
+    for (const auto &candidate : {path, path + ".previous"}) {
+        if (QFile::exists(candidate) && !QFile::remove(candidate)) {
+            document->notify("Automatische Sicherung konnte nicht entfernt werden: " + candidate);
+            emit changed();
+            return;
+        }
+    }
     written = false;
     restored = false;
-    QFile::remove(path);
-    QFile::remove(path + ".previous");
+    preservePrevious = false;
+    decisionPending = false;
+    if (!sessionClosed && document->dirty())
+        timer.start();
     emit changed();
 }
 
 void Recovery::closeSession() {
+    sessionClosed = true;
     timer.stop();
     if (written || restored)
         clear();

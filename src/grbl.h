@@ -1,21 +1,30 @@
 #pragma once
+#include "controllersession.h"
 #include "job.h"
 #include <QObject>
 #include <QPointF>
 #include <QSerialPort>
 #include <QStringList>
 #include <QTimer>
-class GrblSession : public QObject {
+class GrblSession : public ControllerSession {
     Q_OBJECT
   public:
-    explicit GrblSession(QObject *parent = nullptr);
-    bool open(const QString &port);
-    void close();
+    explicit GrblSession(QObject *parent = nullptr,
+                         DeviceProfile profile = DeviceProfile::m3Reference());
+    ~GrblSession() override;
+    bool open(const QString &port) override;
+    ControllerStatus status() const override {
+        return {connected(), ready(),  busy(),   executing(), paused,
+                firing,      progress, position, state};
+    }
+    QStringList logEntries() const override { return log; }
+    const DeviceProfile &deviceProfile() const override { return m_deviceProfile; }
+    void close() override;
     bool connected() const { return serial.isOpen(); }
     bool ready() const;
     bool configurationValid() const {
-        return version && laserMode && powerScale && reportMm && coordinateSystem && bedWidth &&
-               bedHeight;
+        return version && laserMode && powerScale && minimumPower && reportMm && coordinateSystem &&
+               bedWidth && bedHeight;
     }
     bool busy() const { return !queue.isEmpty() || waitingIdle || waitingAck; }
     bool executing() const { return busy() && !handshaking; }
@@ -24,20 +33,18 @@ class GrblSession : public QObject {
     QPointF position;
     QString state = "Getrennt";
     QStringList log;
-    void start(const JobPlan &job);
-    bool overrides(int feed, int power);
+    void start(const JobPlan &job) override;
+    bool overrides(int feed, int power) override;
     int feedOverride = 100, powerOverride = 100;
     bool overrideFeedback = false;
     bool commands(const QStringList &lines, bool buffered = false);
-    void pause();
-    void stop();
-    void jog(double dx, double dy);
-    void home();
-    void zero();
-    void focus(bool on);
-    void frame(const QVariantMap &bounds);
-  signals:
-    void changed();
+    void pause() override;
+    void stop() override;
+    void jog(double dx, double dy) override;
+    void home() override;
+    void zero() override;
+    void focus(bool on) override;
+    void frame(const QVariantMap &bounds) override;
 
   private:
     void receive();
@@ -46,6 +53,8 @@ class GrblSession : public QObject {
     void fail(const QString &message);
     void append(const QString &message);
     void handshake();
+    bool insideMachineBed(const QPointF &workPoint) const;
+    const DeviceProfile m_deviceProfile;
     QSerialPort serial;
     QTimer poll, timeout, focusTimer;
     QByteArray input;
@@ -54,6 +63,12 @@ class GrblSession : public QObject {
     bool reportMm = false, coordinateSystem = false, bedWidth = false, bedHeight = false;
     bool version = false, laserMode = false, powerScale = false, knownPosition = false,
          homing = false;
+    bool minimumPower = false, knownOutput = false, activeInputs = false;
+    double reportedOutput = 0;
+    bool contaminatedConfiguration = false, pauseRequested = false;
+    bool handlingFailure = false;
+    bool zeroPending = false;
+    int configurationRetries = 0;
     QString controllerState;
     QPointF offset;
     bool knownOffset = false;

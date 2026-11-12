@@ -6,6 +6,11 @@ source_dir="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 output_dir="${1:-$source_dir/dist}"
 mkdir -p "$output_dir"
 output_dir="$(cd -- "$output_dir" && pwd)"
+python3 - "$output_dir" <<'PY'
+import pathlib, sys
+if any(pathlib.Path(sys.argv[1]).iterdir()):
+    sys.exit('Use an empty output directory for a new candidate')
+PY
 . /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" == 26.04 && "$(dpkg --print-architecture)" == amd64 ]] || {
     echo 'Package platform must be Ubuntu 26.04 amd64.' >&2; exit 2;
@@ -14,7 +19,7 @@ output_dir="$(cd -- "$output_dir" && pwd)"
     echo 'Commit changes before packaging: binaries and source must match an exact revision.' >&2; exit 2;
 }
 revision="$(git -C "$source_dir" rev-parse HEAD)"
-version='0.9.0-beta.1'
+version="$(cmake -DBLAZER_PRINT_VERSION=ON -P "$source_dir/cmake/Version.cmake")"
 work_dir="$(mktemp -d /tmp/blazer-package.XXXXXXXX)"
 trap 'rm -rf -- "$work_dir"' EXIT
 archive_root="blazer-studio-$version"
@@ -44,9 +49,18 @@ manifest = dict(application='Blazer Studio', version=version, revision=revision,
 with open(os.path.join(out, 'BUILD-MANIFEST.json'), 'w') as f:
     json.dump(manifest, f, indent=2); f.write('\n')
 PY
-cp "$source_dir/docs/beta/START.md" "$source_dir/docs/beta/TEST_PROTOCOL.md" \
-   "$source_dir/docs/beta/KNOWN_LIMITATIONS.md" "$output_dir/"
+cmake --install "$work_dir/build" --component Documentation --prefix "$work_dir/documentation-root"
+cp -a "$work_dir/documentation-root/share/doc/blazer-studio/." "$output_dir/"
+python3 "$work_dir/$archive_root/tools/check-doc-links.py" "$output_dir"
 rm -rf -- "$output_dir/_CPack_Packages"
-(cd "$output_dir" && sha256sum -- *.deb *.tar.gz BUILD-MANIFEST.json START.md \
-    TEST_PROTOCOL.md KNOWN_LIMITATIONS.md > SHA256SUMS)
+python3 - "$output_dir" <<'PY'
+import hashlib, pathlib, sys
+out = pathlib.Path(sys.argv[1])
+files = sorted(p for p in out.rglob('*') if p.is_file() and p.name != 'SHA256SUMS')
+with (out / 'SHA256SUMS').open('w') as f:
+    for path in files:
+        with path.open('rb') as source:
+            digest = hashlib.file_digest(source, 'sha256').hexdigest()
+        f.write(f'{digest}  {path.relative_to(out)}\n')
+PY
 echo "Candidate ready in $output_dir (hardware and external usability acceptance pending)."

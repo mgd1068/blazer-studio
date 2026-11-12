@@ -21,9 +21,12 @@ class Simulator : public QObject {
   public:
     enum class Mode { Ready, Disconnected, Running, Paused, Framing, Fault };
     explicit Simulator(QObject *parent = nullptr);
+    bool setDeviceProfile(const DeviceProfile &profile);
     void setJob(const JobPlan &job) {
         if (!busy())
-            m_job = job;
+            m_job = job.deviceProfile().outputFingerprint() == m_deviceProfile.outputFingerprint()
+                        ? job
+                        : JobPlan(m_deviceProfile);
     }
     virtual bool ready() const { return connected() && !busy() && !firing(); }
     virtual bool connected() const { return m_mode != Mode::Disconnected && m_mode != Mode::Fault; }
@@ -55,6 +58,7 @@ class Simulator : public QObject {
     void clearOutputs();
     void tick();
     JobPlan m_job;
+    DeviceProfile m_deviceProfile = DeviceProfile::m3Reference();
     Mode m_mode = Mode::Ready;
     bool m_firing = false;
     double m_x = 100, m_y = 75, m_progress = 0;

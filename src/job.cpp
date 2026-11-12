@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <cmath>
 namespace {
-constexpr int maxMoves = 500000;
+constexpr int maxMoves = JobPlan::maximumMoves;
 class Capture : public QPaintEngine {
   public:
     Capture() : QPaintEngine(QPaintEngine::AllFeatures) {}
@@ -253,11 +253,6 @@ QPainterPath svgGlobalClip(const QByteArray &bytes, const QRectF &target, bool &
     painter.end();
     return device.engine.area;
 }
-QString num(double n) {
-    if (std::abs(n) < .0005)
-        n = 0;
-    return QString::number(n, 'f', 3);
-}
 } // namespace
 QPainterPath JobPlanner::geometry(const Artwork &a, QString &error, bool fill) {
     QPainterPath p;
@@ -319,20 +314,30 @@ JobPlan JobPlanner::build(const Document &d) {
     return build(d.jobInput());
 }
 JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
-    JobPlan job;
+    JobPlan job(d.deviceProfile);
+    const auto bed = d.deviceProfile.workArea();
     auto aborted = [&]() {
-        JobPlan result;
+        JobPlan result(d.deviceProfile);
         result.cancelled = true;
         result.errors = {"Berechnung abgebrochen."};
         return result;
     };
     if (isCancelled(cancel))
         return aborted();
+    if (!d.deviceProfile.declares("motion-xy")) {
+        job.errors = {"Das Profil beschreibt keine XY-Bewegungsplanung."};
+        return job;
+    }
+    if (bed.width() > Geometry::coordinateLimit || bed.height() > Geometry::coordinateLimit) {
+        job.errors = {"Arbeitsraum überschreitet das aktuelle Planungskoordinatenlimit (2000 mm)."};
+        return job;
+    }
     if (d.layers.size() < 2 || d.layers.size() > 64 || d.activePage < 0 || d.activePage >= 100) {
         job.errors = {"Ungültiger Projektstand für die Berechnung."};
         return job;
     }
     for (const auto &art : d.items) {
+        if (art.toolLayer<0 || art.toolLayer>2) {job.errors={"Ungültige Hilfsformzuordnung."};return job;}
         auto operations = art.extraOperations;
         operations.prepend(art.layer);
         for (int operation : operations)
@@ -345,13 +350,19 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     auto add = [&](QPointF point, double feed, double power, int layer, bool rapid, int slice = 0) {
         if (isCancelled(cancel))
             return false;
+        if (!std::isfinite(feed) || feed < 1 || feed > 100000 || !std::isfinite(power) ||
+            power < 0 || power > 100) {
+            job.errors << "Ungültiger physischer Vorschub oder Prozentwert.";
+            return false;
+        }
         if (job.moves.size() >= maxMoves) {
             if (!job.errors.contains("Job überschreitet 500000 Segmente."))
                 job.errors << "Job überschreitet 500000 Segmente.";
             return false;
         }
         if (!std::isfinite(point.x()) || !std::isfinite(point.y()) || point.x() < -.00001 ||
-            point.y() < -.00001 || point.x() > 200.00001 || point.y() > 150.00001) {
+            point.y() < -.00001 || point.x() > bed.width() + .00001 ||
+            point.y() > bed.height() + .00001) {
             job.errors << "Laserpfad außerhalb des Arbeitsraums.";
             return false;
         }
@@ -377,7 +388,7 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     for (const auto &original : d.items) {
         if (isCancelled(cancel))
             return aborted();
-        if (original.page != d.activePage)
+        if (original.toolLayer != 0 || original.page != d.activePage)
             continue;
         QList<int> operations{original.layer};
         operations.append(original.extraOperations);
@@ -392,7 +403,7 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
                     settings[it.key()] = it.value();
             if (!a.visible || !settings["enabled"].toBool() || settings["power"].toDouble() <= 0)
                 continue;
-            if (!Geometry::insideBed(a.bounds)) {
+            if (!Geometry::insideBed(a.bounds, bed)) {
                 job.errors << a.name + ": außerhalb des Arbeitsraums.";
                 continue;
             }
@@ -420,8 +431,8 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
             }
             const auto extent = path.boundingRect();
             if (!finite || !std::isfinite(extent.width()) || !std::isfinite(extent.height()) ||
-                extent.left() < -.00001 || extent.top() < -.00001 || extent.right() > 200.00001 ||
-                extent.bottom() > 150.00001) {
+                extent.left() < -.00001 || extent.top() < -.00001 ||
+                extent.right() > bed.width() + .00001 || extent.bottom() > bed.height() + .00001) {
                 job.errors << a.name + ": Kontur außerhalb des Arbeitsraums oder ungültig.";
                 continue;
             }
@@ -851,53 +862,14 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     }
     return job;
 }
-QStringList JobPlan::gcode(const Cancellation &cancel) const {
-    if (isCancelled(cancel))
-        return {};
-    if (valid() && !commands.isEmpty())
-        return commands;
-    if (!valid())
-        return {};
-    QStringList lines{"M5",  "(Blazer Studio: GRBL laser mode, $30=1000, $32=1, G54)",
-                      "G21", "G90",
-                      "G54", "G17",
-                      "G94", "S0"};
-    bool emitting = false;
-    double lastPower = -1, lastFeed = -1;
-    int lastSlice = 0;
-    for (const auto &m : moves) {
-        if (isCancelled(cancel))
-            return {};
-        if (m.slice != 0 && m.slice != lastSlice) {
-            lines << (m.slice > 0 ? "(Relief slice " : "(Relief cleanup after ") +
-                         QString::number(std::abs(m.slice)) + ")";
-            lastSlice = m.slice;
-        }
-        if (m.rapid) {
-            if (emitting) {
-                lines << "M5";
-                emitting = false;
-            }
-            lines << "G0 X" + num(m.to.x()) + " Y" + num(m.to.y());
-        } else {
-            if (!emitting || m.power != lastPower) {
-                lines << "M4 S" + QString::number(qRound(m.power * 10));
-                emitting = true;
-                lastPower = m.power;
-            }
-            auto line = "G1 X" + num(m.to.x()) + " Y" + num(m.to.y());
-            if (m.speed != lastFeed) {
-                line += " F" + num(m.speed);
-                lastFeed = m.speed;
-            }
-            lines << line;
-        }
-    }
-    lines << "M5 S0" << "G0";
-    return lines;
-}
 QVariantMap JobPlan::summary() const {
-    return {{"valid", valid()},
+    const auto outputError = ControllerAdapters::outputError(m_deviceProfile);
+    return {{"outputSupported", outputError.isEmpty()},
+            {"outputError", outputError},
+            {"geometryValid", valid()},
+            {"deviceId", m_deviceProfile.id()},
+            {"outputFingerprint", QString::fromLatin1(m_deviceProfile.outputFingerprint())},
+            {"valid", valid()},
             {"errors", errors},
             {"segments", moves.size()},
             {"workLength", workLength},
@@ -907,12 +879,23 @@ QVariantMap JobPlan::summary() const {
 }
 
 JobPlan JobPlanner::materialTest(double minSpeed, double maxSpeed, double minPower, double maxPower,
-                                 int steps) {
-    JobPlan job;
+                                 int steps, const DeviceProfile &profile) {
+    JobPlan job(profile);
+    if (!profile.declares("motion-xy")) {
+        job.errors = {"Das Profil beschreibt keine XY-Bewegungsplanung."};
+        return job;
+    }
     if (!std::isfinite(minSpeed) || !std::isfinite(maxSpeed) || !std::isfinite(minPower) ||
         !std::isfinite(maxPower) || steps < 2 || steps > 10 || minSpeed < 1 || maxSpeed > 7000 ||
         minSpeed > maxSpeed || minPower < 0 || maxPower > 100 || minPower > maxPower) {
         job.errors << "Materialtest: 2–10 Stufen, 1–7000 mm/min und 0–100 % prüfen.";
+        return job;
+    }
+    const double edge = 10 + (steps - 1) * 8 + 5;
+    if (edge > profile.workArea().width() || edge > profile.workArea().height() ||
+        profile.workArea().width() > Geometry::coordinateLimit ||
+        profile.workArea().height() > Geometry::coordinateLimit) {
+        job.errors = {"Materialtest passt nicht in den unterstützten Arbeitsraum dieses Profils."};
         return job;
     }
     QPointF head(0, 0);

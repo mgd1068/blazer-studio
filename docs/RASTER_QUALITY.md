@@ -9,7 +9,7 @@ Importierte Bilder beginnen bei X10/Y10 mit höchstens 100 mm an der längsten S
 - Maximal 32 MiPixel dekodierte Bilder im Dokument; Kopien zählen für dieses Budget mit.
 - Maximal 40 MiB eingebettete Grafikdaten; ein sehr großes oder schlecht komprimierbares PNG kann deshalb auch unterhalb 4096 × 4096 abgelehnt werden.
 - Maximal 64 MiB für die Projektdatei einschließlich Base64 und Metadaten. Autosave und Projektimport verwenden dieselbe Dateigrenze.
-- Projektformat **7** liest Formate **1–6**. Neu gespeicherte Projekte benötigen 0.7 oder neuer; ältere Programme sollen sie ausdrücklich ablehnen.
+- Mit 0.7 wurde Projektformat **7** eingeführt. Der Entwicklungsstand nach beta.2 verwendet inzwischen [Format 8 mit Notizen](PROJECTS.md) und liest Formate 1–7. Ältere Programme einschließlich beta.2 müssen Format 8 ausdrücklich ablehnen.
 - Die bestehenden Jobgrenzen bleiben bestehen: höchstens 500000 Bewegungen und die jeweiligen Raster-/Schichtbudgets. Überschreitungen erzeugen einen ungültigen Job statt einer stillschweigenden Detailreduktion.
 
 Die Fehlerverteilung von Floyd-Steinberg und Atkinson verwendet drei wiederverwendete Zeilen statt einer Fehler-Matrix über das ganze Bild. Dadurch wächst dieser zusätzliche Puffer mit der Bildbreite. Zeiger auf die Fehlerzeilen sowie unveränderliche Masken- und Modusschalter werden vor den inneren Schleifen ermittelt. Ein- und Ausgabebitmap sowie der berechnete Auftrag liegen weiterhin im Speicher. Seit 0.8 läuft der Jobaufbau in der grafischen Anwendung abbrechbar im Hintergrund; Bitmaps und Auftragsdaten bleiben im Speicher. Vollständiges Streaming ist weiterhin offen. [Details](STABILIZATION_08.md).

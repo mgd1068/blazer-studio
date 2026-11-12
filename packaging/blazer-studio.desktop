@@ -6,5 +6,5 @@ Exec=blazer-studio %f
 Icon=blazer-studio
 Terminal=false
 Categories=Graphics;Engineering;
-MimeType=application/x-blazer-studio;
+MimeType=application/x-blazer-studio;application/x-blazer-template;
 StartupNotify=true

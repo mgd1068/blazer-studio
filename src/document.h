@@ -1,5 +1,7 @@
 #pragma once
 #include "batchexport.h"
+#include "guide.h"
+#include "imageexport.h"
 #include "job.h"
 #include "jobpreparation.h"
 #include "relief.h"
@@ -9,17 +11,28 @@
 #include <QPainterPath>
 #include <QUrl>
 #include <QVariantMap>
+#include <functional>
 #include <optional>
 
 class Document : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QVariantMap beginnerSummary READ beginnerSummary NOTIFY changed)
+    Q_PROPERTY(bool imageExportBusy READ imageExportBusy NOTIFY changed)
     Q_PROPERTY(bool batchBusy READ batchBusy NOTIFY changed)
     Q_PROPERTY(QString planningState READ planningState NOTIFY changed)
     Q_PROPERTY(bool planningBusy READ planningBusy NOTIFY changed)
     Q_PROPERTY(QVariantMap jobSummary READ jobSummary NOTIFY changed)
+    Q_PROPERTY(QVariantList guides READ guides NOTIFY changed)
+    Q_PROPERTY(bool guidesVisible READ guidesVisible NOTIFY changed)
+    Q_PROPERTY(bool guideSnapping READ guideSnapping NOTIFY changed)
+    Q_PROPERTY(double bedWidth READ bedWidth NOTIFY deviceProfileChanged)
+    Q_PROPERTY(double bedHeight READ bedHeight NOTIFY deviceProfileChanged)
+    Q_PROPERTY(QVariantMap deviceInfo READ deviceInfo NOTIFY deviceProfileChanged)
     Q_PROPERTY(QStringList pages READ pages NOTIFY changed)
     Q_PROPERTY(int activePage READ activePage NOTIFY changed)
+    Q_PROPERTY(QVariantList history READ history NOTIFY changed)
+    Q_PROPERTY(int historyPosition READ historyPosition NOTIFY changed)
+    Q_PROPERTY(quint64 historyRevision READ historyRevision NOTIFY changed)
     Q_PROPERTY(QVariantList nodes READ nodes NOTIFY selectionChanged)
     Q_PROPERTY(int count READ count NOTIFY changed)
     Q_PROPERTY(int selected READ selected WRITE select NOTIFY selectionChanged)
@@ -27,6 +40,8 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QVariantList selectedRows READ selectedRows NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList layers READ layers NOTIFY changed)
     Q_PROPERTY(QString title READ title NOTIFY changed)
+    Q_PROPERTY(QString notes READ notes NOTIFY changed)
+    Q_PROPERTY(QUrl fileUrl READ fileUrl NOTIFY fileUrlChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY changed)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY changed)
@@ -46,18 +61,46 @@ class Document : public QAbstractListModel {
         GroupRole,
         GroupNameRole,
         GroupFirstRole,
-        OnPageRole
+        OnPageRole,
+        ToolLayerRole
     };
     explicit Document(QObject *parent = nullptr);
     void setBackgroundPlanning(bool enabled);
     bool backgroundPlanning() const { return m_background; }
     JobInput jobInput() const;
+    const DeviceProfile &deviceProfile() const { return m_deviceProfile; }
+    QSizeF workArea() const { return m_deviceProfile.workArea(); }
+    double bedWidth() const { return workArea().width(); }
+    double bedHeight() const { return workArea().height(); }
+    QVariantMap deviceInfo() const {
+        auto info = m_deviceProfile.legacyUiProperties();
+        info["outputFingerprint"] = QString::fromLatin1(m_deviceProfile.outputFingerprint());
+        return info;
+    }
+    bool setDeviceProfile(const DeviceProfile &profile);
+    void addDeviceProfileChangeGuard(std::function<bool()> guard) {
+        m_profileGuards.append(std::move(guard));
+    }
     Q_INVOKABLE void cancelPlanning();
     Q_INVOKABLE void retryPlanning();
     QString planningState() const;
     bool planningBusy() const;
+    bool imageExportBusy() const { return m_imageExport.busy(); }
+    Q_INVOKABLE bool exportImage(const QUrl &url, bool processed = true, const QString &expectedId = {}, quint64 expectedRevision = 0);
+    Q_INVOKABLE void cancelImageExport() { m_imageExport.cancel(); }
     bool batchBusy() const { return m_batch.busy(); }
     QImage imagePreview(const Artwork &item) const;
+    QVariantList guides() const;
+    const QList<Guide> &allGuides() const { return m_guides; }
+    bool guidesVisible() const { return m_guidesVisible; }
+    bool guideSnapping() const { return m_guideSnapping; }
+    Q_INVOKABLE QString addGuide(const QString &axis, double position);
+    Q_INVOKABLE bool setGuidePosition(const QString &id, double position);
+    Q_INVOKABLE bool setGuideLocked(const QString &id, bool locked);
+    Q_INVOKABLE bool removeGuide(const QString &id);
+    Q_INVOKABLE void clearGuides();
+    Q_INVOKABLE void setGuidesVisible(bool visible);
+    Q_INVOKABLE void setGuideSnapping(bool enabled);
     QStringList pages() const { return m_pages; }
     int activePage() const { return m_activePage; }
     QVariantList nodes() const;
@@ -66,6 +109,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE int addOperation(const QString &name, const QString &mode);
     Q_INVOKABLE void assignOperations(const QVariantList &rows);
     Q_INVOKABLE bool addPage(const QString &name);
+    Q_INVOKABLE bool copyPage(int page, const QString &name);
     Q_INVOKABLE void activatePage(int page);
     Q_INVOKABLE bool removePage(int page);
     bool outputs(const Artwork &item) const;
@@ -96,10 +140,17 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void scaleSelection(double percent);
     QVariantList layers() const { return m_layers; }
     QString title() const { return m_title; }
+    QString notes() const { return m_notes; }
+    QUrl fileUrl() const { return m_fileUrl; }
+    Q_INVOKABLE bool setMetadata(const QString &title, const QString &notes);
     QString message() const { return m_message; }
     bool dirty() const { return m_dirty; }
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
+    QVariantList history() const;
+    int historyPosition() const { return m_undo.size(); }
+    quint64 historyRevision() const { return m_historyRevision; }
+    Q_INVOKABLE bool restoreHistory(int position, quint64 revision);
     double pathLength() const;
     const JobPlan &job() const;
     QVariantMap jobSummary() const;
@@ -113,6 +164,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE bool exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
                                         double minPower, double maxPower, int steps);
     QVariantMap activeBounds() const;
+    Q_INVOKABLE QVariantMap framingBounds(const QString &scope = "job") const;
     QStringList issues() const;
     QVariantMap material() const { return m_material; }
     bool materialModified() const;
@@ -122,10 +174,13 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void demo();
     Q_INVOKABLE void newProject();
     Q_INVOKABLE void addShape(const QString &kind);
+    Q_INVOKABLE bool copySelectionToClipboard(bool cut = false);
+    Q_INVOKABLE bool pasteFromClipboard(bool inPlace = false);
     Q_INVOKABLE void removeSelected();
     Q_INVOKABLE void duplicateSelected();
     Q_INVOKABLE void toggleVisible(int row);
     Q_INVOKABLE void setProperty(const QString &name, const QVariant &value);
+    Q_INVOKABLE bool setToolLayer(int toolLayer);
     Q_INVOKABLE void setLayer(int layer);
     Q_INVOKABLE void setLayerSetting(int layer, const QString &key, const QVariant &value);
     QVariantMap beginnerSummary() const;
@@ -136,14 +191,19 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE bool importSvg(const QUrl &url);
     Q_INVOKABLE bool save(const QUrl &url);
     Q_INVOKABLE bool open(const QUrl &url);
+    Q_INVOKABLE bool saveTemplate(const QUrl &url);
+    Q_INVOKABLE bool newFromTemplate(const QUrl &url);
     void beginMove();
     void moveSelection(QPointF position);
-    void finishMove();
-    void notify(const QString &message);
+    Q_INVOKABLE void finishMove();
+    Q_INVOKABLE void notify(const QString &message);
   signals:
+    void deviceProfileChanged();
     void changed();
     void selectionChanged();
     void messageChanged();
+    void projectFileUsed(const QUrl &file);
+    void fileUrlChanged();
 
   private:
     struct Snapshot {
@@ -155,35 +215,58 @@ class Document : public QAbstractListModel {
         QList<int> selection;
         QStringList pages;
         int activePage = 0;
+        QString notes;
+        QList<Guide> guides;
+        bool guidesVisible = true, guideSnapping = true;
+        DeviceProfile deviceProfile = DeviceProfile::m3Reference();
     };
     Snapshot snapshot() const;
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
     void applySnapshot(const Snapshot &state);
+    bool canApplyDeviceProfile(const DeviceProfile &profile);
     QByteArray serialize() const;
+    QByteArray serialize(const Snapshot &state) const;
     std::optional<Snapshot> parse(const QByteArray &json) const;
-    void checkpoint();
+    void checkpoint(const QString &label = QStringLiteral("Bearbeitung"));
+    void clearHistory();
     void refresh(int row = -1);
+    void refreshGuides();
     void markClean();
+    void setFileUrl(const QUrl &url);
     bool transformSelection(const QRectF &bounds, bool history = true);
     void normalizeGroups();
+    void removeSelection(const QString &label);
     bool canAppend(const Artwork &item);
     static bool validBudget(const QList<Artwork> &items);
-    static bool bakePath(Artwork &item, const QPainterPath &path);
+    bool bakePath(Artwork &item, const QPainterPath &path) const;
     void appendArtwork(const Artwork &item);
     QList<Artwork> m_items;
+    DeviceProfile m_deviceProfile = DeviceProfile::m3Reference();
+    QList<std::function<bool()>> m_profileGuards;
     QVariantList m_layers;
     QVariantMap m_material;
     int m_selected = -1;
     QList<int> m_selection;
+    QList<Guide> m_guides;
+    bool m_guidesVisible = true, m_guideSnapping = true;
     QStringList m_pages{"Blatt 01"};
     int m_activePage = 0;
-    QString m_title = "Werkstattschild", m_message;
+    QString m_title = "Werkstattschild", m_notes, m_message;
+    QUrl m_fileUrl;
     bool m_dirty = false;
     Snapshot m_saved;
-    QList<Snapshot> m_undo, m_redo;
+    struct HistoryEntry {
+        Snapshot state;
+        QString label;
+    };
+    QList<HistoryEntry> m_undo, m_redo;
+    quint64 m_historyRevision = 0;
     std::optional<Snapshot> m_beforeMove;
     mutable std::optional<JobPlan> m_job;
     JobPreparation m_preparation;
     BatchExport m_batch;
+    ImageExport m_imageExport;
     bool m_background = false;
+    QByteArray m_clipboardPasteHash;
+    int m_clipboardPastePage = -1, m_clipboardPasteCount = 0;
 };

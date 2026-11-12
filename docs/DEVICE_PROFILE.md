@@ -1,5 +1,7 @@
 # Blaze X M3 – importiertes Profil
 
+Das M3 ist das erste Referenzgerät. Weitere Laser sind als Produktziel eingeplant; Profil, Controlleradapter und Geräteabnahme werden getrennt entwickelt. Der [Mehrgeräteplan](MULTI_DEVICE_PLAN.md) beschreibt den Profilvertrag, die durchgängigen Profildaten für bekannte GRBL-XY-Projekte und den offenen Ausbau um weitere Adapter. Aktuell ist weiterhin ausschließlich die bisherige M3-Konfiguration an die Laufzeit angebunden.
+
 Ausgelesen am 09.11.2026 aus der vorhandenen Installation, ausschließlich Dateizugriff. Die Originalkonfiguration wurde nicht verändert und kein serieller Anschluss geöffnet.
 
 Quelle: `~/.config/LightBurn/prefs.ini`, ein Geräteprofil mit Anzeigename **M3**, Controller **GRBL**, Profilpfad `GRBL`. Die vorhandenen Projekthinweise `~/Projekte/Laser/Katzenschild/Hinweise.txt` nennen dazu **Blaze X M3 / 5-W-Modul** und denselben Arbeitsraum. Die Modulbezeichnung stammt aus diesen Hinweisen, nicht aus einer Hardwareabfrage.
@@ -27,3 +29,6 @@ Seit Projektformat 2 verwenden Objektkoordinaten und Maschinenmarker einheitlich
 ## Ergänzte Herstellerquelle
 
 Die vom Nutzer genannte [Maschineneinstellungsseite](https://de.blazexlaser.com/pages/maschineneinstellung) ist als separate [Materialreferenz](MANUFACTURER_MATERIALS.md) erfasst. Sie nennt M3 Pro; eine Gleichsetzung mit dem eingerichteten M3 ist nicht bestätigt.
+
+
+Aktueller Material- und Betriebsstand vom 11./12.11.2026: [Geräte und Materialabnahme](HARDWARE_ACCEPTANCE.md). Digitale Leistungsskala und erste Kraftpapierwirkung sind bestätigt; eine optische Leistungsmessung und vollständige Geräte-/Materialfreigabe fehlen.

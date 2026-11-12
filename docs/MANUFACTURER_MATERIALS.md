@@ -42,3 +42,17 @@ python3 tools/import_manufacturer_materials.py /tmp/blazex-settings.html --retri
 ```
 
 Nach einer Quellenänderung muss das Schema-/Tabellenmapping geprüft werden. Das Skript bricht ab, wenn die erwarteten Tabellenzahlen oder Wertebereiche nicht stimmen. Es gibt keine automatische Aktualisierung im Programm.
+
+
+## Umgang mit den Materialversuchen vom 11 und 12 November 2026
+
+Die 64 Quellzeilen wurden am 11.11. nochmals mit einem frischen Abruf verglichen und blieben inhaltlich unverändert. Der gebündelte Katalog behält seine Herkunftsmetadaten. Herstellerwerte bleiben auf Nutzerwunsch unverändert; es wird kein pauschaler Leistungs-Offset aus den Kraftpapierversuchen übernommen.
+
+Die Gegenlichtbefunde und der nicht vollständig durchgehende Ausschnitt werden im [Geräteprotokoll](HARDWARE_ACCEPTANCE.md) getrennt bewertet. Insbesondere sind ein eigener Gravur-Durchgang und der eigene Kraftpapier-Schnittversuch keine nachträglich ergänzten Herstellerangaben. Die vollständige Bibliothek wird durch diese Einzelversuche nicht als getestet markiert.
+
+Für einen Vergleich zunächst in eine getrennte Datei extrahieren, damit der gebündelte Katalog unverändert bleibt:
+
+```bash
+python3 tools/import_manufacturer_materials.py /tmp/blazex-settings.html \
+  --retrieved-on 2026-11-11 --output /tmp/manufacturer-comparison.json
+```

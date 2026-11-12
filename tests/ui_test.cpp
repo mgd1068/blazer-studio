@@ -7,7 +7,9 @@
 #include "workspace.h"
 #include <QFile>
 #include <QJsonDocument>
+#include <QMouseEvent>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -32,10 +34,278 @@ class UiMachine : public Simulator {
 class UiTest : public QObject {
     Q_OBJECT
   private slots:
-    void editNavigateAndFocus() {
+    void initTestCase() {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
+    }
+    void startupSafetyIsBilingualAndReturnsEveryLaunch_data() {
+        QTest::addColumn<bool>("completed");
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("new-light") << false << false;
+        QTest::newRow("returning-light") << true << false;
+        QTest::newRow("new-compact-dark") << false << true;
+        QTest::newRow("returning-compact-dark") << true << true;
+    }
+    void startupSafetyIsBilingualAndReturnsEveryLaunch() {
+        QFETCH(bool, completed);
+        QFETCH(bool, dark);
+        QTemporaryDir storage;
+        Document project;
+        UiMachine machine;
+        MaterialLibrary library(storage.filePath("materials.json"));
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        Registration registration;
+        if (completed) QVERIFY(services.finishOnboarding());
+        const auto original = project.projectBytes();
+        for (int launch = 0; launch < 2; ++launch) {
+            QQmlApplicationEngine engine;
+            auto *context = engine.rootContext();
+            context->setContextProperty("project", &project);
+            context->setContextProperty("machine", &machine);
+            context->setContextProperty("appServices", &services);
+            context->setContextProperty("materialLibrary", &library);
+            context->setContextProperty("cameraRegistration", &registration);
+            engine.load(QUrl::fromLocalFile(QStringLiteral(BLAZER_SOURCE_DIR "/qml/Main.qml")));
+            QVERIFY(!engine.rootObjects().isEmpty());
+            auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+            QVERIFY(window);
+            if (dark) { window->resize(1180, 760); window->setProperty("night", true); }
+            auto *warning = window->findChild<QObject *>("startupSafetyDialog");
+            QVERIFY(warning);
+            QTRY_VERIFY(warning->property("visible").toBool());
+            QVERIFY(warning->property("modal").toBool());
+            QVERIFY(!window->findChild<QObject *>("onboardingDialog")->property("visible").toBool());
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+            window->requestActivate();
+            QVERIFY(QTest::qWaitForWindowActive(window));
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTest::mouseClick(window, Qt::LeftButton, {}, QPoint(5, 200));
+            QVERIFY(warning->property("visible").toBool());
+            auto *german = window->findChild<QQuickItem *>("startupSafetyGerman");
+            auto *english = window->findChild<QQuickItem *>("startupSafetyEnglish");
+            QVERIFY(german); QVERIFY(english);
+            QVERIFY(german->property("text").toString().contains("hängenden Controller"));
+            QVERIFY(german->property("text").toString().contains("kein Laser-Aus garantieren"));
+            QVERIFY(english->property("text").toString().contains("frozen controller"));
+            QVERIFY(english->property("text").toString().contains("cannot guarantee"));
+            QTest::qWait(80);
+            for (auto *text : {german, english}) {
+                QVERIFY(text->height() >= text->property("contentHeight").toDouble());
+                QVERIFY(text->width() + 1 >= text->property("contentWidth").toDouble());
+            }
+            QVERIFY(warning->property("height").toDouble() < window->height());
+            if (launch == 0 && qEnvironmentVariableIsSet("BLAZER_SAFETY_SCREENSHOT_DIR")) {
+                const auto dir = qEnvironmentVariable("BLAZER_SAFETY_SCREENSHOT_DIR");
+                QVERIFY(QDir().mkpath(dir));
+                QVERIFY(window->grabWindow().save(dir + (dark ? "/safety-dark.png" : "/safety-light.png")));
+            }
+            auto *button = window->findChild<QQuickItem *>("acknowledgeStartupSafety");
+            QVERIFY(button);
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                             button->mapToScene(QPointF(button->width()/2, button->height()/2)).toPoint());
+            QTRY_VERIFY(!warning->property("visible").toBool());
+            if (!completed)
+                QTRY_VERIFY(window->findChild<QObject *>("onboardingDialog")->property("visible").toBool());
+            QCOMPARE(project.projectBytes(), original);
+            QCOMPARE(services.firstRun(), !completed);
+        }
+    }
+    void lengthFieldsConvertSuffixesAndPreserveUneditedPrecision() {
+        QTemporaryDir storage;
+        Document project;
+        Simulator machine;
+        ApplicationServices services(&project, &machine, storage.filePath("units.ini"));
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("appServices", &services);
+        QQmlComponent component(&engine, QUrl("qrc:/qt/qml/BlazerStudio/qml/NumberField.qml"));
+        std::unique_ptr<QObject> field(component.create());
+        QVERIFY2(field, qPrintable(component.errorString()));
+        auto *input = field->findChild<QObject *>("numericEditor");
+        QVERIFY(input);
+        QSignalSpy edited(field.get(), SIGNAL(edited(double)));
+        field->setProperty("value", 65.);
+        QVERIFY(services.setLengthUnit("in"));
+        QCOMPARE(field->property("shownUnit").toString(), QString("in"));
+        QCOMPARE(field->property("inputText").toString(), QString("2.5591"));
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QCOMPARE(edited.count(), 0);
+        QCOMPARE(field->property("value").toDouble(), 65.);
+        QVariant value;
+        QVERIFY(
+            QMetaObject::invokeMethod(field.get(), "numericValue", Q_RETURN_ARG(QVariant, value)));
+        QCOMPARE(value.toDouble(), 65.);
+        const QList<QPair<QString, double>> cases{
+            {"1,25 in", 31.75}, {"25.4 mm", 25.4}, {"2\"", 50.8}, {".5", 12.7}, {"1e-2 in", .254}};
+        for (const auto &entry : cases) {
+            field->setProperty("inputText", entry.first);
+            QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+            QVERIFY(!edited.isEmpty());
+            QVERIFY(qAbs(edited.takeLast()[0].toDouble() - entry.second) < 1e-10);
+        }
+        field->setProperty("inputText", "1/2 in");
+        const auto count = edited.count();
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QCOMPARE(edited.count(), count);
+        QVERIFY(services.setLengthUnit("mm"));
+        field->setProperty("inputText", "2.5");
+        QVERIFY(QMetaObject::invokeMethod(input, "textEdited"));
+        QVERIFY(services.setLengthUnit("in"));
+        QCOMPARE(field->property("shownUnit").toString(), QString("mm"));
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QCOMPARE(edited.takeLast()[0].toDouble(), 2.5);
+        field->setProperty("unit", "mm/min");
+        field->setProperty("value", 1234.);
+        QVERIFY(QMetaObject::invokeMethod(field.get(), "resetInput"));
+        QCOMPARE(field->property("shownUnit").toString(), QString("mm/min"));
+        QCOMPARE(field->property("inputText").toString(), QString("1234.0"));
+        field->setProperty("inputText", "1 in");
+        QVERIFY(QMetaObject::invokeMethod(input, "editingFinished"));
+        QVERIFY(edited.isEmpty());
+        Workspace workspace;
+        QSignalSpy changed(&workspace, &Workspace::imperialChanged);
+        QCOMPARE(workspace.snapStep(), .5);
+        workspace.setImperial(true);
+        QCOMPARE(workspace.snapStep(), .635);
+        QCOMPARE(changed.count(), 1);
+        workspace.setImperial(true);
+        QCOMPARE(changed.count(), 1);
+    }
+    void imperialDragSnapsInWorldUnitsAndIsOneUndoStep() {
+        class TestWorkspace : public Workspace {
+          public:
+            using Workspace::mouseMoveEvent;
+            using Workspace::mousePressEvent;
+            using Workspace::mouseReleaseEvent;
+        };
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        d.setProperty("x", 50.8);
+        d.setProperty("y", 50.8);
+        d.setProperty("width", 25.4);
+        d.setProperty("height", 25.4);
+        TestWorkspace workspace;
+        workspace.setWidth(1000);
+        workspace.setHeight(800);
+        workspace.setDocument(&d);
+        workspace.setImperial(true);
+        const auto bounds = workspace.selectedScreenBounds();
+        const QPointF start = bounds.center();
+        const double pixelsPerMm = bounds.width() / 25.4;
+        const auto before = d.projectBytes();
+        const auto position = d.historyPosition();
+        QMouseEvent press(QEvent::MouseButtonPress, start, start, Qt::LeftButton, Qt::LeftButton,
+                          Qt::AltModifier);
+        workspace.mousePressEvent(&press);
+        const QPointF end = start + QPointF(.27 * 25.4 * pixelsPerMm, -.08 * 25.4 * pixelsPerMm);
+        QMouseEvent move(QEvent::MouseMove, end, end, Qt::NoButton, Qt::LeftButton,
+                         Qt::AltModifier);
+        workspace.mouseMoveEvent(&move);
+        QMouseEvent release(QEvent::MouseButtonRelease, end, end, Qt::LeftButton, Qt::NoButton,
+                            Qt::AltModifier);
+        workspace.mouseReleaseEvent(&release);
+        QVERIFY(qAbs(d.items()[0].bounds.x() - 57.785) < 1e-9);
+        QVERIFY(qAbs(d.items()[0].bounds.y() - 52.705) < 1e-9);
+        QCOMPARE(d.historyPosition(), position + 1);
+        QVERIFY(d.job().valid());
+        QVERIFY(d.job().gcode().contains("G21"));
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        QVERIFY(workspace.imperial());
+    }
+    void objectEdgesSnapToVisibleGuidesAndAltDisablesTheTarget() {
+        class TestWorkspace : public Workspace {
+          public:
+            using Workspace::mouseMoveEvent; using Workspace::mousePressEvent;
+            using Workspace::mouseReleaseEvent;
+        };
+        for (int mode=0;mode<4;++mode) {
+            Document d; d.newProject(); d.addShape("rect");
+            d.addGuide("vertical",123.25);
+            if(mode==2)d.setGuidesVisible(false);
+            if(mode==3)d.setGuideSnapping(false);
+            TestWorkspace w; w.setWidth(910); w.setHeight(710); w.setDocument(&d);
+            const auto modifiers=mode==1 ? Qt::AltModifier : Qt::NoModifier;
+            const QPointF start(415,375), end(448.6,375);
+            QMouseEvent press(QEvent::MouseButtonPress,start,start,Qt::LeftButton,Qt::LeftButton,modifiers);
+            QMouseEvent move(QEvent::MouseMove,end,end,Qt::NoButton,Qt::LeftButton,modifiers);
+            QMouseEvent release(QEvent::MouseButtonRelease,end,end,Qt::LeftButton,Qt::NoButton,modifiers);
+            w.mousePressEvent(&press);w.mouseMoveEvent(&move);w.mouseReleaseEvent(&release);
+            QCOMPARE(d.items()[0].bounds.x(),mode==0 ? 73.25 : 73.5);
+            QCOMPARE(d.items()[0].bounds.y(),55.);
+        }
+    }
+    void rulersCreateMoveCancelAndLockGuidesWithoutLaserOutput() {
+        class TestWorkspace : public Workspace {
+          public:
+            using Workspace::mouseMoveEvent;
+            using Workspace::mousePressEvent;
+            using Workspace::mouseReleaseEvent;
+            using Workspace::mouseUngrabEvent;
+        };
+        Document d;
+        d.newProject();
+        TestWorkspace w;
+        w.setWidth(910);
+        w.setHeight(710);
+        w.setDocument(&d);
+        // Scale = 4 pixels/mm; bed origin = (55,55), Y=0 at 655.
+        auto send = [&](QEvent::Type type, QPointF pos) {
+            QMouseEvent e(type, pos, pos, type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton,
+                          type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton,
+                          Qt::NoModifier);
+            if (type == QEvent::MouseButtonPress)
+                w.mousePressEvent(&e);
+            else if (type == QEvent::MouseButtonRelease)
+                w.mouseReleaseEvent(&e);
+            else
+                w.mouseMoveEvent(&e);
+        };
+        const auto code = d.job().gcode();
+        send(QEvent::MouseButtonPress, {300, 40});
+        QVERIFY(w.guideDragging());
+        // Commit uses release position even when no last move event arrives.
+        send(QEvent::MouseButtonRelease, {300, 355});
+        QCOMPARE(d.allGuides().size(), 1);
+        QCOMPARE(d.allGuides()[0].axis, QString("horizontal"));
+        QCOMPARE(d.allGuides()[0].position, 75.);
+        const auto id = d.allGuides()[0].id;
+        const auto before = d.projectBytes();
+        const auto history = d.historyPosition();
+        send(QEvent::MouseButtonPress, {350, 355});
+        send(QEvent::MouseMove, {350, 315});
+        QCOMPARE(d.projectBytes(), before);
+        send(QEvent::MouseButtonRelease, {350, 315});
+        QCOMPARE(d.allGuides()[0].position, 85.);
+        QCOMPARE(d.historyPosition(), history + 1);
+        d.undo();
+        QCOMPARE(d.projectBytes(), before);
+        send(QEvent::MouseButtonPress, {350, 355});
+        send(QEvent::MouseMove, {350, 300});
+        w.cancelGuideDrag();
+        QVERIFY(!w.guideDragging());
+        QCOMPARE(d.projectBytes(), before);
+        QVERIFY(d.setGuideLocked(id, true));
+        send(QEvent::MouseButtonPress, {350, 355});
+        QVERIFY(!w.guideDragging());
+        send(QEvent::MouseButtonRelease, {350, 300});
+        QCOMPARE(d.allGuides()[0].position, 75.);
+        QVERIFY(d.setGuideLocked(id, false));
+        send(QEvent::MouseButtonPress, {350, 355});
+        send(QEvent::MouseButtonRelease, {10, 30});
+        QVERIFY(d.guides().isEmpty());
+        send(QEvent::MouseButtonPress, {30, 300});
+        send(QEvent::MouseButtonRelease, {255, 300});
+        QCOMPARE(d.allGuides()[0].axis, QString("vertical"));
+        QCOMPARE(d.allGuides()[0].position, 50.);
+        const auto vertical = d.projectBytes();
+        send(QEvent::MouseButtonPress, {300, 40});
+        w.mouseUngrabEvent();
+        QCOMPARE(d.projectBytes(), vertical);
+        QCOMPARE(d.job().gcode(), code);
+    }
+    void editNavigateAndFocus() {
         Document project;
         QTemporaryDir storage;
         MaterialLibrary library(storage.filePath("materials.json"));
@@ -60,6 +330,10 @@ class UiTest : public QObject {
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(w);
+        auto *startupSafety = w->findChild<QObject *>("startupSafetyDialog");
+        QVERIFY(startupSafety);
+        QTRY_VERIFY(startupSafety->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(startupSafety, "accept"));
         QCOMPARE(w->property("basic").toBool(), true);
         auto originalBytes = project.projectBytes();
         auto *intro = w->findChild<QObject *>("onboardingDialog");
@@ -456,9 +730,11 @@ class UiTest : public QObject {
         auto *operation = item("objectOperation3");
         QVERIFY(operation);
         click(operation);
-        QTest::keyClick(w, Qt::Key_End);
+        QTest::keyClick(w, Qt::Key_Home);
+        QTest::keyClick(w, Qt::Key_Down); // Cut operation; T1/T2 follow the normal operations.
         QTest::keyClick(w, Qt::Key_Return);
         QTRY_COMPARE(project.items()[3].layer, 1);
+        QCOMPARE(project.items()[3].toolLayer,0);
         QCOMPARE(project.items()[4].layer, 0);
         auto *widthInput = item("objectWidthInput");
         QVERIFY(widthInput);
@@ -701,7 +977,19 @@ class UiTest : public QObject {
         QVERIFY(!discard->property("visible").toBool());
         QVERIFY(!machine.busy());
     }
-    void recoveryDialogEscapeKeepsOldRecovery() {
+    void recoveryDialogExplicitDecisions_data() {
+        QTest::addColumn<bool>("incomingDirty");
+        QTest::addColumn<QString>("decision");
+        QTest::newRow("clean-keep") << false << QString("keep");
+        QTest::newRow("draft-keep") << true << QString("keep");
+        QTest::newRow("clean-restore") << false << QString("restore");
+        QTest::newRow("draft-restore") << true << QString("restore");
+        QTest::newRow("clean-discard") << false << QString("discard");
+        QTest::newRow("draft-discard") << true << QString("discard");
+    }
+    void recoveryDialogExplicitDecisions() {
+        QFETCH(bool, incomingDirty);
+        QFETCH(QString, decision);
         Document project;
         QTemporaryDir storage;
         QString recoveryPath;
@@ -717,9 +1005,13 @@ class UiTest : public QObject {
         original.close();
         project.newProject();
         Recovery recovery(&project, storage.filePath("recovery"));
+        if (incomingDirty)
+            project.addShape("text");
+        const auto incomingBytes=project.projectBytes();
         MaterialLibrary library(storage.filePath("materials.json"));
         UiMachine machine;
         ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        if(decision!="keep")QVERIFY(services.finishOnboarding());
         Registration cameraRegistration;
         QQmlApplicationEngine engine;
         auto *context = engine.rootContext();
@@ -737,13 +1029,107 @@ class UiTest : public QObject {
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
+        auto *startupSafety = window->findChild<QObject *>("startupSafetyDialog");
+        QVERIFY(startupSafety);
+        QTRY_VERIFY(startupSafety->property("visible").toBool());
+        QVERIFY(!window->findChild<QObject *>("recoveryDialog")->property("visible").toBool());
+        QVERIFY(recovery.pendingDecision());
+        QVERIFY(QMetaObject::invokeMethod(startupSafety, "accept"));
         auto *dialog = window->findChild<QObject *>("recoveryDialog");
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("visible").toBool());
         QVERIFY(!window->findChild<QObject *>("onboardingDialog")->property("visible").toBool());
         QVERIFY(QTest::qWaitForWindowExposed(window));
         QTest::qWait(50);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        auto clickRecovery = [&](const char *name) {
+            auto *button=window->findChild<QQuickItem *>(name);
+            if(!button || !button->isVisible() || !button->isEnabled())return false;
+            window->requestActivate();
+            if(!QTest::qWaitForWindowActive(window))return false;
+            for(int attempt=0;attempt<5;++attempt) {
+                const auto point=button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint();
+                QTest::mouseMove(window,point);
+                QTest::qWait(30);
+                if(button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint()!=point)continue;
+                QTest::mouseClick(window,Qt::LeftButton,{},point);
+                return true;
+            }
+            return false;
+        };
+        if(decision=="restore") {
+            QVERIFY(clickRecovery("restoreRecovery"));
+            QTRY_VERIFY(!dialog->property("visible").toBool());
+            QVERIFY(!recovery.pendingDecision());
+            QCOMPARE(project.projectBytes(),bytes);
+            QVERIFY(project.dirty());
+            QVERIFY(project.fileUrl().isEmpty());
+            QCOMPARE(project.history().last().toMap()["label"].toString(),QString("Wiederherstellung"));
+            const auto restoredFile=QUrl::fromLocalFile(storage.filePath("restored.blazer"));
+            QVERIFY(project.save(restoredFile));
+            QVERIFY(!project.dirty());
+            QVERIFY(!recovery.available());
+            Document check;
+            QVERIFY(check.open(restoredFile));
+            QCOMPARE(check.projectBytes(),bytes);
+            QVERIFY(window->close());
+            QTRY_VERIFY(!window->isVisible());
+            QVERIFY(!QFile::exists(recoveryPath));
+            return;
+        }
+        if(decision=="discard") {
+            QVERIFY(clickRecovery("discardRecovery"));
+            QTRY_VERIFY(!dialog->property("visible").toBool());
+            QVERIFY(!recovery.pendingDecision());
+            QCOMPARE(project.projectBytes(),incomingBytes);
+            QVERIFY(!QFile::exists(recoveryPath));
+            if(incomingDirty) {
+                QTest::qWait(1800);
+                QVERIFY(recovery.available());
+                QVERIFY(original.open(QIODevice::ReadOnly));
+                QCOMPARE(original.readAll(),incomingBytes);
+                original.close();
+                QVERIFY(!window->close());
+                QTRY_VERIFY(window->findChild<QObject *>("discardDialog")->property("visible").toBool());
+                QVERIFY(clickRecovery("discardChangesButton"));
+            } else QVERIFY(window->close());
+            QTRY_VERIFY(!window->isVisible());
+            QVERIFY(!QFile::exists(recoveryPath));
+            return;
+        }
         QTest::keyClick(window, Qt::Key_Escape);
+        if (incomingDirty) {
+            auto *discard = window->findChild<QObject *>("discardDialog");
+            QTRY_VERIFY(discard->property("visible").toBool());
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY(dialog->property("visible").toBool());
+            QVERIFY(recovery.pendingDecision());
+            const auto before = project.projectBytes();
+            QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+            QCOMPARE(project.projectBytes(), before);
+            QTest::qWait(1800);
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY(discard->property("visible").toBool());
+            auto *save = window->findChild<QQuickItem *>("saveChangesButton");
+            QVERIFY(save);
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                              save->mapToScene(QPointF(save->width()/2, save->height()/2)).toPoint());
+            auto *picker = window->findChild<QObject *>("saveProjectDialog");
+            QVERIFY(picker);
+            QTRY_VERIFY(picker->property("visible").toBool());
+            QVERIFY(QMetaObject::invokeMethod(picker, "reject"));
+            QTRY_VERIFY(dialog->property("visible").toBool());
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            window->requestActivate();
+            QVERIFY(QTest::qWaitForWindowActive(window));
+            QTRY_VERIFY(dialog->property("activeFocus").toBool());
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY(discard->property("visible").toBool());
+            auto *button = window->findChild<QQuickItem *>("discardChangesButton");
+            QVERIFY(button);
+            QTest::mouseClick(window, Qt::LeftButton, {},
+                              button->mapToScene(QPointF(button->width()/2, button->height()/2)).toPoint());
+        }
         QTRY_VERIFY(!window->isVisible());
         QVERIFY(original.open(QIODevice::ReadOnly));
         QCOMPARE(original.readAll(), bytes);

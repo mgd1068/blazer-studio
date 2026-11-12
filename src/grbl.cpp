@@ -2,6 +2,8 @@
 #include "geometry.h"
 #include <QMap>
 #include <QRegularExpression>
+#include <QScopedValueRollback>
+#include <QSignalBlocker>
 #include <cmath>
 namespace {
 QString n(double v) {
@@ -19,7 +21,8 @@ bool point(const QByteArray &v, QPointF &p) {
     return true;
 }
 } // namespace
-GrblSession::GrblSession(QObject *parent) : QObject(parent) {
+GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
+    : ControllerSession(parent), m_deviceProfile(std::move(profile)) {
     poll.setInterval(200);
     timeout.setSingleShot(true);
     timeout.setInterval(10000);
@@ -38,6 +41,14 @@ GrblSession::GrblSession(QObject *parent) : QObject(parent) {
             [this] { fail("GRBL antwortet nicht rechtzeitig; Übertragung abgebrochen."); });
     connect(&focusTimer, &QTimer::timeout, this, [this] { focus(false); });
 }
+GrblSession::~GrblSession() {
+    if (connected()) {
+        // Use the same best-effort shutdown as explicit disconnect, while serial
+        // and timers still exist. Consumers must not re-enter a dying session.
+        const QSignalBlocker notifications(this);
+        close();
+    }
+}
 void GrblSession::append(const QString &s) {
     log.prepend(s);
     while (log.size() > 30)
@@ -45,14 +56,34 @@ void GrblSession::append(const QString &s) {
     emit changed();
 }
 bool GrblSession::ready() const {
-    return connected() && !handshaking && configurationValid() && knownPosition &&
-           controllerState == "Idle" && !busy() && !firing;
+    return connected() && !handshaking && configurationValid() && knownPosition && knownOffset &&
+           knownOutput && reportedOutput == 0 && !activeInputs &&
+           (!overrideFeedback || powerOverride <= 100) && controllerState == "Idle" && !busy() &&
+           !firing;
+}
+bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
+    if (!knownOffset || !std::isfinite(workPoint.x()) || !std::isfinite(workPoint.y()))
+        return false;
+    // Match the three-decimal coordinates actually sent in GCode. G54 changes
+    // the work origin, not the physical travel available to the machine.
+    const QPointF machinePoint{std::round(workPoint.x() * 1000) / 1000 + offset.x(),
+                               std::round(workPoint.y() * 1000) / 1000 + offset.y()};
+    constexpr double epsilon = .0000001;
+    return std::isfinite(machinePoint.x()) && std::isfinite(machinePoint.y()) &&
+           machinePoint.x() >= -epsilon && machinePoint.y() >= -epsilon &&
+           machinePoint.x() <= m_deviceProfile.workArea().width() + epsilon &&
+           machinePoint.y() <= m_deviceProfile.workArea().height() + epsilon;
 }
 bool GrblSession::open(const QString &port) {
     if (port.isEmpty() || connected())
         return false;
+    const auto profileError = DeviceBackends::runtimeSupportError(m_deviceProfile);
+    if (!profileError.isEmpty()) {
+        append(profileError);
+        return false;
+    }
     serial.setPortName(port);
-    serial.setBaudRate(115200);
+    serial.setBaudRate(m_deviceProfile.driverSettings()["baudRate"].toInt());
     serial.setDataBits(QSerialPort::Data8);
     serial.setParity(QSerialPort::NoParity);
     serial.setStopBits(QSerialPort::OneStop);
@@ -63,6 +94,10 @@ bool GrblSession::open(const QString &port) {
     }
     input.clear();
     version = laserMode = powerScale = knownPosition = knownOffset = false;
+    minimumPower = knownOutput = activeInputs = pauseRequested = zeroPending = false;
+    contaminatedConfiguration = false;
+    configurationRetries = 0;
+    overrideFeedback = false;
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
     controllerState.clear();
     firing = paused = false;
@@ -76,10 +111,15 @@ bool GrblSession::open(const QString &port) {
             handshake();
     });
     poll.start();
-    append("115200 Baud geöffnet; GRBL 1.1, $30=1000 und $32=1 werden geprüft.");
+    append(QString("%1 Baud geöffnet; GRBL 1.1, $30=%2 und $32=1 werden geprüft.")
+               .arg(m_deviceProfile.driverSettings()["baudRate"].toInt())
+               .arg(m_deviceProfile.driverSettings()["powerScale"].toDouble(), 0, 'f', 0));
     return true;
 }
 void GrblSession::handshake() {
+    // Settings printouts must not be interrupted by our status polling. Some
+    // ESP32 forks can otherwise interleave two replies on the serial stream.
+    poll.stop();
     paused = false;
     firing = false;
     homing = false;
@@ -87,6 +127,8 @@ void GrblSession::handshake() {
     focusTimer.stop();
     timeout.stop();
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
+    laserMode = powerScale = minimumPower = knownPosition = knownOffset = knownOutput = false;
+    activeInputs = pauseRequested = contaminatedConfiguration = zeroPending = false;
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
@@ -110,6 +152,9 @@ void GrblSession::close() {
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
+    pauseRequested = zeroPending = false;
+    knownPosition = knownOffset = knownOutput = false;
+    overrideFeedback = false;
     if (serial.isOpen()) {
         if (active)
             serial.write("!\x18", 2);
@@ -123,6 +168,11 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message) {
+    // A write/flush on a lost USB port can synchronously emit another serial
+    // error. Do not recurse while attempting the best-effort shutdown.
+    if (handlingFailure)
+        return;
+    QScopedValueRollback<bool> failureGuard(handlingFailure, true);
     poll.stop();
     timeout.stop();
     focusTimer.stop();
@@ -132,6 +182,9 @@ void GrblSession::fail(const QString &message) {
     buffering = false;
     waitingAck = waitingIdle = handshaking = false;
     firing = paused = false;
+    pauseRequested = zeroPending = false;
+    knownOutput = knownOffset = false;
+    overrideFeedback = false;
     version = laserMode = powerScale = knownPosition = false;
     if (serial.isOpen()) {
         serial.write("!\x18", 2);
@@ -153,9 +206,41 @@ void GrblSession::receive() {
         input.remove(0, end + 1);
         if (!s.isEmpty())
             line(s);
+        if (!connected()) {
+            input.clear();
+            return;
+        }
     }
 }
 void GrblSession::line(const QByteArray &s) {
+    if (s.contains('<') &&
+        (!s.startsWith('<') || !s.endsWith('>') || s.count('<') > 1)) {
+        QByteArray remainder = s;
+        QList<QByteArray> reports;
+        int begin;
+        while ((begin = remainder.indexOf('<')) >= 0) {
+            const int end = remainder.indexOf('>', begin);
+            if (end < 0)
+                break;
+            reports.append(remainder.mid(begin, end - begin + 1));
+            remainder.remove(begin, end - begin + 1);
+        }
+        if (!reports.isEmpty()) {
+            const bool taintedSetting = handshaking && remainder.trimmed().startsWith('$');
+            if (taintedSetting)
+                contaminatedConfiguration = true;
+            for (const auto &report : reports) {
+                line(report);
+                if (!connected())
+                    return;
+            }
+            // A numeric setting may have been interrupted in the middle of its
+            // value. Never authorize a configuration from that partial number.
+            if (!taintedSetting && !remainder.trimmed().isEmpty())
+                line(remainder.trimmed());
+            return;
+        }
+    }
     if (s.startsWith("Grbl ")) {
         version = s.startsWith("Grbl 1.1") || s.startsWith("Grbl 1.3a");
         if (!version) {
@@ -163,6 +248,7 @@ void GrblSession::line(const QByteArray &s) {
             return;
         }
         laserMode = powerScale = knownPosition = knownOffset = false;
+        configurationRetries = 0;
         handshake();
         return;
     }
@@ -171,15 +257,21 @@ void GrblSession::line(const QByteArray &s) {
     if (s.startsWith("$13="))
         reportMm = s.mid(4).trimmed() == "0";
     if (s.startsWith("$130="))
-        bedWidth = std::abs(s.mid(5).toDouble() - 200) < .0001;
+        bedWidth = std::abs(s.mid(5).toDouble() - m_deviceProfile.workArea().width()) < .0001;
     if (s.startsWith("$131="))
-        bedHeight = std::abs(s.mid(5).toDouble() - 150) < .0001;
+        bedHeight = std::abs(s.mid(5).toDouble() - m_deviceProfile.workArea().height()) < .0001;
     if (s.startsWith("[GC:"))
         coordinateSystem = QRegularExpression("(?:^| )G54(?: |$)")
                                .match(QString::fromLatin1(s.mid(4, s.size() - 5)))
                                .hasMatch();
     if (s.startsWith("$30="))
-        powerScale = std::abs(s.mid(4).toDouble() - 1000) < .0001;
+        powerScale = std::abs(s.mid(4).toDouble() -
+                              m_deviceProfile.driverSettings()["powerScale"].toDouble()) < .0001;
+    if (s.startsWith("$31=")) {
+        bool valid;
+        const double value = s.mid(4).toDouble(&valid);
+        minimumPower = valid && std::isfinite(value) && value == 0;
+    }
     if (s.startsWith("$32="))
         laserMode = s.mid(4).trimmed() == "1";
     if (s.startsWith("$22="))
@@ -212,7 +304,20 @@ void GrblSession::line(const QByteArray &s) {
         controllerState = QString::fromLatin1(fields.first()).section(':', 0, 0);
         QPointF machine, work;
         bool hasMachine = false, hasWork = false;
+        knownPosition = knownOutput = activeInputs = false;
         for (const auto &field : fields) {
+            if (field.startsWith("FS:")) {
+                const auto values = field.mid(3).split(',');
+                if (values.size() == 2) {
+                    bool validFeed, validOutput;
+                    const double feed = values[0].toDouble(&validFeed);
+                    reportedOutput = values[1].toDouble(&validOutput);
+                    knownOutput = validFeed && validOutput && std::isfinite(feed) && feed >= 0 &&
+                                  std::isfinite(reportedOutput) && reportedOutput >= 0;
+                }
+            }
+            if (field.startsWith("Pn:"))
+                activeInputs = field.size() > 3;
             if (field.startsWith("Ov:")) {
                 auto values = field.mid(3).split(',');
                 if (values.size() == 3) {
@@ -237,6 +342,11 @@ void GrblSession::line(const QByteArray &s) {
             knownPosition = true;
         }
         if (controllerState == "Alarm" || controllerState == "Door") {
+            if (executing() || firing) {
+                fail("Controller gesperrt während Auftrag: " + controllerState +
+                     ". Auftrag verworfen; Ausgangszustand prüfen.");
+                return;
+            }
             queue.clear();
             inFlight.clear();
             sent = rxBytes = 0;
@@ -244,27 +354,46 @@ void GrblSession::line(const QByteArray &s) {
             waitingAck = waitingIdle = false;
             timeout.stop();
             firing = false;
+            paused = pauseRequested = false;
             state = controllerState;
             append("Controller gesperrt: " + controllerState);
             return;
         }
-        if (waitingIdle && controllerState == "Idle") {
+        if (controllerState == "Idle" && knownOutput && reportedOutput != 0 && !firing) {
+            fail("Controller meldet Leistung im Leerlauf; Auftrag verworfen, Ausgang prüfen.");
+            return;
+        }
+        if (executing() && overrideFeedback && powerOverride > 100) {
+            fail("Leistungs-Override über 100 %; Auftrag verworfen, Ausgang prüfen.");
+            return;
+        }
+        if (waitingIdle && controllerState == "Idle" && knownPosition && knownOffset && knownOutput &&
+            reportedOutput == 0 && !activeInputs) {
             waitingIdle = false;
             timeout.stop();
             progress = 1;
             firing = false;
+            paused = pauseRequested = false;
             state = "Bereit";
             append("Controller meldet Idle: Auftrag abgeschlossen.");
         }
-        if (!busy() && !handshaking)
-            state = configurationValid() && knownPosition
-                        ? controllerState == "Idle" ? "Bereit" : controllerState
-                        : "GRBL-Konfiguration nicht freigegeben";
+        if (!busy() && !handshaking) {
+            if (!configurationValid())
+                state = "GRBL-Konfiguration nicht freigegeben";
+            else if (!knownPosition || !knownOffset || !knownOutput)
+                state = "Position, Nullpunkt oder Leistung nicht bestätigt";
+            else if (activeInputs)
+                state = "Controller-Eingang aktiv";
+            else if (overrideFeedback && powerOverride > 100)
+                state = "Leistungs-Override über 100 %";
+            else
+                state = controllerState == "Idle" ? "Bereit" : controllerState;
+        }
         if (executing() && !firing && controllerState == "Hold") {
             paused = true;
             state = "Pausiert";
             timeout.stop();
-        } else if (executing() && paused && controllerState == "Run") {
+        } else if (executing() && paused && !pauseRequested && controllerState == "Run") {
             paused = false;
             state = "Läuft";
             pump();
@@ -294,11 +423,26 @@ void GrblSession::line(const QByteArray &s) {
         progress = total ? std::min(.99, double(acked) / total) : 0;
         if (queue.isEmpty()) {
             if (handshaking) {
+                if (contaminatedConfiguration) {
+                    if (configurationRetries++ == 0) {
+                        append("Verschachtelte Konfigurationsantwort; lese Einstellungen erneut.");
+                        handshake();
+                    } else
+                        fail("Konfiguration nicht eindeutig lesbar; Verbindung geschlossen.");
+                    return;
+                }
                 handshaking = false;
                 state = configurationValid() ? "Warte auf Position"
                                              : "GRBL-Konfiguration nicht freigegeben";
                 serial.write("?");
+                poll.start();
             } else {
+                if (zeroPending) {
+                    // A report queued before G10 completed may still describe
+                    // the old work origin. Require a later WCO confirmation.
+                    knownPosition = knownOffset = false;
+                    zeroPending = false;
+                }
                 waitingIdle = true;
                 serial.write("?");
                 if (!paused)
@@ -360,20 +504,41 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     return connected() && busy();
 }
 void GrblSession::start(const JobPlan &job) {
-    if (position.x() < 0 || position.y() < 0 || position.x() > 200 || position.y() > 150) {
-        append("Aktuelle Arbeitsposition außerhalb des Arbeitsraums; Nullpunkt prüfen.");
+    if (job.deviceProfile().outputFingerprint() != m_deviceProfile.outputFingerprint()) {
+        append("Geräteprofil des Auftrags passt nicht zur geprüften Verbindung.");
+        return;
+    }
+    if (!insideMachineBed(position)) {
+        append("Aktuelle Maschinenposition oder Arbeitsnullpunkt nicht freigegeben.");
         return;
     }
     if (!job.valid()) {
         append(job.errors.join("; "));
         return;
     }
-    commands(job.gcode(), true);
+    // Only targets are emitted. The first move's model origin is not the
+    // current physical start position, which was checked above.
+    for (const auto &move : job.moves)
+        if (!insideMachineBed(move.to)) {
+            append("Auftrag mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
+            return;
+        }
+    const auto program = job.encodedProgram();
+    if (!program.valid() || program.driverId() != m_deviceProfile.driverId() ||
+        program.transport() != m_deviceProfile.transport() ||
+        program.mediaType() != "text/x-gcode" ||
+        program.profileFingerprint() != m_deviceProfile.outputFingerprint()) {
+        append(program.errors().isEmpty() ? QString("Kein passender GRBL-Ausgabevertrag.")
+                                          : program.errors().join("; "));
+        return;
+    }
+    commands(program.gcodeLines(), true);
 }
 void GrblSession::pause() {
     if (!connected() || !busy() || firing || handshaking)
         return;
     paused = !paused;
+    pauseRequested = paused;
     if (paused) {
         serial.write("!");
         timeout.stop();
@@ -393,6 +558,8 @@ void GrblSession::stop() {
     focusTimer.stop();
     firing = false;
     paused = false;
+    pauseRequested = zeroPending = false;
+    knownOutput = false;
     queue.clear();
     inFlight.clear();
     sent = rxBytes = 0;
@@ -402,14 +569,15 @@ void GrblSession::stop() {
     version = laserMode = powerScale = knownPosition = false;
     state = "Abbruch · warte auf GRBL-Neustart";
     serial.write("!\x18", 2);
+    if (!connected())
+        return;
     timeout.start();
     append("Feed Hold und Soft-Reset gesendet; keine automatische Fortsetzung.");
 }
 void GrblSession::jog(double dx, double dy) {
-    auto target = position + QPointF(dx, dy);
-    if (position.x() < 0 || position.y() < 0 || position.x() > 200 || position.y() > 150 ||
-        !std::isfinite(dx) || !std::isfinite(dy) || target.x() < 0 || target.y() < 0 ||
-        target.x() > 200 || target.y() > 150) {
+    const auto target = position + QPointF(n(dx).toDouble(), n(dy).toDouble());
+    if (!std::isfinite(dx) || !std::isfinite(dy) || !insideMachineBed(position) ||
+        !insideMachineBed(target)) {
         append("Bewegung außerhalb des Arbeitsraums abgelehnt.");
         return;
     }
@@ -435,6 +603,7 @@ void GrblSession::home() {
 }
 void GrblSession::zero() {
     if (commands({"M5", "G10 L20 P1 X0 Y0", "G54"})) {
+        zeroPending = true;
         knownPosition = false;
         knownOffset = false;
     }
@@ -442,8 +611,14 @@ void GrblSession::zero() {
 void GrblSession::frame(const QVariantMap &b) {
     QRectF r(b.value("x").toDouble(), b.value("y").toDouble(), b.value("width").toDouble(),
              b.value("height").toDouble());
-    if (!b.value("valid").toBool() || !Geometry::insideBed(r)) {
+    if (!b.value("valid").toBool() || !Geometry::insideBed(r, m_deviceProfile.workArea())) {
         append("Ungültige Rahmenfahrt.");
+        return;
+    }
+    if (!insideMachineBed(position) || !insideMachineBed(r.topLeft()) ||
+        !insideMachineBed(r.topRight()) || !insideMachineBed(r.bottomRight()) ||
+        !insideMachineBed(r.bottomLeft())) {
+        append("Rahmenfahrt mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
         return;
     }
     QStringList lines{"M5", "G21", "G90", "G54"};
@@ -461,10 +636,13 @@ void GrblSession::focus(bool on) {
         return;
     // A stationary GRBL M3 output has no independent watchdog. Host deadline and
     // release reset it; communication loss cannot guarantee output shutdown.
-    if (position.x() < 0 || position.y() < 0 || position.x() > 200 || position.y() > 150)
+    if (!insideMachineBed(position))
         return;
     // Send the finite pulse and its shutdown together, within the 128-byte RX buffer.
-    if (!commands({"M5\nG21\nG90\nG1 F1 M3 S20\nG4 P0.2\nM5 S0\nG0"}))
+    const auto settings = m_deviceProfile.driverSettings();
+    const auto output =
+        qRound64(settings["focusPower"].toDouble() * settings["powerScale"].toDouble() / 100.);
+    if (!commands({"M5\nG21\nG90\nG1 F1 M3 S" + QString::number(output) + "\nG4 P0.2\nM5 S0\nG0"}))
         return;
     firing = true;
     focusTimer.start();

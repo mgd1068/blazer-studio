@@ -1,18 +1,17 @@
 #include "document.h"
 #include "geometry.h"
 #include "imagelimits.h"
+#include "nativedesign.h"
+#include "plotimport.h"
 #include <QDir>
-#include <QDomDocument>
 #include <QFile>
 #include <QFileInfo>
-#include <QFont>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUuid>
-#include <QXmlStreamReader>
 #include <cmath>
 #include <functional>
 namespace {
@@ -59,7 +58,41 @@ bool Document::importFile(const QUrl &url) {
     if (!file.open(QIODevice::ReadOnly) || file.size() > 16 * 1024 * 1024)
         return false;
     QList<Artwork> imported;
-    if (ext == "dxf") {
+    const bool hpgl = ext == "hpgl" || ext == "plt";
+    const bool gcode = ext == "gc" || ext == "gcode" || ext == "nc";
+    const bool ruida = ext == "rd";
+    const bool native = ext == "mage" || ext == "lbrn" || ext == "lbrn2";
+    QString plotInterpretation;
+    if (hpgl || gcode || ruida) {
+        const auto bytes = file.read(16 * 1024 * 1024 + 1);
+        const auto result = hpgl ? PlotImport::hpgl(bytes) : ruida ? PlotImport::ruida(bytes) : PlotImport::gcode(bytes);
+        if (!result.error.isEmpty()) {
+            notify(result.error);
+            return false;
+        }
+        auto paths = result.paths;
+        if (gcode || ruida) {
+            // A raster job can contain thousands of disconnected strokes.
+            // Keep them as subpaths of one editable artwork, without bridges.
+            QPainterPath compound;
+            for (const auto &path : paths)
+                compound.addPath(path);
+            paths = {compound};
+        }
+        for (const auto &path : paths) {
+            Artwork a;
+            a.id = uid();
+            a.name = (hpgl ? "HPGL " : ruida ? "RDWorks " : "GCode ") + QString::number(imported.size() + 1);
+            a.layer = 1;
+            a.page = m_activePage;
+            if (!bakePath(a, path)) {
+                notify("Importgeometrie ungültig; kein Teilimport.");
+                return false;
+            }
+            imported.append(a);
+        }
+        plotInterpretation = result.interpretation;
+    } else if (ext == "dxf") {
         auto lines = QString::fromUtf8(file.readAll()).split('\n');
         struct Pair {
             int code;
@@ -187,166 +220,51 @@ bool Document::importFile(const QUrl &url) {
                    ". Import vollständig abgebrochen.");
             return false;
         }
-    } else if (ext == "lbrn2" || ext == "lbrn") {
-        auto bytes = file.readAll();
-        QXmlStreamReader check(bytes);
-        while (!check.atEnd()) {
-            check.readNext();
-            if (check.isDTD()) {
-                notify("DTD in LightBurn-Projekt abgelehnt.");
-                return false;
-            }
+    } else if (native) {
+        const auto result = NativeDesign::read(file.read(16 * 1024 * 1024 + 1), ext == "mage");
+        if (!result.error.isEmpty()) {
+            notify(result.error + "; kein Teilimport.");
+            return false;
         }
-        if (check.hasError())
-            return false;
-        QDomDocument xml;
-        if (!xml.setContent(bytes))
-            return false;
-        auto root = xml.documentElement();
-        if (root.tagName() != "LightBurnProject")
-            return false;
-        QString error;
-        int shapes = 0;
-        auto transform = [](const QString &text, QTransform &t) {
-            auto values = text.simplified().split(' ');
-            if (values.size() != 6)
-                return false;
-            double v[6];
-            for (int i = 0; i < 6; ++i) {
-                bool ok;
-                v[i] = values[i].toDouble(&ok);
-                if (!ok || !std::isfinite(v[i]) || std::abs(v[i]) > 1e6)
-                    return false;
-            }
-            t = QTransform(v[0], v[1], v[2], v[3], v[4], v[5]);
-            return true;
-        };
-        auto pathData = [&](QDomElement element, QPainterPath &path) {
-            QString text = element.firstChildElement("VertList").text(),
-                    primitives = element.firstChildElement("PrimList").text();
-            struct Vertex {
-                QPointF point, left, right;
-            };
-            QList<Vertex> vertices;
-            const QString n = "([+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)";
-            QRegularExpression point("^" + n + " +" + n), control("c([01])([xy])" + n);
-            for (auto chunk : text.split('V', Qt::SkipEmptyParts)) {
-                auto match = point.match(chunk);
-                if (!match.hasMatch())
-                    return false;
-                Vertex vertex;
-                vertex.point = {match.captured(1).toDouble(), match.captured(2).toDouble()};
-                vertex.left = vertex.right = vertex.point;
-                QMap<QString, double> handles;
-                auto cs = control.globalMatch(chunk);
-                while (cs.hasNext()) {
-                    auto c = cs.next();
-                    handles[c.captured(1) + c.captured(2)] = c.captured(3).toDouble();
-                }
-                if (handles.contains("0x") && handles.contains("0y"))
-                    vertex.left = QPointF(handles["0x"], handles["0y"]);
-                if (handles.contains("1x") && handles.contains("1y"))
-                    vertex.right = QPointF(handles["1x"], handles["1y"]);
-                vertices.append(vertex);
-                if (vertices.size() > 100000)
-                    return false;
-            }
-            QRegularExpression primitive("([LB])([0-9]+) +([0-9]+)");
-            auto matches = primitive.globalMatch(primitives);
-            bool any = false;
-            int previous = -1;
-            while (matches.hasNext()) {
-                auto match = matches.next();
-                int a = match.captured(2).toInt(), b = match.captured(3).toInt();
-                if (a < 0 || b < 0 || a >= vertices.size() || b >= vertices.size())
-                    return false;
-                auto from = vertices[a], to = vertices[b];
-                if (a != previous)
-                    path.moveTo(from.point);
-                if (match.captured(1) == "L")
-                    path.lineTo(to.point);
-                else
-                    path.cubicTo(from.right, to.left, to.point);
-                previous = b;
-                any = true;
-            }
-            return any;
-        };
-        std::function<bool(QDomElement, QTransform, QString)> readShape;
-        readShape = [&](QDomElement element, QTransform parent, QString group) {
-            if (++shapes > Geometry::objectLimit)
-                return false;
-            QString type = element.attribute("Type");
-            QTransform local;
-            auto xf = element.firstChildElement("XForm");
-            if (!xf.isNull() && !transform(xf.text(), local))
-                return false;
-            QTransform combined = local * parent;
-            if (type == "Group") {
-                QString id = group.isEmpty() ? uid() : group;
-                auto children = element.firstChildElement("Children");
-                for (auto child = children.firstChildElement("Shape"); !child.isNull();
-                     child = child.nextSiblingElement("Shape"))
-                    if (!readShape(child, combined, id))
-                        return false;
-                return true;
-            }
-            QPainterPath path;
-            if (type == "Rect") {
-                double w = element.attribute("W").toDouble(), h = element.attribute("H").toDouble(),
-                       radius = element.attribute("Cr").toDouble();
-                path.addRoundedRect(QRectF(-w / 2, -h / 2, w, h), radius, radius);
-            } else if (type == "Ellipse") {
-                double rx = element.attribute("Rx").toDouble(),
-                       ry = element.attribute("Ry").toDouble();
-                path.addEllipse(QRectF(-rx, -ry, rx * 2, ry * 2));
-            } else if (type == "Path") {
-                if (!pathData(element, path)) {
-                    error = "Ungültiger LightBurn-Pfad";
-                    return false;
-                }
-            } else if (type == "Text") {
-                auto backup = element.firstChildElement("BackupPath").firstChildElement("Shape");
-                if (!backup.isNull()) {
-                    return readShape(backup, combined, group);
-                }
-                QFont font(element.attribute("Font").section(',', 0, 0));
-                font.setPixelSize(100);
-                path.addText(0, 0, font, element.attribute("Str"));
-                double h = element.attribute("H").toDouble();
-                auto b = path.boundingRect();
-                if (b.isEmpty() || h <= 0)
-                    return false;
-                QTransform size;
-                size.scale(h / b.height(), h / b.height());
-                path = size.map(path);
-            } else {
-                error = "Nicht unterstützte LightBurn-Form: " + type;
-                return false;
-            }
+        for (const auto &element : result.elements) {
             Artwork a;
             a.id = uid();
-            a.name = "LightBurn " + QString::number(shapes);
-            a.layer = 1;
+            a.name = (ext == "mage" ? "MillMage " : "LightBurn ") + QString::number(imported.size() + 1);
             a.page = m_activePage;
-            a.groupId = group;
-            a.groupName = group.isEmpty() ? QString() : "Importgruppe";
-            if (!bakePath(a, combined.map(path)))
-                return false;
-            imported.append(a);
-            return true;
-        };
-        for (auto shape = root.firstChildElement("Shape"); !shape.isNull();
-             shape = shape.nextSiblingElement("Shape"))
-            if (!readShape(shape, {}, {})) {
-                notify(error.isEmpty() ? "LightBurn-Geometrie ungültig; kein Teilimport."
-                                       : error + "; kein Teilimport.");
-                return false;
+            a.visible = element.visible;
+            a.toolLayer = element.toolLayer;
+            a.groupId = element.group;
+            a.groupName = a.groupId.isEmpty() ? QString() : "Importgruppe";
+            if (element.image) {
+                a.kind = "image";
+                a.bounds = element.bounds;
+                a.reliefAsset = element.image;
+                a.layer = -1;
+                for (int i = 0; i < m_layers.size(); ++i)
+                    if (m_layers[i].toMap()["mode"] == "Gravur") { a.layer = i; break; }
+                if (a.layer < 0) {
+                    notify("Für eingebettete Bilder zuerst eine Gravuroperation anlegen; kein "
+                           "Teilimport.");
+                    return false;
+                }
+                a.style = {{"imageMode", "dither"}, {"brightness", 0.}, {"contrast", 1.}, {"gamma", 1.}};
+            } else {
+                a.layer = 1;
+                if (!bakePath(a, element.path)) {
+                    notify("Native Vektorgeometrie ungültig; kein Teilimport.");
+                    return false;
+                }
             }
-        // Laser-specific settings and coordinate origins are deliberately not guessed.
-        // Geometry is editable before any user-triggered job. Report migration limitations.
-        notify("LightBurn-Geometrie importiert. Schnittparameter und Ursprung/Spiegelung werden "
-               "nicht übernommen; vor Ausgabe prüfen.");
+            imported.append(a);
+        }
+        auto proposed = snapshot();
+        proposed.items.append(imported);
+        proposed.selected = m_items.size();
+        proposed.selection = {proposed.selected};
+        if (!parse(serialize(proposed))) {
+            notify("Kombiniertes Projekt ungültig oder über Daten-/Bildgrenzen; kein Teilimport.");
+            return false;
+        }
     } else {
         notify("Dateiformat nicht unterstützt.");
         return false;
@@ -355,7 +273,7 @@ bool Document::importFile(const QUrl &url) {
         notify("Keine importierbare Geometrie oder zu viele Objekte.");
         return false;
     }
-    checkpoint();
+    checkpoint("Geometrie importieren");
     beginResetModel();
     m_items.append(imported);
     normalizeGroups();
@@ -364,7 +282,21 @@ bool Document::importFile(const QUrl &url) {
     endResetModel();
     refresh();
     notify(QString::number(imported.size()) +
-           " Vektorobjekte importiert; Einheiten und Bearbeitungsparameter prüfen.");
+           (native ? (ext == "mage" ? " MillMage-Grafikobjekte importiert; Fräsoperationen, "
+                                      "Maschinenparameter und Projektursprung nicht übernommen."
+                                    : " LightBurn-Grafikobjekte importiert; Schnittparameter und "
+                                      "Ursprung/Spiegelung nicht übernommen. Text ohne Konturen "
+                                      "verwendet Systemschriften.")
+            : ruida ? " RDWorks-Pfadobjekt importiert (" + plotInterpretation +
+                          "). Gemeinsam links unten platziert, Y nach oben; Leistung, Vorschub, "
+                          "Quellen- und Geräteparameter nicht übernommen."
+            : gcode ? " GCode-Pfadobjekt importiert (" + plotInterpretation +
+                        "). Gemeinsam links unten platziert; "
+                        "Leistung, Vorschub, Pausen und Schaltbefehle werden nicht übernommen."
+            : hpgl ? " HPGL-Pfade importiert (Plottereinheit 0,025 mm; IP/SC berücksichtigt). "
+                     "Gemeinsam links unten platziert. "
+                     "Stifte als Geometrie übernommen; Bearbeitungsparameter neu prüfen."
+                   : " Vektorobjekte importiert; Einheiten und Bearbeitungsparameter prüfen."));
     return true;
 }
 bool Document::importProject(const QUrl &url) {
@@ -377,6 +309,11 @@ bool Document::importProject(const QUrl &url) {
     if (!state || m_items.size() + state->items.size() > Geometry::objectLimit ||
         m_layers.size() + state->layers.size() > 64)
         return false;
+    if (state->deviceProfile.outputFingerprint() != m_deviceProfile.outputFingerprint()) {
+        notify("Projektimport abgelehnt: abweichendes Geräteprofil. Geometrie bei Bedarf separat "
+               "importieren.");
+        return false;
+    }
     auto items = state->items;
     int offset = m_layers.size();
     QMap<QString, QString> groups;
@@ -393,19 +330,23 @@ bool Document::importProject(const QUrl &url) {
         }
     }
     // Validate the combined project through its normal serializer before committing.
-    auto previous = snapshot();
-    m_items.append(items);
-    m_layers.append(state->layers);
-    auto bytes = serialize();
-    applySnapshot(previous);
-    auto combined = parse(bytes);
+    auto proposed = snapshot();
+    proposed.items.append(items);
+    proposed.layers.append(state->layers);
+    for (auto guide : state->guides) {
+        guide.id = uid();
+        guide.page = m_activePage;
+        proposed.guides.append(guide);
+    }
+    auto combined = parse(serialize(proposed));
     if (!combined) {
         notify("Kombiniertes Projekt überschreitet Grenzen.");
         return false;
     }
-    checkpoint();
+    checkpoint("Projekt importieren");
     applySnapshot(*combined);
-    notify("Projekt mit eigenen Operationen eingefügt.");
+    notify("Projektinhalt mit eigenen Operationen eingefügt; Name und Notizen des geöffneten "
+           "Projekts bleiben erhalten.");
     return true;
 }
 bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &pattern) {
@@ -422,4 +363,26 @@ bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &patt
                ? QString::number(result.count) + " Jobs exportiert; keine automatische Ausführung."
                : result.error);
     return result.error.isEmpty() && !result.cancelled;
+}
+
+
+bool Document::exportImage(const QUrl &url, bool processed, const QString &expectedId,
+                           quint64 expectedRevision) {
+    if (m_selection.size()!=1 || m_selected<0 || m_items[m_selected].kind!="image") {
+        notify("Für den Bildexport genau ein Rasterbild auswählen.");
+        return false;
+    }
+    const auto &art = m_items[m_selected];
+    if (!expectedId.isEmpty() && (art.id != expectedId || m_historyRevision != expectedRevision)) {
+        notify("Bild oder Projekt wurde seit Öffnen des Exportdialogs geändert; Export erneut "
+               "öffnen.");
+        return false;
+    }
+    QString error;
+    if(!m_imageExport.start({art.reliefAsset,art.style,art.bounds.size(),processed},url,error)) {
+        notify(error);
+        return false;
+    }
+    notify("Bildexport läuft aus dem angeforderten Bildstand …");
+    return true;
 }

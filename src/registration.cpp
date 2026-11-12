@@ -2,6 +2,14 @@
 #include <QImageReader>
 #include <QPolygonF>
 #include <cmath>
+void Registration::setDeviceProfile(const DeviceProfile &profile) {
+    if (profile.outputFingerprint() == m_deviceProfile.outputFingerprint())
+        return;
+    m_deviceProfile = profile;
+    valid = shown = false;
+    mapping = {};
+    emit changed();
+}
 bool Registration::load(const QUrl &file) {
     if (!file.isLocalFile())
         return false;
@@ -28,7 +36,8 @@ bool Registration::calibrate(const QVariantList &pixels, const QVariantList &wor
                wx = world[i].toDouble(&c), wy = world[i + 1].toDouble(&d);
         if (!a || !b || !c || !d || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(wx) ||
             !std::isfinite(wy) || x < 0 || y < 0 || x > image.width() || y > image.height() ||
-            wx < 0 || wy < 0 || wx > 200 || wy > 150)
+            wx < 0 || wy < 0 || wx > m_deviceProfile.workArea().width() ||
+            wy > m_deviceProfile.workArea().height())
             return false;
         source.append({x, y});
         target.append({wx, wy});

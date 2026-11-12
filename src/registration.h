@@ -1,4 +1,5 @@
 #pragma once
+#include "deviceprofile.h"
 #include <QImage>
 #include <QObject>
 #include <QTransform>
@@ -24,6 +25,7 @@ class Registration : public QObject {
     QUrl source() const { return url; }
     Q_INVOKABLE bool load(const QUrl &file);
     Q_INVOKABLE bool calibrate(const QVariantList &pixels, const QVariantList &world);
+    void setDeviceProfile(const DeviceProfile &profile);
     const QImage &frame() const { return image; }
     QTransform transform() const { return mapping; }
   signals:
@@ -34,4 +36,5 @@ class Registration : public QObject {
     QImage image;
     QTransform mapping;
     bool shown = false, valid = false;
+    DeviceProfile m_deviceProfile = DeviceProfile::m3Reference();
 };

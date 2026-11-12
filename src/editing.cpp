@@ -16,14 +16,57 @@
 #include <cmath>
 #include <qrcodegen/qrcodegen.hpp>
 
-bool Document::bakePath(Artwork &a, const QPainterPath &path) {
+namespace {
+QString editLabel(const QString &action) {
+    if (action.startsWith("align"))return "Ausrichten";
+    if (action.startsWith("distribute"))return "Verteilen";
+    static const QMap<QString, QString> labels{
+        {"rotate", "Drehen"}, {"mirrorX", "Spiegeln X"}, {"mirrorY", "Spiegeln Y"},
+        {"convert", "In Pfad umwandeln"}, {"simplify", "Pfad vereinfachen"},
+        {"offset", "Pfad versetzen"}, {"closePath", "Pfad schließen"},
+        {"reverse", "Pfadrichtung umkehren"}, {"split", "Pfad zerlegen"},
+        {"union", "Vereinigen"}, {"difference", "Differenz"},
+        {"intersection", "Schnittmenge"}, {"join", "Pfade verbinden"},
+        {"textStyle", "Schriftwerte"}, {"textOnPath", "Text auf Pfad"},
+        {"duplicateGrid", "Kopienraster"}, {"nest", "Nesting"},
+        {"copyToPage", "Auswahl ins Blatt kopieren"}, {"imageSettings", "Bildkorrektur"},
+        {"trace", "Vektorisieren"}, {"imageMask", "Bildmaske"},
+        {"imageRotate", "Bild drehen"}, {"imageMirror", "Bild spiegeln"},
+        {"imageToRelief", "Bild als Relief"}};
+    return labels.value(action, "Bearbeitung");
+}
+bool validPageName(const QString &name) {
+    return !name.trimmed().isEmpty() && name.size() <= 200 && !name.contains('\n') &&
+           !name.contains('\r');
+}
+Artwork pageCopy(const Artwork &source, int page, QMap<QString, QString> &groups) {
+    auto copy = source;
+    copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    copy.page = page;
+    if (!source.groupId.isEmpty()) {
+        if (!groups.contains(source.groupId))
+            groups[source.groupId] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        copy.groupId = groups[source.groupId];
+    }
+    return copy;
+}
+} // namespace
+
+bool Document::bakePath(Artwork &a, const QPainterPath &path) const {
     if (path.isEmpty() || path.elementCount() > 100000)
         return false;
-    auto b = path.boundingRect();
-    if (b.width() < .1)
-        b.adjust(-.05, 0, .05, 0);
-    if (b.height() < .1)
-        b.adjust(0, -.05, 0, .05);
+    const auto physical = path.boundingRect();
+    auto b = physical;
+    if (b.width() < Geometry::minimumSize) {
+        b.adjust(-Geometry::minimumSize/2,0,Geometry::minimumSize/2,0);
+        if (physical.left() >= 0 && physical.right() <= bedWidth())
+            b.moveLeft(std::clamp(b.left(), 0., bedWidth() - b.width()));
+    }
+    if (b.height() < Geometry::minimumSize) {
+        b.adjust(0,-Geometry::minimumSize/2,0,Geometry::minimumSize/2);
+        if (physical.top() >= 0 && physical.bottom() <= bedHeight())
+            b.moveTop(std::clamp(b.top(), 0., bedHeight() - b.height()));
+    }
     if (!Geometry::validBounds(b))
         return false;
     for (int i = 0; i < path.elementCount(); ++i) {
@@ -69,7 +112,7 @@ bool Document::setNode(int element, double x, double y) {
     if (!bakePath(a, p))
         return false;
     if (!m_beforeMove)
-        checkpoint();
+        checkpoint("Knoten bearbeiten");
     m_items[m_selected] = a;
     refresh(m_selected);
     return true;
@@ -78,7 +121,7 @@ int Document::addOperation(const QString &name, const QString &mode) {
     if (m_layers.size() >= 64 || name.trimmed().isEmpty() || name.size() > 200 ||
         !QStringList{"Gravur", "Schnitt"}.contains(mode))
         return -1;
-    checkpoint();
+    checkpoint("Operation hinzufügen");
     auto map = m_layers[mode == "Schnitt" ? 1 : 0].toMap();
     map["name"] = name;
     map["mode"] = mode;
@@ -102,7 +145,7 @@ void Document::assignOperations(const QVariantList &ops) {
                 return;
         rows.append(int(n));
     }
-    checkpoint();
+    checkpoint("Operationen zuweisen");
     for (int row : m_selection) {
         m_items[row].layer = rows.first();
         m_items[row].extraOperations = rows.mid(1);
@@ -111,14 +154,58 @@ void Document::assignOperations(const QVariantList &ops) {
     refresh();
 }
 bool Document::addPage(const QString &name) {
-    if (m_pages.size() >= 100 || name.trimmed().isEmpty() || name.size() > 200)
+    if (m_pages.size() >= 100 || !validPageName(name)) {
+        notify("Bitte einen einzeiligen Blattnamen mit 1–200 Zeichen wählen; maximal 100 Blätter.");
         return false;
-    checkpoint();
-    m_pages.append(name);
+    }
+    checkpoint("Blatt hinzufügen");
+    m_pages.append(name.trimmed());
     m_activePage = m_pages.size() - 1;
     m_selection.clear();
     m_selected = -1;
+    if (!m_items.isEmpty())
+        emit dataChanged(index(0), index(m_items.size() - 1));
     refresh();
+    return true;
+}
+bool Document::copyPage(int page, const QString &name) {
+    if (page < 0 || page >= m_pages.size() || m_pages.size() >= 100 || !validPageName(name)) {
+        notify("Blattkopie benötigt ein vorhandenes Blatt, einen einzeiligen Namen mit 1–200 "
+               "Zeichen und Platz für ein weiteres Blatt (maximal 100).");
+        return false;
+    }
+    auto result = m_items;
+    QMap<QString, QString> groups;
+    for (const auto &item : m_items)
+        if (item.page == page)
+            result.append(pageCopy(item, m_pages.size(), groups));
+    if (!validBudget(result)) {
+        notify("Blattkopie überschreitet die Objekt- oder Einbettungsgrenzen des Projekts.");
+        return false;
+    }
+    auto guides = m_guides;
+    for (auto guide : m_guides)
+        if (guide.page == page) {
+            guide.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            guide.page = m_pages.size();
+            guides.append(guide);
+        }
+    if (guides.size() > 1000) {
+        notify("Blattkopie überschreitet die Hilfsliniengrenze.");
+        return false;
+    }
+    checkpoint("Blatt kopieren");
+    beginResetModel();
+    m_items = std::move(result);
+    m_guides = std::move(guides);
+    m_pages.append(name.trimmed());
+    m_activePage = m_pages.size() - 1;
+    m_selection.clear();
+    m_selected = -1;
+    normalizeGroups();
+    endResetModel();
+    refresh();
+    notify("Blatt kopiert und zur Anzeige/Ausgabe gewählt. Operationen gelten projektweit.");
     return true;
 }
 void Document::activatePage(int page) {
@@ -131,15 +218,21 @@ void Document::activatePage(int page) {
     m_job.reset();
     if (m_background)
         m_preparation.submit(jobInput());
-    emit dataChanged(index(0), index(m_items.size() - 1));
+    if (!m_items.isEmpty())
+        emit dataChanged(index(0), index(m_items.size() - 1));
     emit changed();
     emit selectionChanged();
 }
 bool Document::renamePage(int page, const QString &name) {
-    if (page < 0 || page >= m_pages.size() || name.trimmed().isEmpty() || name.size() > 200)
+    if (page < 0 || page >= m_pages.size() || !validPageName(name)) {
+        notify("Bitte ein vorhandenes Blatt und einen einzeiligen Blattnamen mit 1–200 Zeichen "
+               "wählen.");
         return false;
-    checkpoint();
-    m_pages[page] = name;
+    }
+    if (m_pages[page] == name.trimmed())
+        return true;
+    checkpoint("Blatt umbenennen");
+    m_pages[page] = name.trimmed();
     refresh();
     return true;
 }
@@ -149,7 +242,11 @@ bool Document::restoreBytes(const QByteArray &bytes) {
         notify("Wiederherstellung abgelehnt: ungültiges Projekt.");
         return false;
     }
-    checkpoint();
+    if (!canApplyDeviceProfile(state->deviceProfile))
+        return false;
+    checkpoint("Wiederherstellung");
+    m_saved = Snapshot{};
+    setFileUrl({});
     applySnapshot(*state);
     notify("Projekt wiederhergestellt; bitte separat speichern.");
     return true;
@@ -211,7 +308,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
         int count = kind == "scale" ? 1 : 5;
         if (m_items.size() + count * 2 > Geometry::objectLimit || m_layers.size() + count > 64)
             return false;
-        checkpoint();
+        checkpoint("Kalibrierprobe");
         beginResetModel();
         for (int i = 0; i < count; ++i) {
             Artwork a;
@@ -407,7 +504,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
         candidate[row] = a;
         if (!validBudget(candidate))
             return fail("Bildänderung überschreitet die Projektgrenzen.");
-        checkpoint();
+        checkpoint(editLabel(action));
         m_items[row] = a;
         refresh(row);
         return true;
@@ -699,7 +796,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
                             auto delta = c - rb.topLeft();
                             auto q = rotated.translated(delta);
                             auto bounds = q.boundingRect();
-                            if (!Geometry::insideBed(bounds))
+                            if (!Geometry::insideBed(bounds, workArea()))
                                 continue;
                             QPainterPathStroker stroker;
                             stroker.setWidth(2 * gap);
@@ -780,14 +877,9 @@ bool Document::command(const QString &action, const QVariantMap &args) {
         if (page < 0 || page >= m_pages.size() ||
             result.size() + m_selection.size() > Geometry::objectLimit)
             return false;
-        for (int row : m_selection) {
-            auto a = result[row];
-            a.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            a.groupId.clear();
-            a.groupName.clear();
-            a.page = page;
-            result.append(a);
-        }
+        QMap<QString, QString> groups;
+        for (int row : m_selection)
+            result.append(pageCopy(m_items[row], page, groups));
     } else
         return fail("Unbekanntes Werkzeug: " + action);
     if (!validBudget(result))
@@ -806,7 +898,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
         primary = result.size() - 1;
         selected = {primary};
     }
-    checkpoint();
+    checkpoint(editLabel(action));
     beginResetModel();
     m_items = result;
     m_pages = pageNames;
@@ -825,17 +917,18 @@ bool Document::exportSvg(const QUrl &url) const {
     out.writeStartDocument();
     out.writeStartElement("svg");
     out.writeDefaultNamespace("http://www.w3.org/2000/svg");
-    out.writeAttribute("width", "200mm");
-    out.writeAttribute("height", "150mm");
-    out.writeAttribute("viewBox", "0 0 200 150");
+    out.writeAttribute("width", QString::number(bedWidth(), 'g', 17) + "mm");
+    out.writeAttribute("height", QString::number(bedHeight(), 'g', 17) + "mm");
+    out.writeAttribute("viewBox", "0 0 " + QString::number(bedWidth(), 'g', 17) + " " +
+                                      QString::number(bedHeight(), 'g', 17));
     for (const auto &a : m_items)
-        if (a.page == m_activePage && a.visible) {
+        if (a.page == m_activePage && a.visible && a.toolLayer == 0) {
             QString error;
             auto path = JobPlanner::geometry(a, error, true);
             if (!error.isEmpty())
                 return false;
             QTransform t;
-            t.translate(0, 150);
+            t.translate(0, bedHeight());
             t.scale(1, -1);
             out.writeStartElement("path");
             out.writeAttribute("d", VectorUtil::svg(t.map(path)));
@@ -858,7 +951,7 @@ bool Document::manageOperation(int row, const QString &action) {
     if (row < 2 || row >= m_layers.size())
         return false;
     if (action == "delete") {
-        checkpoint();
+        checkpoint("Operation löschen");
         auto mode = m_layers[row].toMap()["mode"].toString();
         m_layers.removeAt(row);
         for (auto &a : m_items) {
@@ -881,7 +974,7 @@ bool Document::manageOperation(int row, const QString &action) {
         int next = row + (action == "up" ? -1 : action == "down" ? 1 : 0);
         if (next == row || next < 2 || next >= m_layers.size())
             return false;
-        checkpoint();
+        checkpoint("Operation umordnen");
         std::swap(m_layers[row], m_layers[next]);
         auto swap = [&](int op) { return op == row ? next : op == next ? row : op; };
         for (auto &a : m_items) {
@@ -898,7 +991,7 @@ bool Document::manageOperation(int row, const QString &action) {
 bool Document::removePage(int page) {
     if (page < 0 || page >= m_pages.size() || m_pages.size() < 2)
         return false;
-    checkpoint();
+    checkpoint("Blatt löschen");
     beginResetModel();
     for (int i = m_items.size() - 1; i >= 0; --i) {
         if (m_items[i].page == page)
@@ -906,8 +999,15 @@ bool Document::removePage(int page) {
         else if (m_items[i].page > page)
             --m_items[i].page;
     }
+    m_guides.removeIf([page](const Guide &g) { return g.page == page; });
+    for (auto &guide : m_guides)
+        if (guide.page > page)
+            --guide.page;
     m_pages.removeAt(page);
-    m_activePage = std::min(page, int(m_pages.size() - 1));
+    if (m_activePage > page)
+        --m_activePage;
+    else if (m_activePage == page)
+        m_activePage = std::min(page, int(m_pages.size() - 1));
     m_selected = -1;
     m_selection.clear();
     normalizeGroups();
@@ -916,7 +1016,7 @@ bool Document::removePage(int page) {
     return true;
 }
 bool Document::outputs(const Artwork &a) const {
-    if (!a.visible || a.page != m_activePage)
+    if (a.toolLayer != 0 || !a.visible || a.page != m_activePage)
         return false;
     QList<int> operations{a.layer};
     operations.append(a.extraOperations);
@@ -928,4 +1028,16 @@ bool Document::outputs(const Artwork &a) const {
             return true;
     }
     return false;
+}
+
+bool Document::setToolLayer(int toolLayer) {
+    if (toolLayer < 0 || toolLayer > 2 || m_selection.isEmpty()) return false;
+    bool changed=false;
+    for(int row:m_selection) changed |= m_items[row].toolLayer!=toolLayer;
+    if(!changed) return true;
+    checkpoint(toolLayer ? "Hilfsform T"+QString::number(toolLayer) : "Laserausgabe zuweisen");
+    for(int row:m_selection)m_items[row].toolLayer=toolLayer;
+    emit dataChanged(index(0),index(m_items.size()-1));
+    refresh();
+    return true;
 }
