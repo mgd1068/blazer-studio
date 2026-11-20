@@ -38,7 +38,7 @@ QByteArray vectorSvg(const QList<Artwork> &items, const QVariantList &layers) {
         if (a.reliefAsset || a.toolLayer != 0)
             return {};
         QString error;
-        auto path = JobPlanner::geometry(a, error, true);
+        auto path = JobPlanner::geometry(a, error, !a.engraveOutline);
         if (!error.isEmpty() || path.isEmpty())
             return {};
         elements += path.elementCount();
@@ -72,7 +72,7 @@ QByteArray vectorSvg(const QList<Artwork> &items, const QVariantList &layers) {
             out.writeAttribute("display", "none");
         out.writeAttribute("d", VectorUtil::svg(transform.map(paths[i])));
         out.writeAttribute("fill",
-                           layers[items[i].layer].toMap()["mode"] == "Schnitt" ? "none" : "black");
+                           (items[i].engraveOutline || layers[items[i].layer].toMap()["mode"] == "Schnitt") ? "none" : "black");
         out.writeAttribute("fill-rule",
                            paths[i].fillRule() == Qt::OddEvenFill ? "evenodd" : "nonzero");
         out.writeAttribute("stroke", "black");

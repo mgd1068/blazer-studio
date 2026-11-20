@@ -377,20 +377,23 @@ void Workspace::paint(QPainter *p) {
                 }
                 p->setPen(QPen(c, .45, a.toolLayer != 0 ? Qt::DashLine : Qt::SolidLine));
                 p->setBrush(Qt::NoBrush);
-                if (a.kind == "path") {
+                if (a.kind == "path" || a.kind == "text" || (a.kind == "svg" && a.engraveOutline)) {
                     QString error;
-                    auto path = JobPlanner::geometry(world, error, true);
+                    auto path = JobPlanner::geometry(world, error, !a.engraveOutline);
                     QTransform t;
                     t.translate(0, workArea().height());
                     t.scale(1, -1);
-                    if (a.toolLayer != 0 || m_document->layers()[a.layer].toMap()["mode"] == "Schnitt")
+                    if (a.toolLayer != 0 || a.engraveOutline || m_document->layers()[a.layer].toMap()["mode"] == "Schnitt")
                         p->drawPath(t.map(path));
                     else
                         p->fillPath(t.map(path), c);
-                } else if (a.kind == "rect")
-                    p->drawRect(a.bounds);
-                else if (a.kind == "ellipse")
-                    p->drawEllipse(a.bounds);
+                } else if (a.kind == "rect" || a.kind == "ellipse") {
+                    if (a.toolLayer == 0 && !a.engraveOutline && m_document->layers()[a.layer].toMap()["mode"] == "Gravur")
+                        p->setBrush(c);
+                    if (a.kind == "rect") p->drawRect(a.bounds);
+                    else p->drawEllipse(a.bounds);
+                    p->setBrush(Qt::NoBrush);
+                }
                 else if ((a.kind == "relief" || a.kind == "image") && a.reliefAsset) {
                     QString error;
                     auto image =
@@ -399,13 +402,6 @@ void Workspace::paint(QPainter *p) {
                 } else if (a.kind == "svg") {
                     if (a.asset)
                         a.asset->renderer->render(p, a.bounds);
-                } else if (a.kind == "text") {
-                    QString error;
-                    auto path = JobPlanner::geometry(world, error, true);
-                    QTransform t;
-                    t.translate(0, workArea().height());
-                    t.scale(1, -1);
-                    p->fillPath(t.map(path), c);
                 }
                 p->setOpacity(1);
                 if (m_preview) {

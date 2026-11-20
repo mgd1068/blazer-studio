@@ -2,6 +2,16 @@
 
 Blazer Studio startet im **Simulator**. Eine echte Verbindung entsteht erst im Bereich **Gerät** durch Auswahl des seriellen Anschlusses und **GRBL verbinden**. Es gibt keine automatische Verbindung, Referenzfahrt oder Jobausführung beim Start.
 
+## Gehäuselüfter am vorhandenen M3
+
+Beim unveränderten M3-Referenzprofil wird vor den Bearbeitungsbahnen `M8` und
+nach `M5 S0` am Auftragsende `M9` ausgegeben. Diese Zuordnung folgt der lokalen
+LightBurn-Einstellung (`AirAssistM7=false`) und der vorhandenen Datei `001.nc`.
+Die Wirkung am Gehäuselüfter ist noch am Gerät zu bestätigen. Andere Profile
+und die laserfreie Rahmenfahrt erhalten diese Befehle nicht. Eine Bestätigung
+des Befehls durch GRBL belegt keinen tatsächlichen Luftstrom; ein automatischer
+Nachlauf oder eine Lüfterüberwachung sind damit nicht implementiert.
+
 ## Projekt → Pfade → Vorschau → Ausgabe
 
 - Rechtecke, Ellipsen, Textkonturen und unterstützte SVG-Vektoren werden in geometrische Pfade umgewandelt. Text verwendet die gespeicherte Schriftwahl und dieselbe Pfadgeometrie wie der Editor.

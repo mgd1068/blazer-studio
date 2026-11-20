@@ -4,6 +4,10 @@ Blazer Studio startet in **Basic**. Oben schaltet **Basic → Advanced** die vol
 
 ## Erster Auftrag
 
+Der rote **STOPP** oben bleibt in allen Hauptansichten sichtbar und bricht ohne
+Rückfrage über den vorhandenen Software-Abbruch ab. Er setzt den Auftrag nicht
+automatisch fort und ersetzt keinen Not-Aus am Gerät.
+
 1. **Neu** beginnt ein leeres Projekt. Das anfängliche Werkstattschild ist ein Übungsprojekt mit Beispielwerten.
 2. **Motiv laden** importiert ein Bild oder eine Vektorzeichnung. Rechteck, Kreis und Text lassen sich auch direkt anlegen.
 3. Links den tatsächlich eingebauten **Laseraufsatz / Toolkopf** und das passende Material wählen. Der Kopf wird nicht automatisch erkannt. Die Materialliste zeigt nur Profile für die gewählte Nennleistung.
@@ -50,3 +54,15 @@ Unter der Objektliste stehen **Kopieren** und **Einfügen** bereit. Auf der Arbe
 Unten rechts im Editor kann die Längeneinheit zwischen **mm** und **in** wechseln. Längenfelder akzeptieren auch ausdrückliche Angaben wie `1,25 in` oder `25.4 mm`. Reines Umschalten ändert das Motiv und die Laserparameter nicht. [Einheiten, Raster und Genauigkeit](EDITOR_UNITS.md) gehören zur Entwicklung beta.4-dev; Geschwindigkeiten und Herstellerreferenzen behalten ihre ausgewiesenen Einheiten.
 
 Hilfslinien für die Platzierung findest du unter [Werkzeuge → Hilfslinien](GUIDES.md). Sie werden gespeichert und niemals gelasert.
+
+## Fläche, Rand und Schnitt unterscheiden
+
+Die Auswahl rechts heißt **Was soll mit dem Motiv passieren?**:
+
+- **Fläche gravieren** füllt die Form mit Gravurbahnen.
+- **Rand gravieren** fährt ausschließlich die Vektorlinien mit den **Gravurwerten** des gewählten Materials ab. Dafür sind weder Schnittwerte noch ein Wechsel in Advanced nötig. Eine erneute Materialwahl oder „Profilwerte übernehmen“ erhält die Randwahl.
+- **Durchschneiden** verwendet die Schnittwerte des Materials. Ein reines Gravurprofil bietet diese Funktion nicht an.
+
+Fotos und Reliefbilder haben keine Vektorlinie für eine Randgravur. Dafür zuerst eine eigenständige Vektorform verwenden. Bei einer gemischten Auswahl wird die Bearbeitungsart nur geändert, wenn sie für alle ausgewählten Objekte passt.
+
+Über der Vorschau steht jetzt der konkrete Grund, wenn ein Auftrag noch nicht bereit ist: etwa fehlende Materialprüfung, unpassender Laseraufsatz, veränderte Werte, noch laufende Berechnung oder fehlende Gerätebereitschaft. Eine Materialbestätigung bleibt eine persönliche Angabe nach einer echten Probe. Ein Wechsel zwischen Fläche, Rand und Schnitt setzt sie zurück; das Programm bestätigt sie nicht selbst.

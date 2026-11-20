@@ -344,7 +344,17 @@ class WorkflowTest : public QObject {
         QTRY_COMPARE(window->property("frameScope").toString(),QString("t2"));
         QTRY_VERIFY(item("frameJobButton")->isEnabled());
         QVERIFY(click(window,item("frameJobButton")));QTRY_VERIFY(machine.busy());QVERIFY(!machine.firing());
-        QVERIFY(click(window,item("stopJobButton")));QTRY_VERIFY(machine.ready());
+        auto *globalStop = item("globalStopButton"); QVERIFY(globalStop);
+        for (int page : {0, 1, 2}) {
+            window->setProperty("page", page);
+            QTest::qWait(30);
+            QVERIFY(globalStop->isVisible()); QVERIFY(globalStop->isEnabled());
+            const auto rect = globalStop->mapRectToScene(globalStop->boundingRect());
+            QVERIFY(QRectF(0, 0, window->width(), window->height()).contains(rect));
+        }
+        window->setProperty("page",0);
+        QVERIFY(click(window,globalStop));QTRY_VERIFY(machine.ready());
+        window->setProperty("page",2);
         QCOMPARE(project.projectBytes(),beforeHelperFrame);
         QVERIFY(screenshot("helper-framing"));
         QVERIFY(click(window,frameTarget));QTest::keyClick(window,Qt::Key_Home);QTest::keyClick(window,Qt::Key_Return);

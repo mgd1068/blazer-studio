@@ -55,6 +55,8 @@ else:
                     'G21\nG90\nG54\nG17\nG94\nS0\nG0 X65.000 Y55.000\nM4 S800\n'
                     'G1 X102.000 Y55.000 F600.000\nG1 X102.000 Y85.000\n'
                     'G1 X65.000 Y85.000\nG1 X65.000 Y55.000\nM5 S0\nG0\n')
+        if mode == 'current':
+            expected = expected.replace('S0\nG0 X65', 'S0\nM8\nG0 X65').replace('M5 S0\nG0\n', 'M5 S0\nM9\nG0\n')
         sources = [('--open-project', 'legacy.blazer')]
         if mode == 'current':
             sources.append(('--new-from-template', 'reusable.blazertemplate'))

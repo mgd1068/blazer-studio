@@ -86,3 +86,7 @@ Der Verlauf enthält höchstens 50 Bearbeitungsschritte plus den ältesten noch 
 Die Dialogliste bleibt bei Statusmeldungen der Hintergrundberechnung stabil. Ändert sich die zugrunde liegende Historie anderweitig, wird ein alter Wechselwunsch abgelehnt, die Liste aktualisiert und der Benutzer wählt erneut. Die zwischenzeitlich bearbeiteten Daten bleiben erhalten. Ein pausierter Simulatorauftrag behält seinen eingefrorenen Plan auch bei Verlaufssprüngen des Entwurfs; die reale Geräteprüfung steht weiterhin aus.
 
 Der vollständige [Funktionsstand](FUNCTION_ACCEPTANCE.md) und die [Abnahmekriterien](PRODUCTION_READINESS.md) bleiben maßgeblich.
+
+### Randgravur (Format 12)
+
+Projekte mit expliziter Randgravur verwenden Format **12**. `engraveOutline` ist pro Objekt ein striktes Boolean: Es verändert die Geometriebearbeitung der primären Gravuroperation zu einer Kontur, ohne deren Materialleistung, Geschwindigkeit oder Durchgänge durch Schnittwerte zu ersetzen. Bilder und Reliefs unterstützen diesen Modus nicht. Format 12 enthält außerdem das Geräteprofil, die Hilfslinienfelder und `toolLayer` für jedes Objekt. Ältere Leser müssen dieses Format ablehnen, damit ein Rand nicht versehentlich als Fläche verarbeitet wird. Dateien ohne Randgravur behalten ihre bisherigen Formatversionen; Formate 1–11 bleiben lesbar. Native Zwischenablage und Vorlagen erhalten die neue Angabe ebenfalls.

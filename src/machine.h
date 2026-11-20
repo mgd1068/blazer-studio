@@ -7,6 +7,7 @@ class Machine : public Simulator {
     Q_OBJECT
     Q_PROPERTY(bool simulation READ simulation NOTIFY changed)
     Q_PROPERTY(QVariantList capabilities READ capabilities CONSTANT)
+    Q_PROPERTY(bool connectionVerified READ connectionVerified NOTIFY changed)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
@@ -14,6 +15,7 @@ class Machine : public Simulator {
                      HardwareAccess access = HardwareAccess::Allowed);
     bool simulation() const { return !live; }
     QStringList ports() const;
+    bool connectionVerified() const { return live && session && session->status().verified; }
     QVariantList capabilities() const;
     Q_INVOKABLE bool setOverrides(int feed, int power) {
         return live && session && session->overrides(feed, power);

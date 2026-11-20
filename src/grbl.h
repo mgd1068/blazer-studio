@@ -15,18 +15,23 @@ class GrblSession : public ControllerSession {
     bool open(const QString &port) override;
     ControllerStatus status() const override {
         return {connected(), ready(),  busy(),   executing(), paused,
-                firing,      progress, position, state};
+                firing,      progress, position, state,       verified()};
     }
     QStringList logEntries() const override { return log; }
     const DeviceProfile &deviceProfile() const override { return m_deviceProfile; }
     void close() override;
     bool connected() const { return serial.isOpen(); }
     bool ready() const;
+    bool verified() const {
+        return connectionVerified && connected() && !handshaking && !awaitingReset &&
+               configurationValid() && knownPosition && knownOffset && knownOutput &&
+               !activeInputs && (!overrideFeedback || powerOverride <= 100);
+    }
     bool configurationValid() const {
         return version && laserMode && powerScale && minimumPower && reportMm && coordinateSystem &&
                bedWidth && bedHeight;
     }
-    bool busy() const { return !queue.isEmpty() || waitingIdle || waitingAck; }
+    bool busy() const { return awaitingReset || !queue.isEmpty() || waitingIdle || waitingAck; }
     bool executing() const { return busy() && !handshaking; }
     bool paused = false, firing = false;
     double progress = 0;
@@ -60,6 +65,7 @@ class GrblSession : public ControllerSession {
     QByteArray input;
     QStringList queue;
     bool waitingAck = false, waitingIdle = false, handshaking = false;
+    bool awaitingReset = false, connectionVerified = false;
     bool reportMm = false, coordinateSystem = false, bedWidth = false, bedHeight = false;
     bool version = false, laserMode = false, powerScale = false, knownPosition = false,
          homing = false;

@@ -34,6 +34,27 @@ class ControllerAdapterTest : public QObject {
         return plan;
     }
   private slots:
+    void m3AuxiliaryOutputBracketsOnlyTheM3Job() {
+        const auto plan = smallPlan();
+        const auto lines = plan.gcode();
+        QCOMPARE(lines.count("M8"), 1);
+        QCOMPARE(lines.count("M9"), 1);
+        QVERIFY(lines.indexOf("M8") < lines.indexOf("M4 S200"));
+        QVERIFY(lines.indexOf("M9") > lines.indexOf("M5 S0"));
+        auto data = DeviceProfile::m3Reference().toJson();
+        data["id"] = "other-grbl-machine";
+        auto workspace = data["workspace"].toObject();
+        workspace["width"] = 300;
+        data["workspace"] = workspace;
+        QString error;
+        const auto other = DeviceProfile::parse(QJsonDocument(data).toJson(), error);
+        QVERIFY(other);
+        JobPlan otherPlan(*other);
+        otherPlan.moves = plan.moves;
+        QVERIFY(otherPlan.encodedProgram().valid());
+        QVERIFY(!otherPlan.gcode().contains("M8"));
+        QVERIFY(!otherPlan.gcode().contains("M9"));
+    }
     void neutralGeometryDoesNotRequireAnOutputAdapter() {
         Document document;
         document.newProject();

@@ -50,6 +50,7 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QVariantMap activeBounds READ activeBounds NOTIFY changed)
     Q_PROPERTY(QStringList issues READ issues NOTIFY changed)
     Q_PROPERTY(QVariantMap material READ material NOTIFY changed)
+    Q_PROPERTY(QString basicOperationKey READ basicOperationKey NOTIFY changed)
     Q_PROPERTY(bool materialModified READ materialModified NOTIFY changed)
   public:
     enum Roles {
@@ -62,7 +63,8 @@ class Document : public QAbstractListModel {
         GroupNameRole,
         GroupFirstRole,
         OnPageRole,
-        ToolLayerRole
+        ToolLayerRole,
+        OutlineRole
     };
     explicit Document(QObject *parent = nullptr);
     void setBackgroundPlanning(bool enabled);
@@ -182,6 +184,8 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void setProperty(const QString &name, const QVariant &value);
     Q_INVOKABLE bool setToolLayer(int toolLayer);
     Q_INVOKABLE void setLayer(int layer);
+    Q_INVOKABLE void setBasicOperation(const QString &operation);
+    QString basicOperationKey() const;
     Q_INVOKABLE void setLayerSetting(int layer, const QString &key, const QVariant &value);
     QVariantMap beginnerSummary() const;
     Q_INVOKABLE bool applyBasicMaterial(const QVariantMap &profile);

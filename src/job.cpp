@@ -401,6 +401,13 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
             if (op == original.layer)
                 for (auto it = a.settings.begin(); it != a.settings.end(); ++it)
                     settings[it.key()] = it.value();
+            if (a.engraveOutline && op == original.layer && settings["mode"] == "Gravur") {
+                if (!a.canEngraveOutline()) {
+                    job.errors << a.name + ": Randgravur benötigt eine Vektorform.";
+                    continue;
+                }
+                settings["mode"] = "Schnitt"; // Contour algorithm, unchanged engraving power/feed.
+            }
             if (!a.visible || !settings["enabled"].toBool() || settings["power"].toDouble() <= 0)
                 continue;
             if (!Geometry::insideBed(a.bounds, bed)) {

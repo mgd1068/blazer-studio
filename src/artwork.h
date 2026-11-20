@@ -19,5 +19,10 @@ struct Artwork {
     QList<int> extraOperations{};
     int page = 0;
     int toolLayer = 0; // 0: laser artwork; 1/2: non-output T1/T2 helper shapes
+    bool engraveOutline = false; // Contour geometry using engraving material parameters.
+    bool canEngraveOutline() const {
+        return kind == "rect" || kind == "ellipse" || kind == "path" ||
+               kind == "text" || kind == "svg";
+    }
     bool operator==(const Artwork &) const = default;
 };

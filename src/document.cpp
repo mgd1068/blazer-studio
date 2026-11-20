@@ -80,6 +80,8 @@ QVariant Document::data(const QModelIndex &i, int role) const {
         return a.visible;
     case LayerRole:
         return a.layer;
+    case OutlineRole:
+        return a.engraveOutline;
     case ToolLayerRole:
         return a.toolLayer;
     case GroupRole:
@@ -99,7 +101,7 @@ QHash<int, QByteArray> Document::roleNames() const {
             {ColorRole, "artColor"},         {VisibleRole, "artVisible"},
             {LayerRole, "artLayer"},         {GroupRole, "artGroup"},
             {GroupNameRole, "artGroupName"}, {GroupFirstRole, "artGroupFirst"},
-            {OnPageRole, "artOnPage"}, {ToolLayerRole, "artToolLayer"}};
+            {OnPageRole, "artOnPage"}, {ToolLayerRole, "artToolLayer"}, {OutlineRole, "artOutline"}};
 }
 QColor Document::layerColor(int n) const {
     static const QList<QColor> colors{"#cb713c", "#4c7bd9", "#209b76",
@@ -157,6 +159,8 @@ QVariantMap Document::selection() const {
             {"height", bounds.height()},
             {"layer", layer},
             {"toolLayer", toolLayer},
+            {"engraveOutline", std::all_of(m_selection.cbegin(), m_selection.cend(), [this](int row) { return m_items[row].engraveOutline; })},
+            {"canEngraveOutline", std::all_of(m_selection.cbegin(), m_selection.cend(), [this](int row) { return m_items[row].canEngraveOutline(); })},
             {"visible", visible},
             {"count", m_selection.size()},
             {"grouped", group},
@@ -740,6 +744,49 @@ void Document::setLayer(int layerIndex) {
     emit dataChanged(index(0), index(m_items.size() - 1));
     refresh();
 }
+QString Document::basicOperationKey() const {
+    bool fill = false, outline = false, cut = false;
+    for (const auto &a : m_items) {
+        if (a.toolLayer != 0 || !a.visible || a.page != m_activePage) continue;
+        if (m_layers[a.layer].toMap()["mode"] == "Schnitt") cut = true;
+        else if (a.engraveOutline) outline = true;
+        else fill = true;
+    }
+    return QString::number(fill) + QString::number(outline) + QString::number(cut);
+}
+void Document::setBasicOperation(const QString &operation) {
+    if (m_selection.isEmpty() || !QStringList{"fill", "outline", "cut"}.contains(operation)) return;
+    const int target = operation == "cut" ? 1 : 0;
+    const bool outline = operation == "outline";
+    if (m_layers[target].toMap()["mode"] != (target == 0 ? "Gravur" : "Schnitt")) {
+        notify("Diese Operation wurde erweitert geändert. Bitte die Operationsart zuerst prüfen.");
+        return;
+    }
+    const auto materialValues = m_material[target == 0 ? "engrave" : "cut"].toMap();
+    if ((!materialValues.isEmpty() && !materialValues.value("enabled", true).toBool()) ||
+        !m_layers[target].toMap()["enabled"].toBool()) {
+        notify("Das gewählte Material bietet keine Werte für diese Bearbeitung.");
+        return;
+    }
+    for (int row : m_selection)
+        if ((outline && !m_items[row].canEngraveOutline()) ||
+            (target == 1 && (m_items[row].kind == "image" || m_items[row].kind == "relief"))) {
+            notify("Randgravur und Durchschneiden benötigen eine Vektorform, kein Bild.");
+            return;
+        }
+    bool change = false;
+    for (int row : m_selection)
+        change |= m_items[row].layer != target || m_items[row].toolLayer != 0 || m_items[row].engraveOutline != outline;
+    if (!change) return;
+    checkpoint("Bearbeitungsart wählen");
+    for (int row : m_selection) {
+        m_items[row].layer = target;
+        m_items[row].toolLayer = 0;
+        m_items[row].engraveOutline = outline;
+    }
+    emit dataChanged(index(0), index(m_items.size() - 1));
+    refresh();
+}
 void Document::setLayerSetting(int layerIndex, const QString &key, const QVariant &value) {
     if (layerIndex < 0 || layerIndex >= m_layers.size())
         return;
@@ -819,6 +866,11 @@ bool Document::materialModified() const {
     for (int i = 0; i < 2; ++i) {
         auto expected = m_material[i == 0 ? "engrave" : "cut"].toMap();
         auto actual = m_layers[i].toMap();
+        // A disabled material operation without any artwork cannot affect the job.
+        const bool used = std::any_of(m_items.cbegin(), m_items.cend(), [i](const Artwork &a) {
+            return a.toolLayer == 0 && (a.layer == i || a.extraOperations.contains(i));
+        });
+        if (!expected.value("enabled", true).toBool() && !used) continue;
         for (const QString key : {"speed", "power", "passes", "enabled", "interval"})
             if (expected.contains(key) && expected[key] != actual[key])
                 return true;
@@ -921,9 +973,10 @@ QByteArray Document::serialize(const Snapshot &state) const {
             {"depthMap",
              a.reliefAsset ? QString::fromLatin1(a.reliefAsset->png.toBase64()) : QString()},
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
+    const bool hasOutline = std::any_of(state.items.cbegin(), state.items.cend(), [](const Artwork &a) { return a.engraveOutline; });
     const bool hasTools = std::any_of(state.items.cbegin(), state.items.cend(), [](const Artwork &a){return a.toolLayer!=0;});
-    if (hasTools || hasProfile)
-        for (int i=0;i<objects.size();++i) {auto object=objects[i].toObject();object["toolLayer"]=state.items[i].toolLayer;objects[i]=object;}
+    if (hasTools || hasProfile || hasOutline)
+        for (int i=0;i<objects.size();++i) {auto object=objects[i].toObject();object["toolLayer"]=state.items[i].toolLayer;if (hasOutline) object["engraveOutline"]=state.items[i].engraveOutline;objects[i]=object;}
     QJsonObject root{{"format", "blazer-studio"},
                      {"version", 8},
                      {"units", "mm"},
@@ -943,10 +996,10 @@ QByteArray Document::serialize(const Snapshot &state) const {
                      {"objects", objects},
                      {"layers", QJsonArray::fromVariantList(state.layers)},
                      {"material", QJsonObject::fromVariantMap(state.material)}};
-    if (hasProfile || hasTools || !state.guides.isEmpty() || !state.guidesVisible ||
+    if (hasOutline || hasProfile || hasTools || !state.guides.isEmpty() || !state.guidesVisible ||
         !state.guideSnapping) {
-        root["version"] = hasProfile ? 11 : hasTools ? 10 : 9;
-        if (hasProfile)
+        root["version"] = hasOutline ? 12 : hasProfile ? 11 : hasTools ? 10 : 9;
+        if (hasProfile || hasOutline)
             root["deviceProfile"] = state.deviceProfile.toJson();
         root["guidesVisible"] = state.guidesVisible;
         root["guideSnapping"] = state.guideSnapping;
@@ -968,7 +1021,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 11) ||
+        !number(root, "version", 1, 12) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -1112,6 +1165,11 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
                   o["layer"].toInt(),
                   o["visible"].toBool(),
                   {}};
+        if (version >= 12) {
+            if (!o["engraveOutline"].isBool()) return {};
+            a.engraveOutline = o["engraveOutline"].toBool();
+            if (a.engraveOutline && !a.canEngraveOutline()) return {};
+        } else if (o.contains("engraveOutline")) return {};
         if (version >= 10) {
             if (!number(o,"toolLayer",0,2) || std::floor(o["toolLayer"].toDouble()) != o["toolLayer"].toDouble()) return {};
             a.toolLayer=o["toolLayer"].toInt();
@@ -1718,6 +1776,7 @@ QVariantMap Document::beginnerSummary() const {
             advanced |= a.layer >= 2 || !a.extraOperations.isEmpty() || a.kind == "relief";
     for (int i = 0; i < 2; ++i) {
         const auto values = m_layers[i].toMap();
+        advanced |= values["mode"] != (i == 0 ? "Gravur" : "Schnitt");
         for (const QString key : {"angle", "angleIncrement", "kerf", "scanOffset", "tabs",
                                   "startPoint", "leadIn", "leadOut", "overscan"})
             advanced |= std::abs(values.value(key, 0).toDouble()) > .000001;

@@ -12,10 +12,11 @@ ApplicationWindow {
     title: (project.dirty ? "● " : "") + project.title + " — Blazer Studio"
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
+    readonly property bool grblVerified: !simulationMode && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
     property bool basic: true
     property bool proofConfirmed: false
     property string probeKey: ""
-    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)
+    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey
     readonly property bool isBasicProbe: probeKey===parameterKey && project.count===1 && project.selection.width===5 && project.selection.height===5
     onParameterKeyChanged: proofConfirmed=false
     onBasicChanged: if(basic && page>2)page=0
@@ -44,6 +45,19 @@ ApplicationWindow {
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
     readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
+    // Same readiness checks as the start action, with a visible explanation.
+    readonly property string startBlockReason: {
+        if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
+        if (!project.jobSummary.valid) return "Auftrag noch nicht bereit: " + project.jobSummary.errors.join(" ");
+        if (basic && !simulationMode) {
+            if (!projectHeadMatches) return "Laseraufsatz und Material passen nicht zusammen. Links das passende Material auswählen.";
+            if (project.beginnerSummary.requiresAdvanced) return project.beginnerSummary.reason;
+            if (project.beginnerSummary.modified) return "Materialwerte wurden verändert. Werte prüfen oder die Profilwerte erneut übernehmen. Randgravur lässt sich rechts mit »Rand gravieren« wählen.";
+            if (!proofConfirmed && !isBasicProbe) return "Materialprüfung fehlt: Nach einer echten Probe die Bestätigung unter der Vorschau setzen.";
+        }
+        if (!machine.ready) return simulationMode ? "Der Simulator ist noch nicht bereit. Gerätestatus prüfen." : "Der Laser ist noch nicht bereit. Verbindung und Gerätestatus im Bereich »Gerät« prüfen.";
+        return "";
+    }
     property bool discardCloseApproved: false
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
     readonly property color panel: night ? "#202e39" : "#ffffff"
@@ -422,6 +436,7 @@ ApplicationWindow {
                 Text { anchors.centerIn: parent; text: "B"; color: "white"; font.pixelSize: 22; font.bold: true }
             }
             Column {
+                visible: win.width >= 1280
                 spacing: 2
                 Text { text: "blazer studio"; font.pixelSize: 18; font.weight: Font.DemiBold; color: "#f6f9fb"; font.letterSpacing: -.5 }
                 Text { text: "LASER WORKSPACE"; color: "#89a0ad"; font.pixelSize: 8; font.letterSpacing: 1.8 }
@@ -429,7 +444,7 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             ActionButton { objectName: "modeToggle"; text: win.basic ? "Basic → Advanced" : "Advanced → Basic"; hint: "Basic führt durch einen einfachen Auftrag mit Profilwerten. Advanced zeigt alle Bearbeitungswerkzeuge. Der Wechsel verändert das Projekt nicht."; dark: win.night; onClicked: win.basic=!win.basic }
             Rectangle {
-                Layout.preferredWidth: win.basic ? 368 : 610; height: 40; radius: 7; color: "#22313e"
+                Layout.preferredWidth: win.basic ? 368 : win.width < 1280 ? 510 : 610; height: 40; radius: 7; color: "#22313e"
                 Row {
                     anchors.fill: parent; anchors.margins: 4; spacing: 3
                     Repeater {
@@ -439,7 +454,7 @@ ApplicationWindow {
                             required property int index
                             objectName: "workflow" + index
                             text: modelData
-                            width: 118; height: 32
+                            width: !win.basic && win.width < 1280 ? 98 : 118; height: 32
                             onClicked: win.page = index
                             background: Rectangle { radius: 5; color: win.page === index ? "#405462" : "transparent" }
                             contentItem: Text { text: modelData; color: win.page === index ? "white" : "#9eb1be"; font.pixelSize: 11; font.weight: Font.Medium; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -448,6 +463,17 @@ ApplicationWindow {
                 }
             }
             Item { Layout.fillWidth: true }
+            ActionButton {
+                id: globalStop
+                objectName: "globalStopButton"
+                text: "■  STOPP"
+                implicitWidth: 112; implicitHeight: 44
+                font.pixelSize: 15; font.bold: true
+                hint: "Bricht den Auftrag sofort per Software ab. Keine automatische Fortsetzung. Ersetzt keinen Not-Aus am Gerät."
+                onClicked: machine.stop()
+                contentItem: Text { text: globalStop.text; font: globalStop.font; color: "white"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 6; color: globalStop.pressed ? "#86241f" : globalStop.hovered ? "#c4342b" : "#b52d25"; border.color: "#ed827b"; border.width: 1 }
+            }
             Rectangle {
                 width: 92; height: 26; radius: 13; color: "#243b3c"
                 Text { anchors.centerIn: parent; text: win.simulationMode ? "●  SIMULATOR" : "●  GRBL"; color: "#81c9b3"; font.pixelSize: 11; font.weight: Font.DemiBold }
@@ -520,7 +546,7 @@ ApplicationWindow {
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
                     objectName: "startJobButton"; text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
-                    primary: true; compact: true; enabled: win.page === 0 || (machine.ready && !project.planningBusy && project.jobSummary.valid && (!win.basic || win.simulationMode || (!project.beginnerSummary.requiresAdvanced && !project.beginnerSummary.modified && win.projectHeadMatches && (win.proofConfirmed || win.isBasicProbe))))
+                    primary: true; compact: true; enabled: win.page === 0 || win.startBlockReason.length === 0; hint: win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason
                     onClicked: { if (win.page === 0) win.page = 1; else { win.page = 2; machine.start() } }
                 }
             }
@@ -688,6 +714,7 @@ ApplicationWindow {
                             required property bool artVisible
                             required property int artToolLayer
                             required property int artLayer
+                            required property bool artOutline
                             required property string artGroup
                             required property string artGroupName
                             required property bool artOnPage
@@ -713,10 +740,12 @@ ApplicationWindow {
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 6
                                     Text { text: "Bearbeitung"; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true }
+                                    Text { visible: win.basic; text: objectRow.artLayer === 0 ? (objectRow.artOutline ? "Rand gravieren" : "Fläche gravieren") : "Durchschneiden"; color: win.ink; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                     ComboBox { HelpBubble { target: parent }
                                         id: objectOperation
                                         objectName: "objectOperation" + objectRow.index
-                                        enabled: !win.basic || (project.layers[0].enabled && project.layers[1].enabled)
+                                        visible: !win.basic
+                                        enabled: true
                                         model: project.layers.map(op=>op.name).concat(["T1 · Hilfsform","T2 · Hilfsform"])
                                         currentIndex: objectRow.artToolLayer>0 ? project.layers.length+objectRow.artToolLayer-1 : objectRow.artLayer
                                         implicitHeight: 28; implicitWidth: 112
@@ -831,7 +860,15 @@ ApplicationWindow {
                         ActionButton { objectName: "retryPlanning"; visible: !project.planningBusy; text: "Neu berechnen"; hint: "Berechnet den aktuellen Projektstand erneut. Ein Laserauftrag startet dadurch nicht."; onClicked: project.retryPlanning() }
                     }
                 }
-                StackLayout {
+                Rectangle {
+                objectName: "startReadinessPanel"
+                visible: win.page === 1 && win.startBlockReason.length > 0
+                Layout.fillWidth: true
+                implicitHeight: startReasonText.implicitHeight + 24
+                color: win.panel; border.color: "#c07b2a"; radius: 5
+                Text { id: startReasonText; objectName: "startReadinessText"; anchors.fill: parent; anchors.margins: 12; text: win.startBlockReason; textFormat: Text.PlainText; color: win.ink; wrapMode: Text.WordWrap; Accessible.role: Accessible.StaticText; Accessible.name: text }
+            }
+            StackLayout {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     currentIndex: win.page === 4 ? 3 : win.page === 3 ? 2 : win.page === 2 ? 1 : 0
                     Item {
@@ -868,7 +905,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; spacing: 15
                                 RowLayout {
                                     Text { text: "Gerät & Positionierung"; color: win.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                                    ActionButton { text: machine.connected ? "Trennen" : "Verbinden"; dark: win.night; onClicked: machine.toggleConnection() }
+                                    ActionButton { text: win.simulationMode ? (machine.connected ? "Simulator trennen" : "Simulator verbinden") : "GRBL trennen"; dark: win.night; onClicked: machine.toggleConnection() }
                                 }
                                 Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : "GRBL / Blaze-X ESP32 · echte Hardwareverbindung · S-Max 1000 / Lasermodus werden geprüft."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 RowLayout {
@@ -881,8 +918,21 @@ ApplicationWindow {
                                         indicator: Text { x: serialPortChoice.width-width-8; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink }
                                     }
                                     ActionButton { text: "Suchen"; dark: win.night; onClicked: machine.refreshPorts() }
-                                    ActionButton { text: "GRBL verbinden"; dark: win.night; enabled: !machine.busy && serialPortChoice.count > 0; onClicked: machine.connectHardware(serialPortChoice.currentText) }
+                                    ActionButton {
+                                        objectName: "connectGrblButton"
+                                        text: win.grblVerified ? "GRBL verbunden" : (!win.simulationMode && machine.connected ? "GRBL wird geprüft …" : "GRBL verbinden")
+                                        primary: win.grblVerified; dark: win.night
+                                        enabled: win.grblVerified || (!machine.busy && !machine.firing && (win.simulationMode || !machine.connected) && serialPortChoice.count > 0)
+                                        hint: win.grblVerified ? "Verbindung und Controllerprüfung bestätigt. Ein Klick startet keinen neuen Reset oder Auftrag. Zum erneuten Verbinden zuerst trennen." : "Öffnet den USB-Anschluss und setzt den Controller zurück. Ein alter gepufferter Auftrag wird verworfen; Referenzierung und Position danach neu prüfen."
+                                        onClicked: if(win.simulationMode || !machine.connected)machine.connectHardware(serialPortChoice.currentText)
+                                    }
                                     ActionButton { text: "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
+                                }
+                                Text {
+                                    objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+                                    text: win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : machine.state + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
+                                    color: win.grblVerified ? "#209b76" : win.muted
+                                    Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 233; radius: 9; color: win.panel; border.color: win.line
@@ -1048,10 +1098,12 @@ ApplicationWindow {
                                 background: Rectangle { radius: 5; color: win.bg; border.color: win.line }
                                 onEditingFinished: project.setProperty("text",text)
                             }
-                            RowLayout {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                ActionButton { objectName: "engraveObjectButton"; text: "Gravieren"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 0; enabled: project.selected >= 0 && (!win.basic || project.layers[0].enabled); onClicked: project.setLayer(0) }
-                                ActionButton { objectName: "cutObjectButton"; text: "Schneiden"; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 1; enabled: project.selected >= 0 && (!win.basic || project.layers[1].enabled); onClicked: project.setLayer(1) }
+                                Text { text: "Was soll mit dem Motiv passieren?"; color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                ActionButton { objectName: "engraveObjectButton"; text: "Fläche gravieren"; hint: "Füllt die Form mit Gravurbahnen. Verwendet die Gravurwerte des Materials."; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 0 && !project.selection.engraveOutline; enabled: project.selected >= 0 && project.layers[0].enabled && (!project.material.engrave || project.material.engrave.enabled); onClicked: project.setBasicOperation("fill") }
+                                ActionButton { objectName: "outlineObjectButton"; text: "Rand gravieren"; hint: "Fährt nur die Linien der Vektorform ab. Verwendet die Gravurwerte, keine Schnittwerte. Für Bilder eine Vektorkontur anlegen."; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 0 && project.selection.engraveOutline; enabled: project.selected >= 0 && project.layers[0].enabled && (!project.material.engrave || project.material.engrave.enabled) && project.selection.canEngraveOutline; onClicked: project.setBasicOperation("outline") }
+                                ActionButton { objectName: "cutObjectButton"; text: "Durchschneiden"; hint: "Verwendet die Schnittwerte des Materials. Für einen markierten Rand stattdessen Rand gravieren wählen."; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 1; enabled: project.selected >= 0 && project.layers[1].enabled && (!project.material.cut || project.material.cut.enabled); onClicked: project.setBasicOperation("cut") }
                             }
                             ActionButton { text: project.selection.visible ? "Objekt ausblenden" : "Objekt einblenden"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: project.selected >= 0; onClicked: project.toggleVisible(project.selected) }
                             Rectangle { visible: !win.basic; Layout.fillWidth: true; height: 1; color: win.line }

@@ -533,7 +533,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
                 return fail("Rasterbilder mit Bildwerkzeugen drehen oder spiegeln.");
             QString error;
             auto p = JobPlanner::geometry(
-                a, error, a.layer >= 0 && m_layers[a.layer].toMap()["mode"] != "Schnitt");
+                a, error, !a.engraveOutline && a.layer >= 0 && m_layers[a.layer].toMap()["mode"] != "Schnitt");
             if (!error.isEmpty())
                 return fail(error);
             if (action == "simplify")
@@ -924,7 +924,7 @@ bool Document::exportSvg(const QUrl &url) const {
     for (const auto &a : m_items)
         if (a.page == m_activePage && a.visible && a.toolLayer == 0) {
             QString error;
-            auto path = JobPlanner::geometry(a, error, true);
+            auto path = JobPlanner::geometry(a, error, !a.engraveOutline);
             if (!error.isEmpty())
                 return false;
             QTransform t;
@@ -934,7 +934,7 @@ bool Document::exportSvg(const QUrl &url) const {
             out.writeAttribute("d", VectorUtil::svg(t.map(path)));
             out.writeAttribute("fill-rule",
                                path.fillRule() == Qt::OddEvenFill ? "evenodd" : "nonzero");
-            out.writeAttribute("fill", m_layers[a.layer].toMap()["mode"] == "Schnitt"
+            out.writeAttribute("fill", (a.engraveOutline || m_layers[a.layer].toMap()["mode"] == "Schnitt")
                                            ? "none"
                                            : layerColor(a.layer).name());
             out.writeAttribute("stroke", layerColor(a.layer).name());

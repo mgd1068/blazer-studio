@@ -19,6 +19,8 @@ class Controller : public QObject {
     bool respondToStatus = true, interleaveSettingsOnce = false;
     bool interleaveSettingsAlways = false;
     QByteArray minimumPower = "0";
+    bool respondToReset = true, holdBlocksCommands = false;
+    QString resetState = "Idle";
     int settingsRequests = 0;
     QSocketNotifier *notifier = nullptr;
     QByteArray realtime;
@@ -90,8 +92,10 @@ class Controller : public QObject {
                     if (c == 0x18) {
                         realtime.append(c);
                         buffer.clear();
-                        status = "Idle";
-                        reply("Grbl 1.3a ['$' for help]\r\n");
+                        status = resetState;
+                        banner = true;
+                        if (respondToReset)
+                            reply("Grbl 1.3a ['$' for help]\r\n");
                         continue;
                     }
                     if (c == '!') {
@@ -116,6 +120,8 @@ class Controller : public QObject {
                         auto line = QString::fromLatin1(buffer);
                         buffer.clear();
                         commands << line;
+                        if (holdBlocksCommands && status == "Hold")
+                            continue;
                         if (line == "$I")
                             reply("[VER:1.3a.20211103:]\r\n");
                         if (line == "$G")
@@ -126,8 +132,9 @@ class Controller : public QObject {
                             if (interleaveSettingsAlways ||
                                 (interleaveSettingsOnce && settingsRequests == 1))
                                 settings = "$30=1000<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0>\r\n";
-                            reply(settings + "$31=" + minimumPower + "\r\n$32=1\r\n$22=1\r\n$13=0\r\n"
-                                             "$130=200\r\n$131=150\r\n");
+                            reply(settings + "$31=" + minimumPower +
+                                  "\r\n$32=1\r\n$22=1\r\n$13=0\r\n"
+                                  "$130=200\r\n$131=150\r\n");
                         }
                         if (autoAck)
                             reply("ok\r\n");
@@ -151,9 +158,8 @@ class Controller : public QObject {
     }
     void report() {
         reply(("<" + status + "|MPos:" + QString::number(machinePosition.x()) + "," +
-               QString::number(machinePosition.y()) + ",0|WCO:" +
-               QString::number(workOffset.x()) + "," + QString::number(workOffset.y()) +
-               ",0|FS:0,0" +
+               QString::number(machinePosition.y()) + ",0|WCO:" + QString::number(workOffset.x()) +
+               "," + QString::number(workOffset.y()) + ",0|FS:0,0" +
                (withOverrides ? "|Ov:" + QString::number(feed) + ",100," + QString::number(power)
                               : QString()) +
                ">\r\n")
@@ -163,6 +169,81 @@ class Controller : public QObject {
 class GrblTest : public QObject {
     Q_OBJECT
   private slots:
+    void everyConnectionResetsHeldControllerBeforeAnyNormalCommand() {
+        Controller controller;
+        controller.status = "Hold";
+        controller.holdBlocksCommands = true;
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QVERIFY(!machine.connectionVerified());
+        QTRY_VERIFY(machine.ready());
+        QVERIFY(machine.connectionVerified());
+        QCOMPARE(controller.realtime.count(char(0x18)), 1);
+        QVERIFY(!controller.realtime.contains('~'));
+        QCOMPARE(controller.commands, QStringList({"M5 S0", "$I", "$$", "$G"}));
+        controller.status = "Run";
+        machine.start();
+        QTRY_VERIFY(controller.commands.contains("M4 S800"));
+        QVERIFY(machine.connectionVerified()); // Busy is distinct from verified connectivity.
+        machine.pause();
+        QVERIFY(machine.connectionVerified());
+        machine.stop();
+        QVERIFY(!machine.connectionVerified());
+        controller.resetState = "Idle";
+        QTRY_VERIFY(machine.ready());
+        QVERIFY(machine.connectionVerified());
+        const auto resets = controller.realtime.count(char(0x18));
+        machine.useSimulator();
+        QVERIFY(!machine.connectionVerified());
+        QVERIFY(machine.connectHardware(controller.port));
+        QVERIFY(!machine.connectionVerified());
+        QTRY_VERIFY(machine.ready());
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+        QVERIFY(machine.connectionVerified());
+    }
+    void oldRepliesCannotVerifyAConnectionBeforeItsResetBanner() {
+        Controller controller;
+        controller.respondToReset = false;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_COMPARE(controller.realtime.count(char(0x18)), 1);
+        controller.reply("ok\r\n[VER:1.3a.old:]\r\n$30=1000\r\n$31=0\r\n$32=1\r\n$13=0\r\n$130="
+                         "200\r\n$131=150\r\n[GC:G54]\r\n");
+        controller.report();
+        QTest::qWait(30);
+        QVERIFY(controller.commands.isEmpty());
+        QVERIFY(!session.ready());
+        QVERIFY(!session.verified());
+        QVERIFY(!session.configurationValid());
+        controller.reply("Grbl 1.3a ['$' for help]\r\n");
+        QTRY_VERIFY(session.ready());
+        QVERIFY(session.verified());
+        session.close();
+        QVERIFY(!session.verified());
+    }
+    void resetNeverUnlocksOrResumesBlockedController_data() {
+        QTest::addColumn<QString>("status");
+        for (const auto &s : {"Alarm", "Door", "Hold"})
+            QTest::newRow(s) << QString(s);
+    }
+    void resetNeverUnlocksOrResumesBlockedController() {
+        QFETCH(QString, status);
+        Controller controller;
+        controller.resetState = status;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(controller.commands.contains("$G"));
+        controller.report();
+        QTRY_COMPARE(session.state, status);
+        QVERIFY(!session.ready());
+        QVERIFY(!session.verified());
+        QVERIFY(!controller.realtime.contains('~'));
+        QVERIFY(!controller.commands.contains("$X"));
+        QVERIFY(!controller.commands.contains("$H"));
+    }
     void destroyingSessionClosesItsController_data() {
         QTest::addColumn<QString>("mode");
         for (const auto &mode : {"idle", "job", "paused", "focus", "unplugged", "closed"})

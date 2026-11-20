@@ -463,6 +463,70 @@ class CoreTest : public QObject {
         QVERIFY(!d.applyBasicMaterial(profile));
         QCOMPARE(d.projectBytes(), before);
     }
+    void beginnerOutlineUsesEngravingWithoutProfileMismatch() {
+        Document d;
+        d.newProject();
+        d.addShape("rect");
+        auto profile = MaterialLibrary::example();
+        auto engraving = profile["engrave"].toMap();
+        engraving["power"] = 17.; engraving["speed"] = 2400.; engraving["passes"] = 1;
+        profile["engrave"] = engraving;
+        auto cut = profile["cut"].toMap(); cut["enabled"] = false; profile["cut"] = cut;
+        QVERIFY(d.applyBasicMaterial(profile));
+        const auto before = d.projectBytes();
+        const auto fillKey = d.basicOperationKey();
+        d.setBasicOperation("outline");
+        QVERIFY(d.items()[0].engraveOutline);
+        QCOMPARE(d.items()[0].layer, 0);
+        QVERIFY(d.basicOperationKey() != fillKey);
+        QVERIFY(!d.materialModified());
+        QVERIFY(!d.beginnerSummary()["requiresAdvanced"].toBool());
+        const auto plan = JobPlanner::build(d);
+        QVERIFY2(plan.valid(), qPrintable(plan.errors.join("; ")));
+        QVERIFY(std::abs(plan.workLength - 160.) < .001);
+        int work = 0;
+        for (const auto &move : plan.moves) if (!move.rapid && move.power > 0) {
+            ++work; QCOMPARE(move.power, 17.); QCOMPARE(move.speed, 2400.); QCOMPARE(move.layer, 0);
+        }
+        QCOMPARE(work, 4);
+        const auto outline = d.projectBytes();
+        d.setBasicOperation("cut"); QCOMPARE(d.projectBytes(), outline);
+        QCOMPARE(QJsonDocument::fromJson(outline).object()["version"].toInt(), 12);
+        Document restored; QVERIFY(restored.restoreBytes(outline));
+        QVERIFY(restored.items()[0].engraveOutline);
+        QCOMPARE(JobPlanner::build(restored).workLength, plan.workLength);
+        d.undo(); QCOMPARE(d.projectBytes(), before);
+        d.redo(); QCOMPARE(d.projectBytes(), outline);
+        QVERIFY(d.applyBasicMaterial(profile)); // Material reapply must preserve edge-only geometry.
+        QVERIFY(d.items()[0].engraveOutline);
+        // An unused, disabled cut preset must not block the engraving operation.
+        d.setLayerSetting(1, "power", 80.); d.setLayerSetting(1, "enabled", true);
+        QVERIFY(!d.materialModified());
+        d.setObjectSetting("power", 91.);
+        QVERIFY(d.materialModified()); // A real output override still requires review.
+        d.setBasicOperation("fill");
+        QVERIFY(!d.items()[0].engraveOutline);
+        QVERIFY(JobPlanner::build(d).workLength > plan.workLength);
+    }
+    void outlineSchemaAndUnsupportedImageAreAtomic() {
+        Document d; d.newProject(); d.addShape("rect"); d.setLayer(0);
+        d.setBasicOperation("outline");
+        auto root = QJsonDocument::fromJson(d.projectBytes()).object();
+        auto objects = root["objects"].toArray(); auto object = objects[0].toObject();
+        object["engraveOutline"] = "true"; objects[0] = object; root["objects"] = objects;
+        const auto good = d.projectBytes();
+        QVERIFY(!d.restoreBytes(QJsonDocument(root).toJson())); QCOMPARE(d.projectBytes(), good);
+        root = QJsonDocument::fromJson(good).object(); root["version"] = 11;
+        QVERIFY(!d.restoreBytes(QJsonDocument(root).toJson())); QCOMPARE(d.projectBytes(), good);
+        QTemporaryDir dir; QImage image(8, 8, QImage::Format_ARGB32); image.fill(Qt::black);
+        const auto file = dir.filePath("image.png"); QVERIFY(image.save(file));
+        QVERIFY(d.importImage(QUrl::fromLocalFile(file)));
+        const auto before = d.projectBytes(); d.setBasicOperation("outline");
+        QCOMPARE(d.projectBytes(), before);
+        d.setBasicOperation("not-an-operation"); QCOMPARE(d.projectBytes(), before);
+        d.select(0); d.toggleSelection(1); const auto mixed = d.projectBytes();
+        d.setBasicOperation("outline"); QCOMPARE(d.projectBytes(), mixed);
+    }
     void beginnerUndoAtHistoryLimit() {
         Document d;
         d.newProject();

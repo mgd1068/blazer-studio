@@ -96,6 +96,12 @@ class GrblControllerAdapter final : public ControllerAdapter {
                           "G17",
                           "G94",
                           "S0"};
+        // Match the existing M3 / LightBurn setup. Do not enable auxiliary
+        // outputs on other profiles; their wiring has not been established.
+        const bool m3EnclosureFan =
+            profile.outputFingerprint() == DeviceProfile::m3Reference().outputFingerprint();
+        if (m3EnclosureFan)
+            lines << "M8";
         bool emitting = false;
         double lastPower = -1, lastFeed = -1;
         int lastSlice = 0;
@@ -135,7 +141,10 @@ class GrblControllerAdapter final : public ControllerAdapter {
                 lines << line;
             }
         }
-        lines << "M5 S0" << "G0";
+        lines << "M5 S0";
+        if (m3EnclosureFan)
+            lines << "M9";
+        lines << "G0";
         if (isCancelled(cancel))
             return ControllerProgram::failure(profile, sourceFingerprint, "Ausgabe abgebrochen.",
                                               true);
