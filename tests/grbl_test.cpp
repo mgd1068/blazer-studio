@@ -168,7 +168,68 @@ class Controller : public QObject {
 };
 class GrblTest : public QObject {
     Q_OBJECT
+    void requireReference(ControllerSession &session) {
+        if (session.status().positionReferenced) return;
+        session.home();
+        QTRY_VERIFY(session.status().ready && session.status().positionReferenced);
+    }
+    void requireReference(Machine &machine) {
+        if (machine.positionReferenced()) return;
+        machine.home();
+        QTRY_VERIFY(machine.ready() && machine.positionReferenced());
+    }
   private slots:
+    void reportedZeroAfterConnectIsNotAReferencedStartPosition() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        QCOMPARE(session.position, QPointF(0, 0));
+        QVERIFY(!session.status().positionReferenced);
+        QVERIFY(!controller.commands.contains("$H"));
+        Document document;
+        document.newProject(); document.addShape("rect");
+        const auto before = controller.commands;
+        session.start(document.job());
+        session.frame({{"valid", true}, {"x", 0}, {"y", 0}, {"width", 200}, {"height", 150}});
+        session.jog(1, 0);
+        session.zero();
+        QTest::qWait(40);
+        QCOMPARE(controller.commands, before); // No G0/G1/G10/M8/M4, even at reported 0/0.
+        requireReference(session);
+        QVERIFY(controller.commands.contains("$H"));
+        session.start(document.job());
+        QTRY_VERIFY(controller.commands.contains("M4 S800"));
+        session.stop();
+        QVERIFY(!session.status().positionReferenced);
+        QTRY_VERIFY(session.ready());
+        QVERIFY(!session.status().positionReferenced);
+        const auto afterReset = controller.commands;
+        session.start(document.job());
+        QTest::qWait(40);
+        QCOMPARE(controller.commands, afterReset);
+        session.close();
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        QVERIFY(!session.status().positionReferenced);
+    }
+    void idleWithoutHomingAcknowledgementDoesNotEstablishReference() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port)); QTRY_VERIFY(session.ready());
+        controller.autoAck = false;
+        session.home();
+        QTRY_VERIFY(controller.commands.contains("M5"));
+        controller.report(); QTest::qWait(30);
+        QVERIFY(!session.status().positionReferenced);
+        controller.reply("ok\r\n");
+        QTRY_VERIFY(controller.commands.contains("$H"));
+        controller.report(); QTest::qWait(30);
+        QVERIFY(!session.status().positionReferenced);
+        controller.reply("error:9\r\n");
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().positionReferenced);
+    }
     void everyConnectionResetsHeldControllerBeforeAnyNormalCommand() {
         Controller controller;
         controller.status = "Hold";
@@ -184,6 +245,7 @@ class GrblTest : public QObject {
         QCOMPARE(controller.realtime.count(char(0x18)), 1);
         QVERIFY(!controller.realtime.contains('~'));
         QCOMPARE(controller.commands, QStringList({"M5 S0", "$I", "$$", "$G"}));
+        requireReference(machine);
         controller.status = "Run";
         machine.start();
         QTRY_VERIFY(controller.commands.contains("M4 S800"));
@@ -257,6 +319,7 @@ class GrblTest : public QObject {
         QVERIFY2(session, qPrintable(error));
         QVERIFY(session->open(controller.port));
         QTRY_VERIFY(session->status().ready);
+        requireReference(*session);
         if (mode == "job" || mode == "paused") {
             Document document;
             document.newProject();
@@ -304,6 +367,7 @@ class GrblTest : public QObject {
         auto machine = std::make_unique<Machine>(&document);
         QVERIFY(machine->connectHardware(controller.port));
         QTRY_VERIFY(machine->ready());
+        requireReference(*machine);
         controller.status = "Run";
         machine->start();
         QTRY_VERIFY(controller.commands.contains("M4 S800"));
@@ -352,6 +416,7 @@ class GrblTest : public QObject {
         QSignalSpy changes(session.get(), &ControllerSession::changed);
         QVERIFY(session->open(controller.port));
         QTRY_VERIFY(session->status().ready);
+        requireReference(*session);
         controller.machinePosition = {12, 18};
         controller.report();
         QTRY_COMPARE(session->status().position, QPointF(12, 18));
@@ -395,6 +460,7 @@ class GrblTest : public QObject {
         GrblSession session;
         QVERIFY(session.open(controller.port));
         QTRY_VERIFY(session.ready());
+        requireReference(session);
         Document document;
         document.newProject();
         document.addShape("rect");
@@ -452,6 +518,7 @@ class GrblTest : public QObject {
         GrblSession session;
         QVERIFY(session.open(controller.port));
         QTRY_VERIFY(session.ready());
+        requireReference(session);
         Document document;
         document.newProject();
         document.addShape("rect");
@@ -553,6 +620,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         Document d;
         d.newProject();
         d.addShape("rect");
@@ -581,6 +649,7 @@ class GrblTest : public QObject {
             GrblSession session;
             QVERIFY(session.open(c.port));
             QTRY_VERIFY(session.ready());
+            requireReference(session);
             Document d;
             d.newProject();
             d.addShape("rect");
@@ -624,6 +693,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         const auto before = c.commands.size();
         s.jog(2, 0);
         QVERIFY(!s.busy());
@@ -652,6 +722,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.autoAck = c.respondToStatus = false;
         s.zero();
         QTRY_VERIFY(c.commands.contains("M5"));
@@ -686,6 +757,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.respondToStatus = false;
         c.reply(status + "\r\n");
         QTRY_VERIFY(!s.ready());
@@ -755,6 +827,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.autoAck = false;
         Document d;
         d.addShape("rect");
@@ -774,6 +847,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.autoAck = false;
         Document d;
         d.addShape("rect");
@@ -789,6 +863,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.autoAck = false;
         Document d;
         d.addShape("rect");
@@ -820,6 +895,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.status = "Run";
         Document d;
         d.addShape("rect");
@@ -841,6 +917,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.autoAck = false;
         Document d;
         d.addShape("rect");
@@ -859,6 +936,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY_WITH_TIMEOUT(s.ready(), 4000);
+        requireReference(s);
         QTRY_VERIFY(s.overrideFeedback);
         QVERIFY(s.overrides(125, 70));
         QTRY_COMPARE(c.feed, 125);
@@ -887,6 +965,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY_WITH_TIMEOUT(s.ready(), 4000);
+        requireReference(s);
         Document d;
         d.newProject();
         d.addShape("rect");
@@ -910,6 +989,7 @@ class GrblTest : public QObject {
         Machine machine(&d);
         QVERIFY(machine.connectHardware(c.port));
         QTRY_VERIFY(machine.ready());
+        requireReference(machine);
         QVERIFY(!machine.simulation());
         const int first = c.commands.size();
         const auto expected = d.job().gcode();
@@ -940,6 +1020,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         c.status = "Run";
         Document d;
         s.start(d.job());

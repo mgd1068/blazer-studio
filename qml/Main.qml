@@ -49,6 +49,7 @@ ApplicationWindow {
     readonly property string startBlockReason: {
         if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
         if (!project.jobSummary.valid) return "Auftrag noch nicht bereit: " + project.jobSummary.errors.join(" ");
+        if (!simulationMode && !machine.positionReferenced) return "Maschinenreferenz fehlt. Die aktuelle Position ist noch kein verlässlicher Nullpunkt. Referenzfahrt und Arbeitsnullpunkt im Bereich »Gerät« prüfen; nach einer Kollision keinen neuen Versuch starten.";
         if (basic && !simulationMode) {
             if (!projectHeadMatches) return "Laseraufsatz und Material passen nicht zusammen. Links das passende Material auswählen.";
             if (project.beginnerSummary.requiresAdvanced) return project.beginnerSummary.reason;
@@ -930,7 +931,7 @@ ApplicationWindow {
                                 }
                                 Text {
                                     objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
-                                    text: win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : machine.state + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
+                                    text: win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : machine.state + (machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
                                     color: win.grblVerified ? "#209b76" : win.muted
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
@@ -947,11 +948,11 @@ ApplicationWindow {
                                                 spacing: 4
                                                 Repeater { model: [1,10,25]; delegate: ActionButton { required property int modelData; text: modelData + " mm"; dark: win.night; compact: true; selected: win.step === modelData; onClicked: win.step = modelData } }
                                             }
-                                            ActionButton { visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: machine.connected && !machine.busy; onClicked: machine.setWorkZero() }
+                                            ActionButton { visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: machine.ready && machine.positionReferenced; onClicked: machine.setWorkZero() }
                                             ActionButton { text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.home() }
                                         }
                                         GridLayout {
-                                            columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: machine.connected && !machine.busy && !machine.firing
+                                            columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: machine.ready && machine.positionReferenced
                                             Item { width: 48; height: 46 }
                                             ActionButton { text: "↑"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(0,win.step) }
                                             Item { width: 48; height: 46 }
@@ -995,7 +996,7 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 8
-                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.ready && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
+                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.ready && machine.positionReferenced && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
                                     ActionButton { objectName: "pauseJobButton"; text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
                                     ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }

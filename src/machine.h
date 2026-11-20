@@ -29,6 +29,9 @@ class Machine : public Simulator {
             session->zero();
     }
     bool ready() const override { return live ? session->status().ready : Simulator::ready(); }
+    bool positionReferenced() const override {
+        return live ? session->status().positionReferenced : Simulator::positionReferenced();
+    }
     bool connected() const override {
         return live ? session->status().connected : Simulator::connected();
     }

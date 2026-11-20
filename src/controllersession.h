@@ -15,6 +15,7 @@ struct ControllerStatus {
     QPointF position;
     QString state = "Getrennt";
     bool verified = false;
+    bool positionReferenced = false;
 };
 class ControllerSession : public QObject {
     Q_OBJECT

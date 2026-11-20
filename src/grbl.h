@@ -15,7 +15,7 @@ class GrblSession : public ControllerSession {
     bool open(const QString &port) override;
     ControllerStatus status() const override {
         return {connected(), ready(),  busy(),   executing(), paused,
-                firing,      progress, position, state,       verified()};
+                firing,      progress, position, state,       verified(), positionReferenced};
     }
     QStringList logEntries() const override { return log; }
     const DeviceProfile &deviceProfile() const override { return m_deviceProfile; }
@@ -74,6 +74,7 @@ class GrblSession : public ControllerSession {
     bool contaminatedConfiguration = false, pauseRequested = false;
     bool handlingFailure = false;
     bool zeroPending = false;
+    bool positionReferenced = false, homingPending = false;
     int configurationRetries = 0;
     QString controllerState;
     QPointF offset;

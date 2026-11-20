@@ -121,6 +121,7 @@ bool GrblSession::open(const QString &port) {
     return true;
 }
 void GrblSession::handshake() {
+    positionReferenced = homingPending = false;
     awaitingReset = false;
     connectionVerified = false;
     // Settings printouts must not be interrupted by our status polling. Some
@@ -148,6 +149,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    positionReferenced = homingPending = false;
     const bool active = busy() || firing;
     poll.stop();
     timeout.stop();
@@ -175,6 +177,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message) {
+    positionReferenced = homingPending = false;
     // A write/flush on a lost USB port can synchronously emit another serial
     // error. Do not recurse while attempting the best-effort shutdown.
     if (handlingFailure)
@@ -351,6 +354,7 @@ void GrblSession::line(const QByteArray &s) {
             knownPosition = true;
         }
         if (controllerState == "Alarm" || controllerState == "Door") {
+            positionReferenced = homingPending = false;
             connectionVerified = false;
             if (executing() || firing) {
                 fail("Controller gesperrt während Auftrag: " + controllerState +
@@ -382,6 +386,11 @@ void GrblSession::line(const QByteArray &s) {
             waitingIdle = false;
             timeout.stop();
             progress = 1;
+            if (homingPending) {
+                positionReferenced = true;
+                homingPending = false;
+                append("Referenzfahrt abgeschlossen; Maschinenposition vom Controller bestätigt.");
+            }
             firing = false;
             paused = pauseRequested = false;
             state = "Bereit";
@@ -449,9 +458,9 @@ void GrblSession::line(const QByteArray &s) {
                 serial.write("?");
                 poll.start();
             } else {
-                if (zeroPending) {
-                    // A report queued before G10 completed may still describe
-                    // the old work origin. Require a later WCO confirmation.
+                if (zeroPending || homingPending) {
+                    // Reports queued before G10 or $H completed may describe
+                    // the old origin/position. Require fresh position and WCO.
                     knownPosition = knownOffset = false;
                     zeroPending = false;
                 }
@@ -516,6 +525,10 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     return connected() && busy();
 }
 void GrblSession::start(const JobPlan &job) {
+    if (!positionReferenced) {
+        append("Start gesperrt: Maschinenreferenz fehlt. Eine gemeldete Position allein genügt nicht.");
+        return;
+    }
     if (job.deviceProfile().outputFingerprint() != m_deviceProfile.outputFingerprint()) {
         append("Geräteprofil des Auftrags passt nicht zur geprüften Verbindung.");
         return;
@@ -565,6 +578,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    positionReferenced = homingPending = false;
     if (!connected())
         return;
     focusTimer.stop();
@@ -589,6 +603,10 @@ void GrblSession::stop() {
     append("Feed Hold und Soft-Reset gesendet; keine automatische Fortsetzung.");
 }
 void GrblSession::jog(double dx, double dy) {
+    if (!positionReferenced) {
+        append("Bewegung gesperrt: Maschinenreferenz fehlt.");
+        return;
+    }
     const auto target = position + QPointF(n(dx).toDouble(), n(dy).toDouble());
     if (!std::isfinite(dx) || !std::isfinite(dy) || !insideMachineBed(position) ||
         !insideMachineBed(target)) {
@@ -598,6 +616,7 @@ void GrblSession::jog(double dx, double dy) {
     commands({"M5", "$J=G91 G21 X" + n(dx) + " Y" + n(dy) + " F600"});
 }
 void GrblSession::home() {
+    if (busy() || firing) return;
     if (!homing) {
         append("Referenzfahrt nicht aktiviert ($22).");
         return;
@@ -609,13 +628,22 @@ void GrblSession::home() {
         acked = 0;
         progress = 0;
         paused = false;
+        positionReferenced = false;
+        homingPending = true;
         state = "Referenzfahrt";
         pump();
         emit changed();
-    } else
-        commands({"M5", "$H"});
+    } else if (ready()) {
+        positionReferenced = false;
+        homingPending = true;
+        if (!commands({"M5", "$H"})) homingPending = false;
+    }
 }
 void GrblSession::zero() {
+    if (!positionReferenced) {
+        append("Arbeitsnullpunkt nicht gesetzt: Maschinenreferenz fehlt.");
+        return;
+    }
     if (commands({"M5", "G10 L20 P1 X0 Y0", "G54"})) {
         zeroPending = true;
         knownPosition = false;
@@ -623,6 +651,10 @@ void GrblSession::zero() {
     }
 }
 void GrblSession::frame(const QVariantMap &b) {
+    if (!positionReferenced) {
+        append("Rahmenfahrt gesperrt: Maschinenreferenz fehlt.");
+        return;
+    }
     QRectF r(b.value("x").toDouble(), b.value("y").toDouble(), b.value("width").toDouble(),
              b.value("height").toDouble());
     if (!b.value("valid").toBool() || !Geometry::insideBed(r, m_deviceProfile.workArea())) {

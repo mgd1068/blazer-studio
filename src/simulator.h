@@ -8,6 +8,7 @@
 class Simulator : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool ready READ ready NOTIFY changed)
+    Q_PROPERTY(bool positionReferenced READ positionReferenced NOTIFY changed)
     Q_PROPERTY(bool connected READ connected NOTIFY changed)
     Q_PROPERTY(QString state READ state NOTIFY changed)
     Q_PROPERTY(double x READ x NOTIFY changed)
@@ -29,6 +30,7 @@ class Simulator : public QObject {
                         : JobPlan(m_deviceProfile);
     }
     virtual bool ready() const { return connected() && !busy() && !firing(); }
+    virtual bool positionReferenced() const { return true; } // No physical coordinates in simulation.
     virtual bool connected() const { return m_mode != Mode::Disconnected && m_mode != Mode::Fault; }
     virtual QString state() const;
     virtual double x() const { return m_x; }

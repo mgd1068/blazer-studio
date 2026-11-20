@@ -7,10 +7,26 @@ Blazer Studio startet im **Simulator**. Eine echte Verbindung entsteht erst im B
 Beim unveränderten M3-Referenzprofil wird vor den Bearbeitungsbahnen `M8` und
 nach `M5 S0` am Auftragsende `M9` ausgegeben. Diese Zuordnung folgt der lokalen
 LightBurn-Einstellung (`AirAssistM7=false`) und der vorhandenen Datei `001.nc`.
-Die Wirkung am Gehäuselüfter ist noch am Gerät zu bestätigen. Andere Profile
+Der Nutzer meldete am 20.11.2026 weiterhin einen ausgeschalteten Gehäuselüfter. Diese Befehlsfolge ist damit keine nachgewiesene Lüfterlösung. Andere Profile
 und die laserfreie Rahmenfahrt erhalten diese Befehle nicht. Eine Bestätigung
 des Befehls durch GRBL belegt keinen tatsächlichen Luftstrom; ein automatischer
 Nachlauf oder eine Lüfterüberwachung sind damit nicht implementiert.
+
+## Maschinenreferenz und Arbeitsnullpunkt
+
+Eine serielle Verbindung, `Idle` und ein Statuswert von 0/0 belegen keine
+physisch bekannte Maschinenposition. Nach Verbindung/Reset/STOPP/Alarm wird
+keine Referenz übernommen. Erst ein ausdrücklich ausgelöstes und vollständig
+quittiertes `$H` mit anschließend frischem Positions-/WCO-Bericht im Leerlauf
+setzt die Referenzfreigabe. Ohne sie sind Jobstart, Rahmenfahrt, Joggen und
+Setzen des Arbeitsnullpunkts im Backend gesperrt. Die Oberfläche erklärt die
+fehlende Referenz. Die Verbindung selbst bleibt für Diagnose und STOPP nutzbar.
+Es gibt keine automatische Referenzfahrt oder Fortsetzung eines alten Auftrags.
+
+Diese Protokollprüfung beweist keine korrekte Achsrichtung, keinen mechanisch
+kalibrierten Verfahrbereich und keine korrekte M3-Firmwarekoordinatenkonvention.
+Nach der gemeldeten Kollision bleiben diese Punkte offen; daraus entsteht keine
+Freigabe für einen neuen Hardwareversuch.
 
 ## Projekt → Pfade → Vorschau → Ausgabe
 

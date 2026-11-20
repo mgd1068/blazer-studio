@@ -25,6 +25,8 @@ class UiMachine : public Simulator {
   public:
     bool simulation() const { return m_simulation; }
     bool connectionVerified() const { return m_verified; }
+    bool positionReferenced() const override { return m_referenced; }
+    void setPositionReferenced(bool value) { m_referenced = value; emit changed(); }
     void setConnectionVerified(bool value) { m_verified = value; emit changed(); }
     void setSimulation(bool value) {
         m_simulation = value;
@@ -32,7 +34,7 @@ class UiMachine : public Simulator {
     }
 
   private:
-    bool m_simulation = true, m_verified = false;
+    bool m_simulation = true, m_verified = false, m_referenced = true;
 };
 class UiTest : public QObject {
     Q_OBJECT
@@ -531,6 +533,10 @@ class UiTest : public QObject {
         QVERIFY(project.job().valid());
         machine.setSimulation(false); // UI state only; this fixture has no serial transport.
         w->setProperty("page", 1);
+        machine.setPositionReferenced(false);
+        QTRY_VERIFY(!item("startJobButton")->isEnabled());
+        QTRY_VERIFY(item("startReadinessText")->property("text").toString().contains("Maschinenreferenz fehlt"));
+        machine.setPositionReferenced(true);
         QTRY_VERIFY(!item("startJobButton")->isEnabled());
         click(item("startJobButton"));
         QVERIFY(!machine.busy());
