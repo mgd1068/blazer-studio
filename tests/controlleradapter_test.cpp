@@ -40,6 +40,8 @@ class ControllerAdapterTest : public QObject {
         QCOMPARE(lines.count("M8"), 1);
         QCOMPARE(lines.count("M9"), 1);
         QVERIFY(lines.indexOf("M8") < lines.indexOf("M4 S200"));
+        QVERIFY(lines.indexOf("G0 X0.000 Y0.000") >= 0);
+        QVERIFY(lines.indexOf("G0 X0.000 Y0.000") < lines.indexOf("M4 S200"));
         QVERIFY(lines.indexOf("M9") > lines.indexOf("M5 S0"));
         auto data = DeviceProfile::m3Reference().toJson();
         data["id"] = "other-grbl-machine";

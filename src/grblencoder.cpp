@@ -102,6 +102,10 @@ class GrblControllerAdapter final : public ControllerAdapter {
             profile.outputFingerprint() == DeviceProfile::m3Reference().outputFingerprint();
         if (m3EnclosureFan)
             lines << "M8";
+        // A shape touching the model origin may have no initial rapid move.
+        // The real head can be elsewhere: reach the first edge with output off.
+        if (!plan.moves.isEmpty() && !plan.moves[0].rapid)
+            lines << "G0 X" + num(plan.moves[0].from.x()) + " Y" + num(plan.moves[0].from.y());
         bool emitting = false;
         double lastPower = -1, lastFeed = -1;
         int lastSlice = 0;
