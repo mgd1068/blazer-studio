@@ -13,8 +13,10 @@ class DeviceManager : public QObject {
     Q_PROPERTY(QVariantMap active READ active NOTIFY changed)
     Q_PROPERTY(QString activeId READ activeId NOTIFY changed)
     Q_PROPERTY(QString bindingKey READ bindingKey NOTIFY changed)
+    Q_PROPERTY(QString parameterHash READ parameterHash NOTIFY changed)
     Q_PROPERTY(QString message READ message NOTIFY changed)
     Q_PROPERTY(QString changeBlockReason READ changeBlockReason NOTIFY changed)
+    Q_PROPERTY(QStringList endpoints READ endpoints NOTIFY changed)
   public:
     explicit DeviceManager(Document *document, Machine *machine, QString path = {},
                            QObject *parent = nullptr);
@@ -22,8 +24,11 @@ class DeviceManager : public QObject {
     QVariantMap active() const;
     QString activeId() const { return bindingKey().isEmpty() ? QString() : selectedId; }
     QString bindingKey() const;
+    QString parameterHash() const;
     QString message() const { return lastMessage; }
     QString changeBlockReason() const;
+    QStringList endpoints() const { return discoveredEndpoints; }
+    Q_INVOKABLE void refreshEndpoints();
     Q_INVOKABLE QVariantMap details(const QString &id) const { return library.instance(id); }
     Q_INVOKABLE QString addCurrent(QString name, QString endpoint);
     Q_INVOKABLE QString importProfile(const QUrl &url, QString name, QString endpoint);
@@ -42,6 +47,7 @@ class DeviceManager : public QObject {
     Machine *machine;
     DeviceLibrary library;
     QString selectedId, selectedBinding, lastMessage;
+    QStringList discoveredEndpoints;
     bool activating = false;
     bool changing = false;
     struct Mutation {

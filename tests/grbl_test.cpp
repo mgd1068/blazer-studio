@@ -183,12 +183,51 @@ class GrblTest : public QObject {
     }
     void requireReference(Machine &machine) {
         supplySyntheticContract(*static_cast<GrblSession *>(machine.session.get()));
+        machine.accessory = AccessoryContract(true);
+        QVERIFY(machine.accessory.configure(AccessoryContract::Role::EnclosureExtraction,
+                                             {"synthetic-pty-extraction", "virtual fixture only, no hardware", true}));
+        const auto request = machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
+        QVERIFY(request);
+        QVERIFY(machine.accessory.acknowledge(*request, true));
+        const auto now = machine.accessoryClock.elapsed();
+        QVERIFY(machine.accessory.observe(AccessoryContract::Role::EnclosureExtraction,
+                                         AccessoryContract::PhysicalState::Flowing,
+                                         "virtual airflow fixture", now, now));
         if (machine.positionReferenced())
             return;
         machine.home();
         QTRY_VERIFY(machine.ready() && machine.positionReferenced());
     }
   private slots:
+    void facadeRejectsUnknownExtractionDespiteSyntheticMotionContract() {
+        Controller controller;
+        Document document; document.setBackgroundPlanning(false); document.newProject(); document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        machine.accessory = AccessoryContract(true); // No real mapping exists in production.
+        QVERIFY(machine.motionSafetyError().isEmpty());
+        QVERIFY(machine.extractionSafetyError().contains("Ausgangszuordnung"));
+        const auto before = controller.commands;
+        machine.start(); machine.focus(true);
+        QTest::qWait(60);
+        QCOMPARE(controller.commands, before);
+        QVERIFY(!machine.firing());
+    }
+    void lostAirflowStopsAnActiveSyntheticJobWithoutResumeOrAccessoryOff() {
+        Controller controller;
+        Document document; document.setBackgroundPlanning(false); document.newProject(); document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        controller.status = "Run";
+        machine.start(); QTRY_VERIFY(controller.commands.contains("M4 S800"));
+        const auto resetCount = controller.realtime.count(char(0x18));
+        QTRY_VERIFY_WITH_TIMEOUT(controller.realtime.count(char(0x18)) > resetCount, 4500);
+        QVERIFY(!controller.realtime.contains('~'));
+        QVERIFY(!controller.commands.contains("M9"));
+        QVERIFY(!machine.accessoryJobActive);
+    }
     void homingAloneNeverCommissionsARealMachineCoordinateContract() {
         Controller c;
         GrblSession s;

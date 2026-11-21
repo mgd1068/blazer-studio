@@ -1,6 +1,8 @@
 #pragma once
 #include "controllersession.h"
 #include "simulator.h"
+#include "accessorycontract.h"
+#include <QElapsedTimer>
 #include <memory>
 class Document;
 class Machine : public Simulator {
@@ -9,6 +11,8 @@ class Machine : public Simulator {
     Q_PROPERTY(QVariantList capabilities READ capabilities CONSTANT)
     Q_PROPERTY(bool connectionVerified READ connectionVerified NOTIFY changed)
     Q_PROPERTY(QString motionSafetyError READ motionSafetyError NOTIFY changed)
+    Q_PROPERTY(QString extractionSafetyError READ extractionSafetyError NOTIFY changed)
+    Q_PROPERTY(QStringList processingSafetyErrors READ processingSafetyErrors NOTIFY changed)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
@@ -20,6 +24,17 @@ class Machine : public Simulator {
     QVariantList capabilities() const;
     QString motionSafetyError() const {
         return live && session ? session->status().motionSafetyError : QString();
+    }
+    QString extractionSafetyError() const {
+        return live ? accessory.preflightError(accessoryClock.elapsed()) : QString();
+    }
+    QStringList processingSafetyErrors() const {
+        if (!live) return {};
+        QStringList errors;
+        if (!motionSafetyError().isEmpty()) errors << motionSafetyError();
+        if (!positionReferenced()) errors << "Maschinenreferenz fehlt.";
+        if (!extractionSafetyError().isEmpty()) errors << extractionSafetyError();
+        return errors;
     }
     Q_INVOKABLE bool setOverrides(int feed, int power) {
         return live && session && session->overrides(feed, power);
@@ -70,4 +85,8 @@ class Machine : public Simulator {
     void syncDeviceProfile();
     bool live = false;
     const HardwareAccess hardwareAccess;
+    AccessoryContract accessory{true};
+    QElapsedTimer accessoryClock;
+    bool accessoryJobActive = false;
+    QTimer accessoryWatchdog;
 };

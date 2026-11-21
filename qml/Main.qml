@@ -13,14 +13,29 @@ ApplicationWindow {
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
     readonly property bool grblVerified: !simulationMode && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
+    readonly property var deviceService: typeof deviceManager !== "undefined" ? deviceManager : null
+    readonly property var testLedger: typeof materialTestLedger !== "undefined" ? materialTestLedger : null
+    property bool preferencesSyncing: true
     property bool basic: true
     property bool proofConfirmed: false
     property string probeKey: ""
-    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey
+    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey+(deviceService ? deviceService.bindingKey+deviceService.parameterHash : "")
     readonly property bool isBasicProbe: probeKey===parameterKey && project.count===1 && project.selection.width===5 && project.selection.height===5
     onParameterKeyChanged: proofConfirmed=false
-    onBasicChanged: if(basic && page>2)page=0
+    onBasicChanged: {
+        if (basic && page > 2) page = 0
+        if (!preferencesSyncing && typeof appServices !== "undefined" && typeof appServices.setBeginnerMode === "function") appServices.setBeginnerMode(basic)
+    }
     property bool night: false
+    onNightChanged: if (!preferencesSyncing && typeof appServices !== "undefined" && typeof appServices.setDarkTheme === "function") appServices.setDarkTheme(night)
+    function syncPreferences() {
+        preferencesSyncing = true
+        if (typeof appServices !== "undefined") {
+            if (typeof appServices.darkTheme !== "undefined") night = appServices.darkTheme
+            if (typeof appServices.beginnerMode !== "undefined") basic = appServices.beginnerMode
+        }
+        preferencesSyncing = false
+    }
     property int page: 0
     property int operation: 1
     property string frameScope: "job"
@@ -43,12 +58,14 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible
+    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
         if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
         if (!project.jobSummary.valid) return "Auftrag noch nicht bereit: " + project.jobSummary.errors.join(" ");
+        if (!simulationMode && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0) return machine.processingSafetyErrors.join("\n");
+        if (!simulationMode && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length > 0) return machine.motionSafetyError;
         if (!simulationMode && !machine.positionReferenced) return "Maschinenreferenz fehlt. Die aktuelle Position ist noch kein verlässlicher Nullpunkt. Referenzfahrt und Arbeitsnullpunkt im Bereich »Gerät« prüfen; nach einer Kollision keinen neuen Versuch starten.";
         if (basic && !simulationMode) {
             if (!projectHeadMatches) return "Laseraufsatz und Material passen nicht zusammen. Links das passende Material auswählen.";
@@ -119,6 +136,15 @@ ApplicationWindow {
         if(win.lastProjectSaveFolder.toString().length>0)saveDialog.currentFolder=win.lastProjectSaveFolder
         if(project.fileUrl.toString().length>0)saveDialog.selectedFile=project.fileUrl
         saveDialog.open()
+    }
+    DeviceManagerDialog { id: deviceDialog; manager: win.deviceService; dark: win.night; onAboutToShow: machine.focus(false) }
+    BarcodeDialog { id: barcodeDialog; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
+    MaterialTestRecordDialog { id: materialRecordDialog; manager: win.deviceService; ledger: win.testLedger; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
+    SettingsBundleDialog { id: settingsBundleDialog; service: typeof appServices !== "undefined" ? appServices : null; dark: win.night; onAboutToShow: machine.focus(false) }
+    Connections {
+        target: typeof appServices !== "undefined" ? appServices : null
+        ignoreUnknownSignals: true
+        function onChanged() { if (!win.preferencesSyncing) win.syncPreferences() }
     }
     ProjectDialog {
         id: projectDetails
@@ -284,6 +310,7 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Undo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.undo() }
     Shortcut { sequences: [StandardKey.Redo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.redo() }
     Shortcut { sequence: "Ctrl+I"; enabled: !projectDialogActive; onActivated: importDialog.open() }
+    Shortcut { objectName: "applicationStopShortcut"; sequence: "Ctrl+."; context: Qt.ApplicationShortcut; onActivated: machine.stop() }
     Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDialogActive; onActivated: { canvas.cancelGuideDrag(); canvas.selectedGuideId=""; machine.stop(); project.select(-1) } }
     FileDialog { id: importDialog; objectName: "importMotifDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik, GCode oder Modell importieren"; nameFilters: ["Geometrie, Bilder und Modelle (*.svg *.dxf *.hpgl *.plt *.gc *.gcode *.nc *.rd *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2 *.mage)"]; onAccepted: win.importMotif(selectedFile) }
     Component {
@@ -376,6 +403,7 @@ ApplicationWindow {
         onAccepted: win.continueStartup()
     }
     Component.onCompleted: {
+        win.syncPreferences();
         win.refreshFraming(); saveDialog=saveDialogFactory.createObject(win)
         // These offline CLI modes cannot access hardware and have no interactive startup.
         if(Qt.application.arguments.some(arg=>["--screenshot","--export-gcode","--self-test"].indexOf(arg)>=0))win.continueStartup()
@@ -470,7 +498,7 @@ ApplicationWindow {
                 text: "■  STOPP"
                 implicitWidth: 112; implicitHeight: 44
                 font.pixelSize: 15; font.bold: true
-                hint: "Bricht den Auftrag sofort per Software ab. Keine automatische Fortsetzung. Ersetzt keinen Not-Aus am Gerät."
+                hint: "STOPP auch mit Strg+. · Bricht den Auftrag sofort per Software ab. Keine automatische Fortsetzung. Ersetzt keinen Not-Aus am Gerät."
                 onClicked: machine.stop()
                 contentItem: Text { text: globalStop.text; font: globalStop.font; color: "white"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                 background: Rectangle { radius: 6; color: globalStop.pressed ? "#86241f" : globalStop.hovered ? "#c4342b" : "#b52d25"; border.color: "#ed827b"; border.width: 1 }
@@ -511,6 +539,7 @@ ApplicationWindow {
                         onAboutToShow: machine.focus(false)
                         MenuItem { objectName: "projectMetadataMenuItem"; text: "Projektangaben …"; onTriggered: projectDetails.open() }
                         MenuItem { objectName: "historyMenuItem"; text: "Bearbeitungsverlauf …"; onTriggered: historyDialog.open() }
+                        MenuItem { objectName: "settingsBundleMenuItem"; text: "Bedieneinstellungen übertragen …"; onTriggered: settingsBundleDialog.open() }
                         MenuSeparator {}
                         MenuItem { objectName: "newTemplateMenuItem"; text: "Neu aus Vorlage …"; onTriggered: win.requestAction("template") }
                         MenuItem { objectName: "saveTemplateMenuItem"; text: "Als Vorlage speichern …"; onTriggered: saveTemplateDialog.open() }
@@ -576,9 +605,10 @@ ApplicationWindow {
                             anchors.fill: parent; anchors.margins: 12; spacing: 5
                             Text { objectName: "deviceProfileName"; width: parent.width; elide: Text.ElideRight; textFormat: Text.PlainText; text: "◈  " + project.deviceInfo.name; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
                             Text { width: parent.width; elide: Text.ElideRight; textFormat: Text.PlainText; text: project.bedWidth+" × "+project.bedHeight+" mm  ·  "+project.deviceInfo.controller; color: win.muted; font.pixelSize: 11 }
-                            Text { text: "Projektprofil"; color: "#299679"; font.pixelSize: 12 }
+                            Text { width: parent.width; elide: Text.ElideRight; textFormat: Text.PlainText; text: win.deviceService ? (win.deviceService.activeId.length > 0 ? win.deviceService.active.name : "Kein physisches Gerät gewählt") : "Projektprofil"; color: "#299679"; font.pixelSize: 12 }
                         }
                     }
+                    ActionButton { objectName: "manageDevicesButton"; text: "Geräte verwalten …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.deviceService; enabled: win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true
                         Text { text: "Laseraufsatz / Toolkopf"; color: win.muted; font.pixelSize: 11 }
@@ -686,6 +716,7 @@ ApplicationWindow {
                         onClicked: win.showManufacturerReference()
                     }
                     ActionButton { objectName: "materialTestButton"; text: "Materialtest"; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: materialTestDialog.open() }
+                    ActionButton { objectName: "materialTestHistoryButton"; text: "Testbeobachtung & Historie …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.testLedger; onClicked: materialRecordDialog.open() }
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     RowLayout {
                         SectionLabel { text: "OBJEKTE"; dark: win.night; Layout.fillWidth: true }
@@ -775,6 +806,7 @@ ApplicationWindow {
                             MenuItem { HelpBubble { target: parent } text: "Rechteck"; onTriggered: win.addShape("rect") }
                             MenuItem { HelpBubble { target: parent } text: "Ellipse"; onTriggered: win.addShape("ellipse") }
                             MenuItem { HelpBubble { target: parent } text: "Text"; onTriggered: win.addShape("text") }
+                            MenuItem { objectName: "barcodeMenuItem"; text: "Barcode (Code128-B) …"; onTriggered: barcodeDialog.open() }
                         }
                         ActionButton { objectName: "copyObjectsButton"; text: "Kopie"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.duplicateSelected() }
                         ActionButton { objectName: "deleteObjectsButton"; text: win.basic ? "Löschen" : "−"; hint: "Auswahl löschen"; dark: win.night; compact: true; enabled: project.selected >= 0; onClicked: project.removeSelected() }
@@ -823,6 +855,7 @@ ApplicationWindow {
                         ActionButton { text: win.basic ? "Kreis" : "○"; hint: "Fügt eine Ellipse ein. Gleiche Breite und Höhe ergeben einen Kreis."; compact: true; dark: win.night; enabled: win.page === 0; onClicked: win.addShape("ellipse") }
                         ActionButton { visible: !win.basic; text: "⋈"; hint: "Knoten ein/aus"; compact: true; dark: win.night; enabled: win.page===0 && !win.basic; selected: canvas.nodes; onClicked: canvas.nodes=!canvas.nodes }
                         ActionButton { text: "Text"; hint: "Fügt einen Text ein. Den Inhalt rechts ändern."; compact: true; dark: win.night; enabled: win.page === 0; onClicked: win.addShape("text") }
+                        ActionButton { objectName: "barcodeToolButton"; text: "Barcode"; hint: "Erzeugt Code128-B als Vektorgeometrie mit Ruhezonen."; compact: true; dark: win.night; enabled: win.page === 0; onClicked: barcodeDialog.open() }
                         Rectangle { width: 1; height: 18; color: win.line; Layout.leftMargin: 3; Layout.rightMargin: 3 }
                         ActionButton { text: "↶"; hint: "Rückgängig · Strg+Z"; compact: true; dark: win.night; enabled: project.canUndo; onClicked: project.undo() }
                         ActionButton { text: "↷"; hint: "Wiederholen · Strg+Umschalt+Z"; compact: true; dark: win.night; enabled: project.canRedo; onClicked: project.redo() }
@@ -914,18 +947,18 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     ComboBox { HelpBubble { target: parent }
                                         id: serialPortChoice; objectName: "serialPortChoice"; Layout.fillWidth: true
-                                        model: typeof machine.ports !== "undefined" ? machine.ports : []; displayText: count ? currentText : "Kein serielles Gerät gefunden"
+                                        model: win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0 ? [win.deviceService.active.endpoint] : []; displayText: count ? currentText : "Kein Geräteanschluss zugeordnet"
                                         contentItem: Text { text: serialPortChoice.displayText; color: win.ink; font: serialPortChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: 20 }
                                         indicator: Text { x: serialPortChoice.width-width-8; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink }
                                     }
-                                    ActionButton { text: "Suchen"; dark: win.night; onClicked: machine.refreshPorts() }
+                                    ActionButton { objectName: "editDeviceConnection"; text: "Zuordnung …"; dark: win.night; enabled: !!win.deviceService; onClicked: deviceDialog.open() }
                                     ActionButton {
                                         objectName: "connectGrblButton"
                                         text: win.grblVerified ? "GRBL verbunden" : (!win.simulationMode && machine.connected ? "GRBL wird geprüft …" : "GRBL verbinden")
                                         primary: win.grblVerified; dark: win.night
-                                        enabled: win.grblVerified || (!machine.busy && !machine.firing && (win.simulationMode || !machine.connected) && serialPortChoice.count > 0)
+                                        enabled: win.grblVerified || (!machine.busy && !machine.firing && (win.simulationMode || !machine.connected) && win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0)
                                         hint: win.grblVerified ? "Verbindung und Controllerprüfung bestätigt. Ein Klick startet keinen neuen Reset oder Auftrag. Zum erneuten Verbinden zuerst trennen." : "Öffnet den USB-Anschluss und setzt den Controller zurück. Ein alter gepufferter Auftrag wird verworfen; Referenzierung und Position danach neu prüfen."
-                                        onClicked: if(win.simulationMode || !machine.connected)machine.connectHardware(serialPortChoice.currentText)
+                                        onClicked: if ((win.simulationMode || !machine.connected) && win.deviceService) win.deviceService.connectSelected()
                                     }
                                     ActionButton { text: "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
                                 }
@@ -933,6 +966,13 @@ ApplicationWindow {
                                     objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
                                     text: win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : machine.state + (machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
                                     color: win.grblVerified ? "#209b76" : win.muted
+                                    Accessible.role: Accessible.StaticText; Accessible.name: text
+                                }
+                                Text {
+                                    objectName: "processingSafetyStatus"
+                                    visible: !win.simulationMode && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: "#c07b2a"
+                                    text: typeof machine.processingSafetyErrors !== "undefined" ? machine.processingSafetyErrors.join("\n") : ""
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
                                 Rectangle {

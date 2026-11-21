@@ -3,6 +3,15 @@
 #include <QPointer>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
+    accessoryClock.start();
+    accessoryWatchdog.setInterval(50);
+    connect(&accessoryWatchdog, &QTimer::timeout, this, [this] {
+        if (live && (accessoryJobActive || firing()) && !processingSafetyErrors().isEmpty()) {
+            document->notify("Auftrag abgebrochen: " + processingSafetyErrors().join("\n"));
+            stop();
+        }
+    });
+    accessoryWatchdog.start();
     document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
         return !self || (!self->busy() && !self->firing() &&
                          (!self->session || !self->session->status().connected));
@@ -15,10 +24,19 @@ void Machine::syncDeviceProfile() {
                        document->deviceProfile().outputFingerprint())
         return;
     live = false;
+    accessory = AccessoryContract(true);
+    accessoryJobActive = false;
     QString error;
     session = ControllerSessions::create(document->deviceProfile(), error);
     if (session)
-        connect(session.get(), &ControllerSession::changed, this, &Simulator::changed);
+        connect(session.get(), &ControllerSession::changed, this, [this] {
+            if (live && accessoryJobActive && !session->status().executing) {
+                accessoryJobActive = false;
+                accessory.transition(session->status().connected ? AccessoryContract::Event::Complete
+                                                                : AccessoryContract::Event::Disconnect);
+            }
+            emit changed();
+        });
     else
         document->notify(error);
     Simulator::setDeviceProfile(document->deviceProfile());
@@ -48,12 +66,16 @@ bool Machine::connectHardware(const QString &port) {
     if (session->status().connected)
         session->close();
     Simulator::stop();
+    accessory = AccessoryContract(true);
+    accessoryJobActive = false;
     live = true;
     bool result = session->open(port);
     emit changed();
     return result;
 }
 void Machine::useSimulator() {
+    accessory.transition(AccessoryContract::Event::Disconnect);
+    accessoryJobActive = false;
     if (session)
         session->close();
     live = false;
@@ -78,6 +100,10 @@ void Machine::home() {
         Simulator::home();
 }
 void Machine::focus(bool on) {
+    if (on && live && !processingSafetyErrors().isEmpty()) {
+        document->notify(processingSafetyErrors().join("\n"));
+        return;
+    }
     if (live)
         session->focus(on);
     else
@@ -101,6 +127,10 @@ void Machine::start() {
     }
     if (busy() || firing())
         return;
+    if (live && !processingSafetyErrors().isEmpty()) {
+        document->notify(processingSafetyErrors().join("\n"));
+        return;
+    }
     const auto &job = document->job();
     if (job.deviceProfile().outputFingerprint() != document->deviceProfile().outputFingerprint()) {
         document->notify("Geräteprofil des Auftrags ist veraltet; bitte neu berechnen.");
@@ -110,26 +140,41 @@ void Machine::start() {
         document->notify(job.errors.join("; "));
         return;
     }
-    if (live)
+    if (live) {
+        if (!accessory.begin(accessoryClock.elapsed())) {
+            document->notify(extractionSafetyError()); return;
+        }
         session->start(job);
-    else {
+        accessoryJobActive = session->status().executing;
+        if (!accessoryJobActive) accessory.transition(AccessoryContract::Event::Complete);
+    } else {
         Simulator::setJob(job);
         Simulator::start();
     }
 }
 void Machine::pause() {
-    if (live)
+    if (live) {
+        if (paused() && !processingSafetyErrors().isEmpty()) {
+            document->notify(processingSafetyErrors().join("\n"));
+            stop(); return;
+        }
+        accessory.transition(AccessoryContract::Event::Pause);
         session->pause();
-    else
+    } else
         Simulator::pause();
 }
 void Machine::stop() {
+    accessory.transition(AccessoryContract::Event::Stop);
+    if (live) accessory.transition(AccessoryContract::Event::Fault); // GRBL stop uses reset: physical output becomes unknown.
+    accessoryJobActive = false;
     if (live)
         session->stop();
     else
         Simulator::stop();
 }
 void Machine::disconnectFault() {
+    accessory.transition(AccessoryContract::Event::Disconnect);
+    accessoryJobActive = false;
     if (live)
         session->close();
     else

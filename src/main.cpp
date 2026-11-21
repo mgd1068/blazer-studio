@@ -2,6 +2,8 @@
 #include "blazer_version.h"
 #include "depthservice.h"
 #include "document.h"
+#include "devicemanager.h"
+#include "materialtestledger.h"
 #include "deviceprofile.h"
 #include "machine.h"
 #include "materiallibrary.h"
@@ -123,6 +125,8 @@ int main(int argc, char **argv) {
     Machine simulator(&document, nullptr,
                       transient ? Machine::HardwareAccess::Disabled
                                 : Machine::HardwareAccess::Allowed);
+    DeviceManager deviceManager(&document, &simulator, transient ? transientRecovery.filePath("devices.json") : QString());
+    MaterialTestLedger materialTestLedger(transient ? transientRecovery.filePath("material-tests.json") : QString());
     ApplicationServices services(
         &document, &simulator, transient ? transientRecovery.filePath("settings.ini") : QString());
     QFile materials(":/profiles/manufacturer-materials.json");
@@ -137,6 +141,8 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("cameraRegistration", &registration);
     engine.rootContext()->setContextProperty("materialLibrary", &materialLibrary);
     engine.rootContext()->setContextProperty("machine", &simulator);
+    engine.rootContext()->setContextProperty("deviceManager", &deviceManager);
+    engine.rootContext()->setContextProperty("materialTestLedger", &materialTestLedger);
     engine.rootContext()->setContextProperty("deviceProfile", profile);
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,

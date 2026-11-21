@@ -3,6 +3,11 @@
 #include "machine.h"
 #include <QFile>
 #include <QScopedValueRollback>
+#include <QCryptographicHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QSet>
+#include <algorithm>
 
 DeviceManager::DeviceManager(Document *d, Machine *m, QString path, QObject *parent)
     : QObject(parent), document(d), machine(m), library(std::move(path)) {
@@ -38,6 +43,11 @@ bool DeviceManager::allowChange() {
     const auto reason = changeBlockReason();
     return reason.isEmpty() || fail(reason);
 }
+void DeviceManager::refreshEndpoints() {
+    if (changing) return;
+    discoveredEndpoints = machine->ports(); // Metadata only; no endpoint is opened.
+    emit changed();
+}
 void DeviceManager::invalidateSelection() {
     selectedId.clear(); selectedBinding.clear();
     lastMessage = "Gerätezuordnung hat sich geändert. Das physische Gerät erneut auswählen; keine Verbindung wurde geöffnet.";
@@ -52,6 +62,29 @@ QString DeviceManager::bindingKey() const {
 }
 QVariantMap DeviceManager::active() const {
     return bindingKey().isEmpty() ? QVariantMap{} : library.instance(selectedId);
+}
+QString DeviceManager::parameterHash() const {
+    if (bindingKey().isEmpty()) return {};
+    // Processing parameters, not geometric layout or portable physical grants.
+    // A material history match never confirms the current material checkbox.
+    QSet<QString> signatures;
+    for (const auto &art : document->items()) {
+        if (!art.visible || art.toolLayer || art.page != document->activePage()) continue;
+        QVariantList extraOperations;
+        for (const auto operation : art.extraOperations) extraOperations.append(operation);
+        const QVariantMap values{{"kind", art.kind}, {"layer", art.layer},
+                                 {"extraOperations", extraOperations},
+                                 {"outline", art.engraveOutline}, {"settings", art.settings},
+                                 {"style", art.style}, {"relief", art.relief.toMap()}};
+        signatures.insert(QString::fromUtf8(QJsonDocument::fromVariant(values).toJson(QJsonDocument::Compact)));
+    }
+    auto sorted = signatures.values(); std::sort(sorted.begin(), sorted.end());
+    const QVariantMap parameters{{"contract", 1},
+                                {"profile", QString::fromLatin1(document->deviceProfile().outputFingerprint())},
+                                {"material", document->material()}, {"layers", document->layers()},
+                                {"operations", sorted}};
+    return QString::fromLatin1(QCryptographicHash::hash(
+        QJsonDocument::fromVariant(parameters).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
 }
 QString DeviceManager::addCurrent(QString name, QString endpoint) {
     if (!allowChange()) return {};
