@@ -268,14 +268,19 @@ class F39ReviewTest : public QObject {
     }
     void realMainOpensPlacementAndChangesActualPipeline_data() {
         QTest::addColumn<bool>("compactDark");
-        QTest::newRow("light") << false;
-        QTest::newRow("compact-dark") << true;
+        QTest::addColumn<bool>("background");
+        QTest::newRow("light-sync") << false << false;
+        QTest::newRow("compact-dark-sync") << true << false;
+        QTest::newRow("light-async") << false << true;
+        QTest::newRow("compact-dark-async") << true << true;
     }
     void realMainOpensPlacementAndChangesActualPipeline() {
         QFETCH(bool, compactDark);
+        QFETCH(bool, background);
         QTemporaryDir storage;
         Document project;
         rectangle(project);
+        project.setBackgroundPlanning(background);
         Machine machine(&project, nullptr, Machine::HardwareAccess::Disabled);
         DeviceManager devices(&project, &machine, storage.filePath("devices.json"));
         MaterialLibrary materials(storage.filePath("materials.json"));
@@ -304,8 +309,18 @@ class F39ReviewTest : public QObject {
         QTRY_VERIFY(object("startupSafetyDialog")->property("visible").toBool());
         QVERIFY(click(window, item("acknowledgeStartupSafety")));
         QTRY_VERIFY(!object("startupSafetyDialog")->property("visible").toBool());
+        QTRY_VERIFY(project.job().valid());
         QVERIFY(click(window, item("jobPlacementButton")));
         QTRY_VERIFY(object("jobPlacementDialog")->property("visible").toBool());
+        machine.disconnectFault();
+        QTRY_VERIFY(!project.hasPreviewPosition());
+        QTRY_VERIFY(!item("refreshPlacementPosition")->isEnabled());
+        const auto unavailable = item("previewHeadPosition")->property("text").toString();
+        QVERIFY(unavailable.contains("Simulator"));
+        QVERIFY(!unavailable.contains("reales Gerät"));
+        machine.toggleConnection();
+        QTRY_VERIFY(project.hasPreviewPosition());
+        QTRY_VERIFY(project.job().valid());
         auto *choice = item("startModeChoice");
         QVERIFY(choice);
         QVERIFY(click(window, choice));
@@ -313,7 +328,17 @@ class F39ReviewTest : public QObject {
         QTest::keyClick(window, Qt::Key_Down);
         QTest::keyClick(window, Qt::Key_Return);
         QTRY_COMPARE(project.startMode(), Document::CurrentPosition);
+        const QList<QRectF> anchors{{100, 75, 40, 20}, {80, 75, 40, 20}, {60, 75, 40, 20},
+                                    {100, 65, 40, 20}, {80, 65, 40, 20}, {60, 65, 40, 20},
+                                    {100, 55, 40, 20}, {80, 55, 40, 20}, {60, 55, 40, 20}};
+        for (int index = 0; index < 9; ++index) {
+            QVERIFY(click(window, item("jobOrigin" + QString::number(index))));
+            QCOMPARE(int(project.jobOrigin()), index);
+            QTRY_VERIFY(project.job().valid());
+            QCOMPARE(bounds(project.placementSummary()["graphicsBounds"].toMap()), anchors[index]);
+        }
         QVERIFY(click(window, item("jobOrigin4")));
+        QTRY_VERIFY(project.job().valid());
         QCOMPARE(project.jobOrigin(), Document::Center);
         QCOMPARE(bounds(project.placementSummary()["graphicsBounds"].toMap()),
                  QRectF(80, 65, 40, 20));
@@ -325,17 +350,25 @@ class F39ReviewTest : public QObject {
         QTRY_COMPARE(project.startMode(), Document::UserOrigin);
         QVERIFY(!project.job().valid());
         QVERIFY(click(window, item("captureJobUserOrigin")));
-        QVERIFY(project.job().valid());
+        QTRY_VERIFY(project.job().valid());
         QVERIFY(project.placementSummary()["originConfirmed"].toBool());
         const auto saved = QUrl::fromLocalFile(storage.filePath("from-ui.blazer"));
         QVERIFY(project.save(saved));
         QVERIFY(project.open(saved));
         QVERIFY(!project.job().valid());
         QTRY_VERIFY(item("confirmJobUserOrigin")->isEnabled());
+        const auto evidence = qEnvironmentVariable("BLAZER_F39_REVIEW_EVIDENCE");
+        if (!evidence.isEmpty()) {
+            QVERIFY(QDir().mkpath(evidence));
+            QTest::qWait(80);
+            QVERIFY(window->grabWindow().save(evidence + "/placement-dialog-unconfirmed-" +
+                                              QTest::currentDataTag() + ".png"));
+        }
         QVERIFY(click(window, item("confirmJobUserOrigin")));
-        QVERIFY(project.job().valid());
+        QTRY_VERIFY(project.job().valid());
         QVERIFY(QMetaObject::invokeMethod(object("jobPlacementDialog"), "close"));
         machine.jog(10, 0);
+        QTRY_VERIFY(project.job().valid());
         QCOMPARE(bounds(project.placementSummary()["graphicsBounds"].toMap()),
                  QRectF(80, 65, 40, 20));
         QCOMPARE(project.job().moves.first().from, QPointF(110, 75));
