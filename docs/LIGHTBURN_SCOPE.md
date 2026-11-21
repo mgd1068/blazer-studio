@@ -1,14 +1,14 @@
 # Funktionsumfang: Referenz LightBurn 2.2.01
 
-Stand und Recherche: 09.11.2026. Verbindliches Produktziel aus Mathias’ Auftrag: den Funktionsumfang der aktuellen LightBurn-Version als Referenz übernehmen, mit eigener OrcaSlicer-artiger Linux-Oberfläche und BlazerX als erstem Gerät.
+Stand und Recherche: 21.11.2026 (erneut gegen offizielle Quellen geprüft). Verbindliches Produktziel aus Mathias’ Auftrag: den Funktionsumfang der aktuellen LightBurn-Version als Referenz übernehmen, mit eigener OrcaSlicer-artiger Linux-Oberfläche und BlazerX als erstem Gerät.
 
 ## Referenz und Geltung
 
 Der offizielle [Release-Index](https://release.lightburnsoftware.com/LightBurn/Release/) verweist mit `latest` auf **2.2.01**; die [Downloadliste](https://release.lightburnsoftware.com/LightBurn/Release/latest/) nennt den 02.11.2026 für die Installationsdateien. Der [2.2-Changelog](https://docs.lightburnsoftware.com/2.2/NewFeatures/#2201) enthält die Änderungen seit 2.2.00. Die Ausgangsbasis umfasst Core und Pro, einschließlich neuer beziehungsweise experimenteller Funktionen. Native Linux-Unterstützung endete bei LightBurn nach 1.7; Blazer Studio wird nativ für Linux entwickelt. Quelle: [LightBurn 2.0 / Systemkompatibilität](https://lightburnsoftware.com/blogs/news/lightburn-2-0-00-new-shapes-edit-nodes-submenu-dark-mode-and-more).
 
-Dies ist ein versionierter Zielkatalog, keine Behauptung bereits implementierter Gleichwertigkeit. Alle Einträge sind offen. Vor Implementierung einer Funktionsfamilie werden ihre Detailoptionen und Abnahmetests gegen die verlinkte Referenz spezifiziert. Veröffentlichungen nach dem Stichtag ändern den Umfang nicht stillschweigend; spätere Vergleiche werden separat dokumentiert.
+Dies ist ein versionierter Zielkatalog, keine Behauptung bereits implementierter Gleichwertigkeit. Die Familien bleiben bis zu ihrer vollständigen Detailabnahme offen; vorhandene Teilumfänge stehen in FUNCTION_ACCEPTANCE.md. Vor Implementierung einer Funktionsfamilie werden ihre Detailoptionen und Abnahmetests gegen die verlinkte Referenz spezifiziert. Veröffentlichungen nach dem Stichtag ändern den Umfang nicht stillschweigend; spätere Vergleiche werden separat dokumentiert.
 
-Geräteunabhängige Funktionen gehören zum Zielumfang. Hardwarefunktionen werden auf dem BlazerX umgesetzt, soweit Controller und Zubehör sie ermöglichen. Unbekannte Fähigkeiten bleiben offen; nicht zutreffende Funktionen erhalten eine dokumentierte Begründung, statt aus dem Katalog zu verschwinden. Die Unterstützung sämtlicher anderer Laserhersteller ist ein gesonderter Ausbau und wird durch dieses erste BlazerX-Projekt nicht als bereits beauftragt oder vorhanden ausgegeben.
+Geräteunabhängige Funktionen gehören zum Zielumfang. Hardwarefunktionen werden auf dem BlazerX umgesetzt, soweit Controller und Zubehör sie ermöglichen. Unbekannte Fähigkeiten bleiben offen; nicht zutreffende Funktionen erhalten eine dokumentierte Begründung, statt aus dem Katalog zu verschwinden. Seit Mathias’ erweitertem Auftrag vom 12.11.2026 sind weitere Laser ausdrücklich Produktziel. Die konkrete Unterstützung wird pro Controller und Modell gemäß MULTI_DEVICE_PLAN.md nachgewiesen; das M3-Profil belegt keine andere Hardware.
 
 ## Umsetzungsetappen
 
@@ -126,3 +126,19 @@ Das aktuelle Update betrifft besonders Gerätebereitschaft, Konfigurationsübern
 LightBurn-spezifische Lizenzen, Cloud-/Partnerzugänge und proprietäre Serviceanbindungen werden nicht als eigene Dienste ausgegeben. Ihr jeweiliger Arbeitsablauf wird als Integrationsziel erfasst. Blazer Studio erhält eigene Projektdateien und Einstellungen; ein Import vorhandener LightBurn-Dateien braucht einen separat getesteten Konverter und einen Verlustbericht.
 
 Funktionsgleichheit wird je ID anhand konkreter Beispielprojekte, Import-/Exportprüfungen, Geometrie-/Werkzeugwegtests und Simulator-/Gerätetests beurteilt. Sichtbare UI-Schalter allein gelten nicht als Implementierung. Nicht ausführbare Hardwareoptionen bleiben im Fähigkeitenbericht erklärbar.
+
+## Erneuter Windows-Abgleich am 21.11.2026
+
+Der offizielle [latest-Index](https://release.lightburnsoftware.com/LightBurn/Release/latest/) liefert weiterhin **LightBurn 2.2.01**, Windows-Datei `LightBurn-v2.2.01.exe`, Zeitstempel **2026-11-02 22:32:05 UTC**. Verglichen wurde die öffentliche stabile Ausgabe, keine unveröffentlichte Beta. Die [2.2-Referenz](https://docs.lightburnsoftware.com/2.2/Reference/) ist der aktuelle Detailindex. Der Implementierungsvergleich bezieht sich auf **c1fc186**, nicht auf fremde uncommittete Gerätebibliothek-/Versionsarbeiten und nicht auf die installierte Anwendung.
+
+Der Familienkatalog F01–F53 bleibt erhalten. Er ist keine 53-Punkte-Checkliste, die bereits durch jeweils einen Schalter erfüllt wäre. Für die priorisierte nächste Arbeit siehe [Abnahmematrix](FUNCTION_ACCEPTANCE.md#priorisierte-lücken-nach-abgleich-am-21112026); reale Controllerfamilien stehen im [Mehrgeräteplan](MULTI_DEVICE_PLAN.md#controllerfamilien-gegen-lightburn-2201).
+
+Besonders leicht zu verwechselnde Referenzfunktionen:
+
+- [Startmodi und Ursprung](https://docs.lightburnsoftware.com/2.2/Reference/CoordinatesOrigin/): absolute Koordinaten, aktuelle Position und Benutzerursprung mit neun Ankern; Galvo verwendet absolute Koordinaten. G90/G54 allein erfüllt F39 nicht.
+- [Klassisches Print and Cut](https://docs.lightburnsoftware.com/2.2/Reference/PrintAndCut/): zwei reale Zielpositionen bestimmen Versatz, Drehung und optional Maßstab; korrekte Referenz/Positionsmeldung und absolute Ausgabe sind Voraussetzung. Ein transformiertes Hintergrundfoto ist keine solche Ausgabeausrichtung.
+- [Kamera-Print-and-Cut](https://docs.lightburnsoftware.com/2.2/Reference/CameraPrintAndCut/): kalibrierte Kopfkamera, mindestens drei nicht kollineare Marken, automatische Markensuche und Ausgabezuordnung. Ein manuelles Vierpunktfoto erfüllt dies nicht.
+- [Barcodes](https://docs.lightburnsoftware.com/2.2/Reference/BarCode/): unter anderem Code 128, Code 93, Data Matrix, EAN, UPC, PDF417 und QR sowie variable Inhalte und formatspezifische Optionen. QR plus CSV ist ein Teilumfang, keine Barcode-Parität.
+- [Migration](https://docs.lightburnsoftware.com/2.2/Guides/Migration/): `.lbzip`-User-Bundles enthalten Einstellungen, Hotkeys, Presets, Geräte und Bibliotheken. Projekte sowie SHX-/Systemschriften brauchen gesonderte Übernahme. Blazer Studio muss unterstützte Inhalte, Konflikte und Verluste erklären; fremde LightBurn-Lizenzdaten werden nicht zu einer Blazer-Lizenz.
+
+Alle Quellen sind offizielle LightBurn-Primärquellen, geprüft am 21.11.2026. Die Quellen beschreiben das Zielprodukt; sie belegen weder die eigene Umsetzung noch reale Betriebssicherheit.

@@ -49,3 +49,17 @@ blazer-studio --validate-device-profile profiles/blaze-x-m3.json
 Exitcode 0 bedeutet gültige Beschreibung, auch bei einem noch nicht unterstützten Treiber. Das JSON-Feld `runtimeSupported` benennt gesondert die aktuelle Laufzeitverwendbarkeit. Es bedeutet keine Live-Gerätefreigabe. Ungültige Dateien liefern Exitcode 2. Treibereinstellungen und Herkunftsinhalte werden nicht ausgegeben.
 
 Die automatisierten Fälle prüfen unveränderte alte M3-Oberflächendaten, kanonischen Rundlauf, synthetische GRBL-/Galvo-/DSP-Beschreibungen, Fingerprintänderungen, Datenlimits und den CLI-Start ohne Display mit ungültigem Qt-GUI-Backend. Die synthetischen Beispiele sind keine Herstellerfreigaben. Reale Laserversuche bleiben [Geräte- und Materialabnahme](HARDWARE_ACCEPTANCE.md).
+
+## Controllerfamilien gegen LightBurn 2.2.01
+
+Geprüft am **21.11.2026** gegen offizielle [Controller-/Firmwareliste](https://docs.lightburnsoftware.com/2.2/GetStarted/LaserID/) und [Gerätetypen im Detailindex](https://docs.lightburnsoftware.com/2.2/Reference/). Die Tabelle konkretisiert MD3–MD5 am Code-Stand **c1fc186**. Eine gemeinsame GCode-Bezeichnung beweist keine austauschbaren Dialekte oder Zustandsregeln.
+
+| Familie / Referenz | Vorhandener eigener Stand | Fehlende Freigabestufen |
+|---|---|---|
+| GCode: GRBL | Neutraler XY-Plan, serieller GRBL-Encoder/Session, M3-Profil und PTY-Tests | M3 reale Koordinaten-/Zubehör-/Betriebsabnahme weiterhin offen; keine generelle GRBL-Gerätezusage |
+| GCode: Smoothieware, Marlin, FluidNC, grblHAL, xTool | Kein eigener freigegebener Adapter | Je Dialekt Laser-/Einheiten-/Homing-/Hold-/Statusvertrag, seriell oder Netzwerk, Fehlerfälle und Modellabnahme |
+| DSP: Ruida, Trocen, TopWisdom | Begrenzter Ruida-RD-Geometrieimport; kein DSP-Output-/Sitzungsadapter | Binärformat, Übertragung/Retry, Gerätespeicher, Send versus Start, Status/Abbruch, Quellenparameter und Achsen; Import nicht als Unterstützung anzeigen |
+| Galvo: EZCAD2, EZCAD2 Lite, EZCAD3, BSL | Deskriptor kann unbekannte Familien beschreiben; keine Markierausgabe | Protokoll/SDK und Nutzungsrechte, Scannerkorrektur, Quelle/Frequenz/Puls/MOPA, Red-Dot-Framing, externe Achsen, Betriebsabnahme |
+| Weitere typbezogene Workflows: ACCELaser, Epilog | Kein passender Adapter | [ACCELaser](https://docs.lightburnsoftware.com/2.2/Reference/DeviceTypes/ACCELaser/) und [Epilog](https://docs.lightburnsoftware.com/2.2/Reference/DeviceTypes/Epilog/) separat spezifizieren; Dokumentationsnennung ist keine pauschale Modellkompatibilität |
+
+Die LightBurn-Liste ist eine Referenz kompatibler Familien, kein Nachweis sämtlicher am Markt befindlicher Laser. Für Blazer Studio müssen Profilvorhandensein, Offlineplanung, Jobdateiausgabe, implementierter Transport, Protokolltest und tatsächliche Modellabnahme getrennte Felder bleiben. Ein synthetischer `verified`-Wert, grüner Test oder importiertes Windows-Profil kann keine aktuelle Ausgabe freigeben. Keine Geräteaktion wurde für diesen Abgleich ausgeführt.
