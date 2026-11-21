@@ -2,7 +2,7 @@
 
 `tests/controllerruntime_adversarial_test.cpp` exercises the actual production
 runtime facade/worker and GRBL core against Root's independent Python PTY process.
-It depends on Runtime checkpoint ac27197 (or its later integrated equivalent),
+The current 17-case version depends on Runtime checkpoint 6ffc675 (or its later integrated equivalent),
 PreparedControllerJob, the C++ RuntimePeer wrapper, and peer option
 `runOnPoweredCommand` (6bdf6e7). The fixture option retains synthetic Run after
 powered dispatch so natural completion cannot mask a lease/watchdog failure.
@@ -73,10 +73,9 @@ Machine/CMake changes or external port enumeration/opening occurred in this lane
 
 ## Deliberately unresolved coverage
 
-The existing core's general timeout is restarted by healthy Run/Jog/Hold/Home
-status reports. Therefore an independent absolute ACK-loss deadline is not yet
-proved by these passing cases; it needs an explicit policy and a separately causal
-ACK-loss test. Status/flow success must not be mislabeled as ACK-loss coverage.
+The initial 16-case version did not cover an independent ACK deadline; see the
+counterexample and fixed-checkpoint validation below. The explicit host-Hold
+remaining-budget policy still needs separate dedicated acceptance coverage.
 
 Additional staged cases remain focus native-input proof/deadline, work-zero expiry,
 wire error/hangup/flooding, repeated destruction/FD baseline, and external typed
@@ -99,6 +98,16 @@ Run status renews the core's general timeout indefinitely. The original passing
 Root subsequently accepted a distinct conservative 10-second **host** ACK limit;
 that can abort slow/planner-full operations and is not a firmware/mechanical
 shutdown guarantee. Motion owns the product fix and its separate explicit host
-Hold remaining-budget policy. The test remains a red counterexample until that
-fix is validated on a new immutable checkpoint. Evidence and exact proposed test
+Hold remaining-budget policy. The red counterexample was subsequently resolved and revalidated on the new
+immutable checkpoint noted below. Evidence and exact proposed test
 patch are retained in `blazer-controller-runtime-tests-20261121/accessory-lane/`.
+
+Current independent full-suite validation: **17/17 Qt results passed in 27347 ms**
+against detached unchanged 6ffc675. The new ACK timer is included in worker
+affinity checks. Its peer reset arrived 2 ms after the copied absolute oldest
+unacknowledged-write deadline. The lower bound uses that worker deadline, not
+last ACK time: another pipelined write may precede the last ACK. A separate
+last-peer-ACK+10250-ms upper bound remains, and the captured outstanding budget
+is checked to exceed 9 seconds when ACK suppression begins. PreciseTimer plus
+absolute due recheck avoids false early timer callbacks. Prior normal/SAN16-case
+evidence remains recorded separately; this 17-case result is a normal build.

@@ -28,7 +28,7 @@ class ControllerRuntimeTestAccess {
         bool initialized = false, affinity = false, lease = false, releaseRequired = false;
         bool job = false, focus = false, awaitingAck = false;
         quint64 generation = 0, epoch = 0;
-        qint64 flowAtMs = -1, clockMs = -1, statusAtNs = -1;
+        qint64 flowAtMs = -1, clockMs = -1, statusAtNs = -1, ackDueAtNs = -1;
         QString extractionError;
     };
     struct BarrierState {
@@ -69,13 +69,16 @@ class ControllerRuntimeTestAccess {
             result->initialized = true;
             result->affinity = thread != gui && worker.thread() == thread && core.thread() == thread &&
                 core.serial.thread() == thread && core.poll.thread() == thread &&
-                core.timeout.thread() == thread && core.focusTimer.thread() == thread &&
+                core.timeout.thread() == thread && core.ackTimeout.thread() == thread && core.focusTimer.thread() == thread &&
                 core.workZeroDeadline.thread() == thread && worker.m_watchdog &&
                 worker.m_watchdog->thread() == thread;
             result->lease = worker.m_accessory.activeLease();
             result->releaseRequired = worker.m_accessory.releaseRequired();
             result->job = worker.m_jobActive;
             result->awaitingAck = core.waitingAck;
+            if (!core.ackDue.isEmpty())
+                result->ackDueAtNs = RuntimePeer::monotonicNs() +
+                    (core.ackDue.first() - core.ackClock.elapsed()) * 1000000LL;
             result->focus = worker.m_focusActive;
             result->generation = worker.m_mailbox->generation.load();
             result->epoch = worker.m_connectionEpoch;
@@ -452,9 +455,11 @@ class ControllerRuntimeAdversarialTest : public QObject {
             if (event.value("kind") == "ack") lastAckAt = event.value("atNs").toInteger();
         }
         QVERIFY(lastAckAt > 0);
+        QTest::qWait(100); // Drain already-sent ACKs; the peer will send no new ones.
         const auto probe = ControllerRuntimeTestAccess::probe(runtime);
         QVERIFY(probe && probe->job && probe->lease && probe->awaitingAck && probe->extractionError.isEmpty());
-        QTest::qWait(9200); // GUI responsive until shortly before the ACK-specific bound.
+        QVERIFY(probe->ackDueAtNs > RuntimePeer::monotonicNs() + 9000000000LL);
+        QTest::qWait(9100); // GUI responsive until shortly before the ACK-specific bound.
         const auto healthy = ControllerRuntimeTestAccess::probe(runtime);
         QVERIFY(healthy && healthy->job && healthy->awaitingAck && healthy->extractionError.isEmpty());
         QVERIFY(runtime.status().statusFresh);
@@ -464,8 +469,13 @@ class ControllerRuntimeAdversarialTest : public QObject {
         const auto journal = events(peer);
         const auto reset = firstResetAfter(journal, begin);
         QVERIFY2(reset >= begin && reset < end, "Independent ACK deadline did not stop before GUI return; status must not renew ACK age");
-        QVERIFY(reset >= lastAckAt + 9995000000LL);
+        // The oldest unacknowledged WRITE may precede the last received ACK
+        // in a pipelined window. Use its copied private absolute deadline for
+        // the lower bound, plus a separate peer-ACK upper bound.
+        QVERIFY(reset >= probe->ackDueAtNs - 5000000LL);
+        QVERIFY(reset <= probe->ackDueAtNs + 250000000LL);
         QVERIFY(reset <= lastAckAt + 10250000000LL);
+        qInfo() << "ACK deadline to peer reset ms" << (reset - probe->ackDueAtNs) / 1000000;
         QVERIFY(noResumeOrAccessoryOff(journal));
     }
     void stopLatchCancelsPreparedStartBeforeAnyMotion() {
