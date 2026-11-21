@@ -23,6 +23,7 @@ class Machine : public Simulator {
     QStringList ports() const;
     bool connectionVerified() const { return live && session && session->status().verified; }
     QVariantList capabilities() const;
+    QVariantMap controllerDiagnosticSnapshot() const;
     void setPreviewDeviceBinding(const QByteArray &binding);
     Q_INVOKABLE void refreshPreviewPosition();
     QString motionSafetyError() const {

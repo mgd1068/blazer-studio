@@ -157,3 +157,9 @@ Vorprüfungsablehnungen und begrenztes numerisches Readback auf. Er bewahrt
 keinen vollständigen Werkzeugweg und keine Anschluss-/Projekttexte. Diese
 Instrumentierung verändert keine Freigabe und ist kein physischer
 Bewegungsnachweis; bewusster lokaler Export bleibt eine eigene UI-Integration.
+
+The adapter marks explicit homing and reset/handshake phases separately from
+normal execution. Expected loss of reference during homing invalidates old
+accessory evidence without interrupting that separately commissioned procedure.
+A reset wait must never provoke repeated STOPP/reset writes every watchdog tick.
+Active output leases and reported emission still require unconditional handling.

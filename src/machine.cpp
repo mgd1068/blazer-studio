@@ -16,7 +16,7 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
             emit changed(); // Also refresh stale airflow/status evidence while idle.
         }
         const auto status = session ? session->status() : ControllerStatus{};
-        const bool unsafeMotion = live && status.executing &&
+        const bool unsafeMotion = live && status.executing && !status.referencing && !status.resetting &&
             (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty());
         const bool unsafeOutput = live && (accessoryJobActive || accessoryFocusActive || firing()) &&
             !errors.isEmpty();
@@ -90,7 +90,7 @@ void Machine::syncDeviceProfile() {
                 // Preserve the loss boundary before a protective STOPP emits
                 // nested session notifications. Never erase the active-output
                 // evidence and then rely on a watchdog to rediscover it.
-                const bool mustStop = status.executing || status.firing ||
+                const bool mustStop = (status.executing && !status.referencing && !status.resetting) || status.firing ||
                     accessoryJobActive || accessoryFocusActive;
                 sessionWasVerified = status.verified;
                 sessionWasReferenced = status.positionReferenced;
@@ -299,4 +299,19 @@ QVariantList Machine::capabilities() const {
                     {"status", "Ausgangszuordnung und Luftstrom nicht bestätigt"},
                     {"detail", "Gehäuseabsaugung und Air Assist sind getrennt. Unbekannter "
                                "Zubehörzustand gibt keine Bearbeitung frei."}}};
+}
+
+QVariantMap Machine::controllerDiagnosticSnapshot() const {
+    // Numeric protocol evidence is available only through the explicit preview
+    // workflow. Never collect raw logs, ports, document text or material notes.
+    return {{"schema", 1},
+            {"controller", live && session ? session->diagnosticSnapshot()
+                : QVariantMap{{"supported",false},{"reasonCode","simulator"}}},
+            {"facade", QVariantMap{
+                {"simulation",simulation()}, {"connected",connected()}, {"ready",ready()},
+                {"positionReferenced",positionReferenced()},
+                {"motionContractBlocked",!motionSafetyError().isEmpty()},
+                {"homingContractBlocked",!homingSafetyError().isEmpty()},
+                {"extractionContractBlocked",!extractionSafetyError().isEmpty()},
+                {"relativeHardwareStartBlocked",live && document->startMode()!=Document::AbsoluteCoordinates}}}};
 }
