@@ -1,3 +1,5 @@
+#include "artlibrary.h"
+#include "artlibrarycontroller.h"
 #include "applicationservices.h"
 #include "blazer_version.h"
 #include "depthservice.h"
@@ -129,6 +131,8 @@ int main(int argc, char **argv) {
     DeviceManager deviceManager(&document, &simulator, transient ? transientRecovery.filePath("devices.json") : QString());
     VectorInspectionService vectorInspectionService(&document);
     MaterialTestLedger materialTestLedger(transient ? transientRecovery.filePath("material-tests.json") : QString());
+    ArtLibrary artLibrary(transient ? transientRecovery.filePath("art-library.blazerart") : QString());
+    ArtLibraryController artLibraryController(&document, &simulator, &artLibrary);
     ApplicationServices services(
         &document, &simulator, transient ? transientRecovery.filePath("settings.ini") : QString());
     QFile materials(":/profiles/manufacturer-materials.json");
@@ -137,6 +141,8 @@ int main(int argc, char **argv) {
     auto reference = QJsonDocument::fromJson(materials.readAll()).toVariant();
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("appServices", &services);
+    engine.rootContext()->setContextProperty("artLibrary", &artLibrary);
+    engine.rootContext()->setContextProperty("artLibraryController", &artLibraryController);
     engine.rootContext()->setContextProperty("project", &document);
     engine.rootContext()->setContextProperty("recovery", &recovery);
     engine.rootContext()->setContextProperty("depthService", &depthService);

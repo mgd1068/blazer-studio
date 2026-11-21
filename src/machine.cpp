@@ -18,7 +18,7 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
         const auto status = session ? session->status() : ControllerStatus{};
         const bool unsafeMotion = live && status.executing && !status.referencing && !status.resetting &&
             (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty());
-        const bool unsafeOutput = live && (accessoryJobActive || accessoryFocusActive || firing()) &&
+        const bool unsafeOutput = live && (accessory.activeLease() || accessoryJobActive || accessoryFocusActive || firing()) &&
             !errors.isEmpty();
         if (unsafeMotion || unsafeOutput) {
             document->notify("Auftrag abgebrochen: " + errors.join("\n"));
@@ -91,7 +91,7 @@ void Machine::syncDeviceProfile() {
                 // nested session notifications. Never erase the active-output
                 // evidence and then rely on a watchdog to rediscover it.
                 const bool mustStop = (status.executing && !status.referencing && !status.resetting) || status.firing ||
-                    accessoryJobActive || accessoryFocusActive;
+                    accessory.activeLease() || accessoryJobActive || accessoryFocusActive;
                 sessionWasVerified = status.verified;
                 sessionWasReferenced = status.positionReferenced;
                 accessory.transition(AccessoryContract::Event::Fault);

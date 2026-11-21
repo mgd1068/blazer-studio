@@ -135,6 +135,7 @@ class AccessoryContract {
         return true;
     }
     bool releaseRequired() const { return m_releaseRequired; }
+    bool activeLease() const { return m_lease; }
 
   private:
     static constexpr size_t index(Role role) { return role == Role::EnclosureExtraction ? 0 : 1; }

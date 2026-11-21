@@ -1,3 +1,5 @@
+#include "artlibrary.h"
+#include "artlibrarycontroller.h"
 #include "applicationservices.h"
 #include "devicemanager.h"
 #include "document.h"
@@ -73,6 +75,8 @@ class FeatureWorkflowTest : public QObject {
         DeviceManager devices(&project, &machine, storage.filePath("devices.json"));
         MaterialTestLedger ledger(storage.filePath("material-tests.json"));
         MaterialLibrary library(storage.filePath("materials.json"));
+        ArtLibrary artLibrary(storage.filePath("art-library.blazerart"));
+        ArtLibraryController artController(&project,&machine,&artLibrary);
         VectorInspectionService vectorInspector(&project);
         Registration registration;
         ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
@@ -83,6 +87,8 @@ class FeatureWorkflowTest : public QObject {
         context->setContextProperty("deviceManager", &devices); context->setContextProperty("materialTestLedger", &ledger);
         context->setContextProperty("materialLibrary", &library); context->setContextProperty("cameraRegistration", &registration);
         context->setContextProperty("appServices", &services);
+        context->setContextProperty("artLibrary", &artLibrary);
+        context->setContextProperty("artLibraryController", &artController);
         context->setContextProperty("vectorInspectionService", &vectorInspector);
         for (const auto &pair : {qMakePair("deviceProfile", "blaze-x-m3.json"),qMakePair("manufacturerReference", "manufacturer-materials.json")}) {
             QFile file(QStringLiteral(BLAZER_SOURCE_DIR "/profiles/") + pair.second);
