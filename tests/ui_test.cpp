@@ -33,6 +33,8 @@ class UiMachine : public Simulator {
     bool statusFresh() const { return true; }
     QString connectionPhase() const { return m_simulation ? "closed" : m_verified ? "idle" : "handshake"; }
     Q_INVOKABLE void registerFocusControl(QObject *) {}
+    // UI layout fixture only; real native provenance is tested through Machine + PTY.
+    Q_INVOKABLE void registerNativeActionControl(QObject *, const QString &, const QVariantMap & = {}) {}
     Q_INVOKABLE void beginFocus() {
         if (m_asyncFocusFixture) { m_pendingFocus=true; emit changed(); }
         else focus(true);
