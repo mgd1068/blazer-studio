@@ -12,6 +12,9 @@
 #include <QDBusPendingReply>
 #include <QDBusServiceWatcher>
 #include <QLibrary>
+#include <QFile>
+#include <QFileInfo>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <time.h>
@@ -25,13 +28,13 @@ qint64 NativeInputIntentAdapter::nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
-NativeInputIntentAdapter::NativeInputIntentAdapter(QObject *parent) : QObject(parent) {
+NativeInputIntentAdapter::NativeInputIntentAdapter(QObject *parent, bool enablePlatformInput) : QObject(parent) {
     m_contextStarted=nowMs();
     struct timespec boot{},mono{};
     if (clock_gettime(CLOCK_BOOTTIME,&boot)==0 && clock_gettime(CLOCK_MONOTONIC,&mono)==0)
         m_suspendGap=boot.tv_sec*1000LL+boot.tv_nsec/1000000-
                      (mono.tv_sec*1000LL+mono.tv_nsec/1000000);
-    if (!qGuiApp) return;
+    if (!enablePlatformInput || !qGuiApp) return;
     qGuiApp->installEventFilter(this);
     qGuiApp->installNativeEventFilter(this);
 #if defined(BLAZER_HAS_XCB_INPUT_CLOCK) && QT_CONFIG(xcb)
@@ -62,7 +65,9 @@ NativeInputIntentAdapter::NativeInputIntentAdapter(QObject *parent) : QObject(pa
         QDBusServiceWatcher::WatchForOwnerChange,this);
     connect(ownerWatcher,&QDBusServiceWatcher::serviceOwnerChanged,this,[this] {
         if (m_domain == Domain::KWinMonotonic32) m_domain = Domain::Unknown;
-        ++m_platformEpoch; m_checkPending=false; m_compositorOwner.clear(); revoke();
+        ++m_platformEpoch; m_checkPending=false; m_compositorOwner.clear();
+        const QPointer<NativeInputIntentAdapter> alive(this);
+        revoke(); if (!alive) return;
         checkWaylandDomain();
     });
     checkWaylandDomain();
@@ -80,6 +85,11 @@ NativeInputIntentAdapter::~NativeInputIntentAdapter() {
 }
 void NativeInputIntentAdapter::probe() {
     if (QGuiApplication::platformName().startsWith("wayland")) {
+        if (m_domain==Domain::KWinMonotonic32 && !compositorPeerStillMatches()) {
+            m_domain=Domain::Unknown; m_compositorOwner.clear(); ++m_platformEpoch;
+            const QPointer<NativeInputIntentAdapter> alive(this);
+            revoke(); if (!alive) return;
+        }
         checkWaylandDomain();
         return;
     }
@@ -94,6 +104,47 @@ void NativeInputIntentAdapter::probe() {
         XCB_ATOM_WM_NAME, XCB_ATOM_CARDINAL, 32, 1, &value);
     m_probeSequence = cookie.sequence;
     xcb_flush(c); // No wait, roundtrip or nested event loop.
+#endif
+}
+bool NativeInputIntentAdapter::matchesCompositorPeer(qint64 peerPid,qint64 ownerPid,uint uid) {
+    if (peerPid<=0 || ownerPid<=0) return false;
+    if (peerPid==ownerPid) return true; // Already same-UID SO_PEERCRED, unique DBus owner.
+    const auto peerPath=QString("/proc/%1/exe").arg(peerPid);
+    if (QFileInfo(peerPath).symLinkTarget()!="/usr/bin/kwin_wayland_wrapper") return false;
+    struct stat info{};
+    if (::stat("/usr/bin/kwin_wayland_wrapper",&info)!=0 || info.st_uid!=0 ||
+        (info.st_mode&(S_IWGRP|S_IWOTH))!=0 || !S_ISREG(info.st_mode)) return false;
+    QFile status(QString("/proc/%1/status").arg(ownerPid));
+    if (!status.open(QIODevice::ReadOnly)) return false;
+    const auto data=status.read(8193);
+    if (data.size()>8192) return false;
+    bool name=false,parent=false,ids=false;
+    for (const auto &line:data.split('\n')) {
+        const auto fields=line.simplified().split(' ');
+        if (fields.size()==2 && fields[0]=="Name:") name=fields[1]=="kwin_wayland";
+        if (fields.size()==2 && fields[0]=="PPid:") {
+            bool ok=false; const auto pid=fields[1].toLongLong(&ok); parent=ok && pid==peerPid;
+        }
+        if (fields.size()==5 && fields[0]=="Uid:") {
+            ids=true;
+            for(int i=1;i<5;++i) { bool ok=false; const auto value=fields[i].toUInt(&ok); ids &= ok && value==uid; }
+        }
+    }
+    return name && parent && ids;
+}
+bool NativeInputIntentAdapter::compositorPeerStillMatches() const {
+#if QT_CONFIG(wayland)
+    auto native=qGuiApp->nativeInterface<QNativeInterface::QWaylandApplication>();
+    static QLibrary client("libwayland-client.so.0");
+    using GetFd=int(*)(wl_display *);
+    const auto getFd=reinterpret_cast<GetFd>(client.resolve("wl_display_get_fd"));
+    if (!native || !native->display() || !getFd) return false;
+    struct ucred credentials{}; socklen_t size=sizeof(credentials);
+    return getsockopt(getFd(native->display()),SOL_SOCKET,SO_PEERCRED,&credentials,&size)==0 &&
+        size==sizeof(credentials) && credentials.uid==getuid() && credentials.pid==m_peerPid &&
+        matchesCompositorPeer(m_peerPid,m_ownerPid,getuid());
+#else
+    return false;
 #endif
 }
 void NativeInputIntentAdapter::checkWaylandDomain() {
@@ -132,11 +183,12 @@ void NativeInputIntentAdapter::checkWaylandDomain() {
             [this,epoch,credentials,bus,owner](QDBusPendingCallWatcher *watcher) {
             QDBusPendingReply<uint> pidReply=*watcher; watcher->deleteLater();
             if (epoch!=m_platformEpoch) return;
-            if (pidReply.isError() || pidReply.value()!=uint(credentials.pid)) { m_checkPending=false; return; }
+            if (pidReply.isError() || !matchesCompositorPeer(credentials.pid,pidReply.value(),getuid())) { m_checkPending=false; return; }
+            const auto ownerPid=pidReply.value();
             auto infoCall=QDBusMessage::createMethodCall(owner,"/KWin","org.kde.KWin","supportInformation");
             auto infoWait=new QDBusPendingCallWatcher(bus.asyncCall(infoCall,500),this);
             connect(infoWait,&QDBusPendingCallWatcher::finished,this,
-                [this,epoch,owner](QDBusPendingCallWatcher *watcher) {
+                [this,epoch,owner,ownerPid,credentials](QDBusPendingCallWatcher *watcher) {
                 QDBusPendingReply<QString> reply=*watcher; watcher->deleteLater();
                 if (epoch!=m_platformEpoch) return;
                 m_checkPending=false;
@@ -148,6 +200,8 @@ void NativeInputIntentAdapter::checkWaylandDomain() {
                 // Trust the active local session compositor, not installed packages,
                 // environment variables, proc visibility or a binary-attestation claim.
                 m_compositorOwner=owner;
+                m_peerPid=credentials.pid; m_ownerPid=ownerPid;
+                if (!compositorPeerStillMatches()) { m_compositorOwner.clear(); return; }
                 m_domain=Domain::KWinMonotonic32;
                 revoke();
             });
@@ -256,6 +310,10 @@ QString NativeInputIntentAdapter::reason() const {
 void NativeInputIntentAdapter::capture(QObject *windowObject, quint64 timestamp,
         const QPointF &scene, bool key, bool spontaneous, bool repeat, bool synthetic) {
     if (!spontaneous || repeat || synthetic) return;
+    if (m_domain==Domain::KWinMonotonic32 && !compositorPeerStillMatches()) {
+        m_domain=Domain::Unknown; m_compositorOwner.clear(); ++m_platformEpoch;
+        revoke(); return;
+    }
     // KWin input-method forwarding can reuse a previous seat timestamp. Its
     // keyboard provenance is insufficient even when the compositor clock is known.
     if (key && m_domain==Domain::KWinMonotonic32) return;

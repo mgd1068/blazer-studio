@@ -27,6 +27,12 @@ Supported domains are intentionally explicit:
   environment alone cannot enable this domain. Ownership changes invalidate
   it. The input timestamp is compared modulo 32 bits against explicit Linux
   CLOCK_MONOTONIC; quantization and mapping cost reduce remaining lifetime.
+  A precise inherited-listener exception supports the installed startup wrapper:
+  socket peer executable must resolve to `/usr/bin/kwin_wayland_wrapper`, that
+  system file must be root owned and not group/world writable, and the unique
+  DBus owner must be its direct child named `kwin_wayland` with all four UID
+  fields matching the socket UID. No generic ancestor search is permitted.
+  Peer/ancestry checks run again before capture and during periodic validation.
   This path accepts pointer presses only. Keyboard input-method forwarding may
   reuse a prior seat timestamp and cannot provide this proof.
 - **Qt XCB**: a private InputOnly window on Qt's actual XCB connection receives
@@ -74,3 +80,7 @@ Tests use private synthetic input/clock seams and offscreen windows; they do not
 click real controls, open hardware ports, establish human provenance or grant
 motion/homing/airflow commissioning. Independent PTY worker tests remain needed
 for deadline expiry after capture and before actual output dispatch.
+
+`HardwareAccess::Disabled` constructs an inert adapter: no application/native
+event filter, compositor probes, DBus watcher or polling timer. Simulator focus
+remains independent of input proofs.

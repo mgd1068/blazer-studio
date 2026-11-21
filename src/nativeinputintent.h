@@ -16,7 +16,7 @@ class NativeInputIntentAdapter final : public QObject, public QAbstractNativeEve
         quint64 interaction = 0;
         qint64 observedAtMs = -1, expiresAtMs = -1;
     };
-    explicit NativeInputIntentAdapter(QObject *parent = nullptr);
+    explicit NativeInputIntentAdapter(QObject *parent = nullptr, bool enablePlatformInput = true);
     ~NativeInputIntentAdapter() override;
     void registerControl(QObject *control, const QString &action);
     std::optional<Intent> consume(const QString &action);
@@ -50,6 +50,9 @@ class NativeInputIntentAdapter final : public QObject, public QAbstractNativeEve
     quint64 m_platformEpoch = 1;
     bool m_checkPending = false;
     QString m_compositorOwner;
+    qint64 m_peerPid = -1, m_ownerPid = -1;
+    static bool matchesCompositorPeer(qint64 peerPid, qint64 ownerPid, uint uid);
+    bool compositorPeerStillMatches() const;
     void checkWaylandDomain();
     static qint64 nowMs();
     void probe();

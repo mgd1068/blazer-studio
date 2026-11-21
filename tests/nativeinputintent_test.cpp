@@ -24,10 +24,20 @@ class NativeInputIntentTestAccess {
         a.capture(&w,time,{10,10},false,spontaneous,repeat,synth);
     }
     static void forceSuspend(NativeInputIntentAdapter &a) { a.m_suspendGap-=1000; }
+    static bool inactive(const NativeInputIntentAdapter &a) {
+        return !a.m_probeTimer.isActive() && !a.m_xcb && !a.m_checkPending && a.m_compositorOwner.isEmpty();
+    }
 };
 class NativeInputIntentTest : public QObject {
     Q_OBJECT
   private slots:
+    void disabledDoesNotRegisterPlatformWork() {
+        NativeInputIntentAdapter a(nullptr,false);
+        QVERIFY(NativeInputIntentTestAccess::inactive(a));
+        QTest::qWait(220);
+        QVERIFY(NativeInputIntentTestAccess::inactive(a));
+        QVERIFY(!a.consume("focus"));
+    }
     void unknownIsClosed() {
         NativeInputIntentAdapter a;
         QVERIFY(!a.reason().isEmpty());

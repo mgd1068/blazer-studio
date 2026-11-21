@@ -9,7 +9,7 @@
 #include <QUuid>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
-    nativeInput = new NativeInputIntentAdapter(this);
+    nativeInput = new NativeInputIntentAdapter(this,hardwareAccess==HardwareAccess::Allowed);
     connect(nativeInput,&NativeInputIntentAdapter::invalidated,this,[this] {
         if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()))
             runtime->revokeFocusContext();
@@ -41,10 +41,10 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
 }
 void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
     if (previewDeviceBinding == binding) return;
+    previewDeviceBinding = binding; // Publish before revocation notifications can reenter.
     const QPointer<Machine> alive(this);
     nativeInput->revoke();
     if (!alive) return;
-    previewDeviceBinding = binding; // Publish before STOPP notifications can reenter the manager.
     if (live && (connected() || occupied() || requestPending())) {
         document->notify("Gerätebindung geändert. Verbindung vor weiterer Bearbeitung erneut prüfen.");
         session->close();
