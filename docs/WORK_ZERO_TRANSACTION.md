@@ -53,3 +53,16 @@ Die unabhängige kinematische Pflanze prüft wörtliche physische Sollpunkte und
 unveränderte Travelanzahl; G10 verändert nur den virtuellen WCO. Ihr extern
 verschobener Kopf muss auch bei WPos0 faulten. Kein realer Anschluss, Laser,
 Geräteprofilgrant oder Live-App-Zustand wurde verwendet.
+
+
+## Machine integration evidence
+
+The integrated facade rejects work-zero before dispatch while any output lease,
+job/focus flag, firing or other controller transaction is active. The expected
+coordinate-readback exception checks the actual accessory lease as well as both
+facade flags; it cannot exempt an emitting stream. Work-zero is busy but does not
+appear as a running/paused laser job. Independent Machine/PTy regressions in
+`grbl` cover delayed positive readback, signed coordinates, facade denial,
+raw-session misuse, lease acquisition/lost flags, errors, timeout, stop and startup.
+The complete independent GRBL run on e3529a0 passed 199 cases; this is software
+protocol/model evidence, not physical commissioning.

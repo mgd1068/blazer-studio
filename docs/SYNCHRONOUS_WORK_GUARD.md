@@ -20,8 +20,10 @@ leases (including handshake, reference/home, zero, reset and paused output until
 that lease ends). A simulator does not block. A connected but genuinely idle
 session need not prohibit preparation of the next design. Wire state changes to
 `Document::notifySynchronousWorkGuardChanged()`. The read-only QML property
-`synchronousWorkBlockReason` uses signal `synchronousWorkGuardChanged`. This patch
-does not itself modify Machine or Main; its owner must register that predicate.
+`synchronousWorkBlockReason` uses signal `synchronousWorkGuardChanged`. The integrated Machine registers this predicate using QPointer, including actual
+accessory leases even if facade flags are lost. Machine changes and destruction
+notify the Document guard. Main disables the heavy toolbar/shortcut paths and
+shows the reason; STOPP remains independently available.
 
 `permitSynchronousWork()` checks and reports the reason. Admission occurs before
 file access, external process launch, clipboard access, mutation or expensive
