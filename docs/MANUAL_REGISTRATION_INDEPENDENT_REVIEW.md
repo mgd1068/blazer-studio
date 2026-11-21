@@ -55,3 +55,11 @@ Evidence: benslab/analysis/blazer-printcut-independent-20261121. Immutable norma
 and sanitized core libraries were read-only copied from Parity's post-commit f866
 builds before linking the independent test. This is a source/software oracle, not
 a release or hardware acceptance result.
+
+Two additional positive rows set only the first rapid.from to200.0006, while actual
+emitted targets remain at or below200.0004. This raw head coordinate is inside the
+profile and is not written to the wire. A format-level guard must not pretend it
+was rounded and commanded. Both plain and registered rows remain usable on the
+baseline. Expanded baseline:6passed/3failed/0skipped in5ms. The earlier seven-result
+baseline also reproduced its same three functional failures under ASan/UBSan in
+25ms, without a sanitizer finding (leak detection disabled).
