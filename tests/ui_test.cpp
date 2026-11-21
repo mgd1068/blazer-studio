@@ -13,6 +13,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <algorithm>
@@ -23,6 +24,7 @@ class UiMachine : public Simulator {
     Q_PROPERTY(bool simulation READ simulation WRITE setSimulation NOTIFY changed)
     Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
     Q_PROPERTY(bool statusFresh READ statusFresh NOTIFY changed)
+    Q_PROPERTY(bool requestPending READ requestPending NOTIFY changed)
     Q_PROPERTY(QString connectionPhase READ connectionPhase NOTIFY changed)
     Q_PROPERTY(bool connectionVerified READ connectionVerified WRITE setConnectionVerified NOTIFY changed)
   public:
@@ -31,8 +33,25 @@ class UiMachine : public Simulator {
     bool statusFresh() const { return true; }
     QString connectionPhase() const { return m_simulation ? "closed" : m_verified ? "idle" : "handshake"; }
     Q_INVOKABLE void registerFocusControl(QObject *) {}
-    Q_INVOKABLE void beginFocus() { focus(true); }
+    Q_INVOKABLE void beginFocus() {
+        if (m_asyncFocusFixture) { m_pendingFocus=true; emit changed(); }
+        else focus(true);
+    }
     Q_INVOKABLE void endFocus() { focus(false); }
+    bool requestPending() const { return m_pendingFocus; }
+    bool ready() const override { return !m_pendingFocus && Simulator::ready(); }
+    void useAsyncFocusFixture() { m_asyncFocusFixture=true; }
+    void acceptPendingFocus() {
+        if (!m_pendingFocus) return;
+        m_pendingFocus=false;
+        Simulator::focus(true);
+    }
+    void focus(bool on) override {
+        const bool cancelled=m_pendingFocus;
+        if (!on) m_pendingFocus=false;
+        Simulator::focus(on);
+        if (cancelled) emit changed();
+    }
     bool simulation() const { return m_simulation; }
     bool connectionVerified() const { return m_verified; }
     bool positionReferenced() const override { return m_referenced; }
@@ -45,6 +64,7 @@ class UiMachine : public Simulator {
 
   private:
     bool m_simulation = true, m_verified = false, m_referenced = true;
+    bool m_asyncFocusFixture=false, m_pendingFocus=false;
 };
 class UiTest : public QObject {
     Q_OBJECT
@@ -53,6 +73,82 @@ class UiTest : public QObject {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
+    }
+    void focusHoldSurvivesPendingAdmissionAndReleaseCancelsIt_data() {
+        QTest::addColumn<bool>("compact");
+        QTest::newRow("normal-light") << false;
+        QTest::newRow("compact-dark") << true;
+    }
+    void focusHoldSurvivesPendingAdmissionAndReleaseCancelsIt() {
+        QFETCH(bool,compact);
+        QTemporaryDir storage;
+        Document project;
+        UiMachine machine;
+        machine.useAsyncFocusFixture();
+        MaterialLibrary library(storage.filePath("materials.json"));
+        ApplicationServices services(&project,&machine,storage.filePath("settings.ini"));
+        QVERIFY(services.finishOnboarding());
+        Registration registration;
+        QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("project",&project);
+        engine.rootContext()->setContextProperty("machine",&machine);
+        engine.rootContext()->setContextProperty("materialLibrary",&library);
+        engine.rootContext()->setContextProperty("appServices",&services);
+        engine.rootContext()->setContextProperty("cameraRegistration",&registration);
+        engine.load(QUrl::fromLocalFile(QStringLiteral(BLAZER_SOURCE_DIR "/qml/Main.qml")));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto window=qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        if (compact) { window->resize(1180,760); window->setProperty("night",true); }
+        auto safety=window->findChild<QObject *>("startupSafetyDialog");
+        QVERIFY(safety);
+        QTRY_VERIFY(safety->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(safety,"accept"));
+        window->setProperty("page",2);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        auto button=window->findChild<QQuickItem *>("focusHold");
+        QVERIFY(button);
+        QTRY_VERIFY(button->isVisible() && button->isEnabled());
+        QTest::qWait(60);
+        for (auto parent=button->parentItem();parent;parent=parent->parentItem()) {
+            if (!parent->property("contentY").isValid()) continue;
+            const auto position=button->mapToItem(parent,QPointF());
+            const auto delta=position.y()<5 ? position.y()-5
+                : position.y()+button->height()>parent->height()-5
+                    ? position.y()+button->height()-parent->height()+5 : 0.;
+            const auto limit=std::max(0.,parent->property("contentHeight").toDouble()-parent->height());
+            parent->setProperty("contentY",std::clamp(parent->property("contentY").toDouble()+delta,0.,limit));
+        }
+        QTest::qWait(30);
+        const auto point=button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint();
+        QVERIFY(QRect(0,0,window->width(),window->height()).contains(point));
+        QTest::mousePress(window,Qt::LeftButton,{},point);
+        bool leftHeld=true;
+        const auto releaseOnFailure=qScopeGuard([&] {
+            if (leftHeld) QTest::mouseRelease(window,Qt::LeftButton,{},point);
+        });
+        QVERIFY2(machine.requestPending(),"The focus press was cancelled by its own asynchronous admission.");
+        QVERIFY(!machine.firing());
+        QVERIFY(button->property("pressed").toBool());
+        QVERIFY(button->isEnabled());
+        machine.acceptPendingFocus();
+        QVERIFY(machine.firing());
+        QTest::mouseRelease(window,Qt::LeftButton,{},point);
+        leftHeld=false;
+        QVERIFY(!machine.firing());
+        QVERIFY(!machine.requestPending());
+        // A real release before acceptance must cancel the pending action;
+        // preserving enabled while held does not create a later focus pulse.
+        QTest::mousePress(window,Qt::LeftButton,{},point);
+        leftHeld=true;
+        QVERIFY(machine.requestPending());
+        QTest::mouseRelease(window,Qt::LeftButton,{},point);
+        leftHeld=false;
+        QVERIFY(!machine.requestPending());
+        machine.acceptPendingFocus();
+        QVERIFY(!machine.firing());
     }
     void startupSafetyIsBilingualAndReturnsEveryLaunch_data() {
         QTest::addColumn<bool>("completed");
