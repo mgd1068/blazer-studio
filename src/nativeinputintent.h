@@ -35,6 +35,7 @@ class NativeInputIntentAdapter final : public QObject, public QAbstractNativeEve
         Intent intent;
         QPointer<QObject> control, window;
         quint64 context = 0;
+        bool key = false;
     };
     Domain m_domain = Domain::Unknown;
     Sample m_sample;
@@ -55,6 +56,7 @@ class NativeInputIntentAdapter final : public QObject, public QAbstractNativeEve
     bool compositorPeerStillMatches() const;
     void checkWaylandDomain();
     static qint64 nowMs();
+    bool clockContinuity();
     void probe();
     void sample(quint32 server, qint64 before, qint64 after);
     std::optional<Intent> mapTimestamp(quint64 timestamp, qint64 now);

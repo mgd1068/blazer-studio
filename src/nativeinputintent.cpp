@@ -247,18 +247,23 @@ void NativeInputIntentAdapter::sample(quint32 server, qint64 before, qint64 afte
     }
     m_sample = {server,before,after};
 }
-std::optional<NativeInputIntentAdapter::Intent>
-NativeInputIntentAdapter::mapTimestamp(quint64 timestamp, qint64 now) {
+bool NativeInputIntentAdapter::clockContinuity() {
     struct timespec boot{}, monotonic{};
-    if (clock_gettime(CLOCK_BOOTTIME,&boot)!=0 || clock_gettime(CLOCK_MONOTONIC,&monotonic)!=0) return {};
+    if (clock_gettime(CLOCK_BOOTTIME,&boot)!=0 || clock_gettime(CLOCK_MONOTONIC,&monotonic)!=0) return false;
     const auto gap=boot.tv_sec*1000LL+boot.tv_nsec/1000000-
                    (monotonic.tv_sec*1000LL+monotonic.tv_nsec/1000000);
     if (m_suspendGap>=0 && (gap-m_suspendGap>20 || gap<m_suspendGap-20)) {
-        m_suspendGap=gap; m_sample={}; revoke(); return {};
+        m_suspendGap=gap; m_sample={}; revoke(); return false;
     }
     m_suspendGap=gap;
+    return true;
+}
+std::optional<NativeInputIntentAdapter::Intent>
+NativeInputIntentAdapter::mapTimestamp(quint64 timestamp, qint64 now) {
+    if (!clockContinuity()) return {};
     if (m_domain==Domain::KWinMonotonic32) {
         if (timestamp==0 || timestamp>std::numeric_limits<quint32>::max()) return {};
+        struct timespec monotonic{};
         if (clock_gettime(CLOCK_MONOTONIC,&monotonic)!=0) return {};
         const qint64 nativeNow=monotonic.tv_sec*1000LL+monotonic.tv_nsec/1000000;
         const auto age=static_cast<qint32>(quint32(nativeNow)-quint32(timestamp));
@@ -291,6 +296,12 @@ void NativeInputIntentAdapter::registerControl(QObject *control, const QString &
         connect(item, &QQuickItem::windowChanged, this, [this] { revoke(); });
         connect(item, &QQuickItem::visibleChanged, this, [this] { revoke(); });
         connect(item, &QQuickItem::enabledChanged, this, [this] { revoke(); });
+        connect(item, &QQuickItem::activeFocusChanged, this, [this,item] {
+            if (item->hasActiveFocus()) return;
+            for (const auto &pending:m_pending) {
+                if (pending.key && pending.control==item) { revoke(); return; }
+            }
+        });
     }
     if (control) connect(control, &QObject::destroyed, this, [this] { revoke(); });
 }
@@ -343,7 +354,7 @@ void NativeInputIntentAdapter::capture(QObject *windowObject, quint64 timestamp,
             match=i.key();
         }
     }
-    if (!match.isEmpty()) m_pending[match] = {*mapped,m_controls.value(match),window,m_context};
+    if (!match.isEmpty()) m_pending[match] = {*mapped,m_controls.value(match),window,m_context,key};
 }
 std::optional<NativeInputIntentAdapter::Intent>
 NativeInputIntentAdapter::consume(const QString &action) {
@@ -351,10 +362,17 @@ NativeInputIntentAdapter::consume(const QString &action) {
     if (i==m_pending.end()) return {};
     const auto pending=i.value();
     m_pending.erase(i); // One-shot, including denied/expired attempts.
+    const QPointer<NativeInputIntentAdapter> alive(this);
+    if (!clockContinuity() || !alive) return {};
+    if (m_domain==Domain::KWinMonotonic32 && !compositorPeerStillMatches()) {
+        m_domain=Domain::Unknown; m_compositorOwner.clear(); ++m_platformEpoch;
+        revoke(); return {};
+    }
     auto item=qobject_cast<QQuickItem *>(pending.control.data());
     auto window=qobject_cast<QQuickWindow *>(pending.window.data());
     if (pending.context!=m_context || !item || !window || !window->isActive() ||
         !window->isVisible() || !item->isEnabled() || !item->isVisible() ||
+        (pending.key && !item->hasActiveFocus()) ||
         item->window()!=window || m_controls.value(action)!=item ||
         nowMs()>pending.intent.expiresAtMs || !reason().isEmpty()) return {};
     return pending.intent;
