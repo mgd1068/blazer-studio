@@ -1,6 +1,10 @@
 #include "applicationservices.h"
 #include "atomicfile.h"
 #include "settingsbundle.h"
+#include "machine.h"
+#include <QLockFile>
+#include <QSaveFile>
+#include <QUuid>
 #include <QCryptographicHash>
 #include <QFile>
 #ifdef Q_OS_UNIX
@@ -268,6 +272,85 @@ bool ApplicationServices::exportDiagnostics(const QUrl &file) {
                    : error;
     emit changed();
     return ok;
+}
+
+QVariantMap ApplicationServices::previewTechnicalDiagnostics(bool includeController) {
+    m_technicalDiagnosticsJson.clear();
+    m_technicalDiagnosticsDigest.clear();
+    auto report = diagnostics(); // Keep the existing privacy-default schema unchanged.
+    if (includeController)
+        if (const auto machine = qobject_cast<Machine *>(m_machine))
+            report["controllerContext"] = machine->controllerDiagnosticSnapshot();
+    auto bytes = QJsonDocument::fromVariant(report).toJson();
+    if (bytes.isEmpty() || bytes.size() > 64 * 1024) {
+        m_message = "Technische Diagnose überschreitet 64 KiB; keine exportierbare Vorschau.";
+        emit changed();
+        return {};
+    }
+    // Salt the content binding so identical subsequent previews also invalidate
+    // earlier tokens without adding any metadata to the privacy-default report.
+    const auto nonce = QUuid::createUuid().toRfc4122();
+    m_technicalDiagnosticsDigest = QString::fromLatin1(
+        QCryptographicHash::hash(nonce + bytes, QCryptographicHash::Sha256).toHex());
+    m_technicalDiagnosticsJson = std::move(bytes);
+    const QVariantMap result{{"digest", m_technicalDiagnosticsDigest},
+                             {"report", report},
+                             {"json", QString::fromUtf8(m_technicalDiagnosticsJson)}};
+    m_message = report.contains("controllerContext")
+        ? "Technische Vorschau mit ausdrücklich gewähltem Controllerkontext eingefroren."
+        : includeController ? "Controllerkontext nicht verfügbar; Standarddiagnosevorschau eingefroren."
+                            : "Diagnosevorschau ohne Controllerkontext eingefroren.";
+    emit changed();
+    return result;
+}
+bool ApplicationServices::exportTechnicalDiagnostics(const QUrl &url,
+                                                     const QString &expectedDigest) {
+    const auto fail = [this](const QString &message) {
+        m_message = message;
+        emit changed();
+        return false;
+    };
+    const bool digestValid =
+        expectedDigest.size() == 64 &&
+        std::all_of(expectedDigest.cbegin(), expectedDigest.cend(),
+                    [](QChar c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+    if (!digestValid || expectedDigest != m_technicalDiagnosticsDigest ||
+        m_technicalDiagnosticsJson.isEmpty() || m_technicalDiagnosticsJson.size() > 64 * 1024)
+        return fail(
+            "Zuerst eine aktuelle technische Diagnosevorschau prüfen; Vorschautoken ungültig.");
+    if (!url.isValid() || !url.isLocalFile() || !url.host().isEmpty() || url.hasQuery() ||
+        url.hasFragment() || url.toString().size() > 32768 ||
+        !QDir::isAbsolutePath(url.toLocalFile()) ||
+        QFileInfo(url.toLocalFile()).suffix().compare("json", Qt::CaseInsensitive) != 0)
+        return fail("Bitte eine lokale reguläre JSON-Datei für die eingefrorene Diagnose wählen.");
+    const auto frozenBytes = m_technicalDiagnosticsJson;
+    const auto path = url.toLocalFile();
+    QLockFile lock(path + ".lock");
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock(0))
+        return fail(
+            "Diagnosedatei wird bereits bearbeitet oder das Verzeichnis ist nicht beschreibbar.");
+    const QFileInfo target(path);
+    if (target.isSymLink() || (target.exists() && !target.isFile()))
+        return fail("Diagnoseziel muss eine reguläre Datei sein; Verweise und Geräte werden nicht "
+                    "überschrieben.");
+    QSaveFile output(path);
+    output.setDirectWriteFallback(false);
+    if (!output.open(QIODevice::WriteOnly) ||
+        !output.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner) ||
+        output.write(frozenBytes) != frozenBytes.size() ||
+        !output.commit())
+        return fail("Eingefrorene Diagnose konnte nicht atomar gespeichert werden; vorheriger "
+                    "Stand bleibt erhalten.");
+    m_message = "Geprüfte Diagnosevorschau unverändert lokal gespeichert; kein Upload.";
+    emit changed();
+    return true;
+}
+void ApplicationServices::clearTechnicalDiagnosticsPreview() {
+    m_technicalDiagnosticsJson.clear();
+    m_technicalDiagnosticsDigest.clear();
+    m_message = "Technische Diagnosevorschau verworfen.";
+    emit changed();
 }
 
 bool ApplicationServices::setLengthUnit(const QString &unit) {

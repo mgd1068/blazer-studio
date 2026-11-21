@@ -32,6 +32,9 @@ class ApplicationServices : public QObject {
     Q_INVOKABLE bool finishOnboarding();
     Q_INVOKABLE QVariantMap diagnostics() const;
     Q_INVOKABLE bool exportDiagnostics(const QUrl &file);
+    Q_INVOKABLE QVariantMap previewTechnicalDiagnostics(bool includeController = false);
+    Q_INVOKABLE bool exportTechnicalDiagnostics(const QUrl &file, const QString &expectedDigest);
+    Q_INVOKABLE void clearTechnicalDiagnosticsPreview();
     QVariantList recentProjects() const;
     Q_INVOKABLE bool clearRecentProjects();
     Q_INVOKABLE bool openRecentProject(const QUrl &file);
@@ -50,6 +53,10 @@ class ApplicationServices : public QObject {
     QVariantMap portablePreferences() const;
     bool applyPortablePreferences(const QVariantMap &preferences);
     bool settingsFailure(const QString &message);
+    // One bounded immutable preview. The digest is an opaque generation token,
+    // not a standalone file checksum; another preview invalidates the old token.
+    QByteArray m_technicalDiagnosticsJson;
+    QString m_technicalDiagnosticsDigest;
     QString m_message;
     QString m_lengthUnit="mm";
     QStringList m_recent;
