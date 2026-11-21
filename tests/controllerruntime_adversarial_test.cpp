@@ -507,6 +507,29 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QVERIFY(after && after->generation > before->generation && !after->lease && !after->job);
         QVERIFY(!barrier->timedOut());
     }
+    void fullMailboxRejectsOverrideAdmissionWithoutClaimingExecution() {
+        RuntimePeer peer;
+        QVERIFY(startPeer(peer));
+        RuntimeOwner owner;
+        auto &runtime = *owner.runtime;
+        QVERIFY(open(runtime, peer));
+        QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
+        auto barrier = ControllerRuntimeTestAccess::hold(runtime);
+        QVERIFY(barrier);
+        for (int i = 0; i < 16; ++i) runtime.jog(.1, 0);
+        const bool overflowAccepted = runtime.overrides(100, 100);
+        runtime.stop(); // Clear all queued motion before letting the worker proceed.
+        barrier->release();
+        QVERIFY2(!overflowAccepted, "A full mailbox must reject admission rather than report accepted execution");
+        QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready && !runtime.status().requestPending, 3000);
+        QVERIFY(runtime.overrides(100, 100)); // Enqueued only; no synthetic override/flow grant exists.
+        QVERIFY(ControllerRuntimeTestAccess::probe(runtime)); // Worker FIFO fence.
+        QTRY_VERIFY_WITH_TIMEOUT(!runtime.status().requestPending, 1000);
+        const auto after = peer.snapshot();
+        QVERIFY(after.ok);
+        QCOMPARE(after.object.value("counts").toObject().value("overrideByte").toInt(), 0);
+        QVERIFY(noUnsafeCommandAfter(after.object.value("events").toArray(), 0));
+    }
     void queuedMotionExpiresBeforeDispatch() {
         RuntimePeer peer;
         QVERIFY(startPeer(peer));

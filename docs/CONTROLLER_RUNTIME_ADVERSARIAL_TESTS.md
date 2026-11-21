@@ -111,3 +111,12 @@ last-peer-ACK+10250-ms upper bound remains, and the captured outstanding budget
 is checked to exceed 9 seconds when ACK suppression begins. PreciseTimer plus
 absolute due recheck avoids false early timer callbacks. Prior normal/SAN16-case
 evidence remains recorded separately; this 17-case result is a normal build.
+
+Current-source extension: `fullMailboxRejectsOverrideAdmissionWithoutClaimingExecution`
+queues 16 normal intents behind a private worker barrier, verifies that the full
+mailbox rejects override admission, latches STOP before releasing all queued motion,
+and then verifies a new available-slot admission still does not execute any
+unsupported override byte. This checks `enqueued`, not controller acknowledgement
+or execution success. Against unchanged 6c9ffca, **18/18 normal Qt results pass in
+27447 ms**. The prior complete 17-case version also passed ASan/UBSan against
+6ffc675 (29256 ms, detect_leaks=0); the new 18-case result is normal-build evidence.
