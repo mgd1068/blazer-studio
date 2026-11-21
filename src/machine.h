@@ -17,6 +17,11 @@ class Machine : public Simulator {
     Q_PROPERTY(bool overridesReady READ overridesReady NOTIFY changed)
     Q_PROPERTY(QString overridesSafetyError READ overridesSafetyError NOTIFY changed)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
+    Q_PROPERTY(bool occupied READ occupied NOTIFY changed)
+    Q_PROPERTY(bool requestPending READ requestPending NOTIFY changed)
+    Q_PROPERTY(bool statusFresh READ statusFresh NOTIFY changed)
+    Q_PROPERTY(qint64 statusAgeMs READ statusAgeMs NOTIFY changed)
+    Q_PROPERTY(QString connectionPhase READ connectionPhase NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
     explicit Machine(Document *document, QObject *parent = nullptr,
@@ -64,6 +69,16 @@ class Machine : public Simulator {
     }
 
     bool connectHardware(const QString &port);
+    ControllerSubmission requestConnectHardware(const QString &port,
+                                                const QByteArray &bindingDigest);
+    bool occupied() const;
+    bool requestPending() const;
+    bool statusFresh() const;
+    qint64 statusAgeMs() const;
+    QString connectionPhase() const;
+    Q_INVOKABLE void registerFocusControl(QObject *control);
+    Q_INVOKABLE void beginFocus();
+    Q_INVOKABLE void endFocus();
     Q_INVOKABLE void useSimulator();
     Q_INVOKABLE void refreshPorts() { emit changed(); }
     Q_INVOKABLE void setWorkZero();
@@ -102,6 +117,9 @@ class Machine : public Simulator {
     void pause() override;
     void stop() override;
     void disconnectFault() override;
+
+  signals:
+    void connectionRequestFinished(quint64 requestId, bool opened, const QString &reason);
 
   private:
     friend class GrblTest; // Synthetic PTY commissioning, never a public release switch.

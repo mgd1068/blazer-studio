@@ -6,6 +6,12 @@
 #include <QVariantMap>
 #include <memory>
 struct JobPlan;
+struct ControllerSubmission {
+    quint64 requestId = 0;
+    bool enqueued = false;
+    QString reason;
+    explicit operator bool() const { return enqueued; }
+};
 
 // A session owns live state; output artifacts and profiles never imply readiness.
 struct ControllerStatus {
@@ -23,6 +29,14 @@ struct ControllerStatus {
     QString overridesSafetyError = "Echtzeit-Overrides sind für diese Sitzung nicht freigegeben.";
     // A bounded non-motion work-coordinate transaction, never a lease exemption.
     bool coordinateUpdatePending = false;
+    // Runtime transport state, never a physical permission or refreshed by GUI receipt.
+    bool opening = false, closing = false, requestPending = false, occupied = false;
+    bool statusFresh = false;
+    qint64 statusAgeMs = -1, runtimeHeartbeatAgeMs = -1;
+    quint64 connectionEpoch = 0, sequence = 0;
+    QString connectionPhase = "closed";
+    bool accessoryLeaseActive = false, accessoryJobActive = false, accessoryFocusActive = false;
+    QString extractionSafetyError;
 };
 class ControllerSession : public QObject {
     Q_OBJECT
@@ -34,6 +48,13 @@ class ControllerSession : public QObject {
     virtual QStringList logEntries() const = 0;
     virtual QVariantMap diagnosticSnapshot() const { return {{"supported", false}}; }
     virtual bool open(const QString &endpoint) = 0;
+    // Async runtime admission. Enqueued does not mean port-open or verified.
+    virtual ControllerSubmission requestOpen(const QString &endpoint,
+                                              const QByteArray &bindingDigest) {
+        Q_UNUSED(endpoint);
+        Q_UNUSED(bindingDigest);
+        return {0, false, "Asynchrone Verbindungsanforderung nicht unterstützt."};
+    }
     virtual void close() = 0;
     virtual void start(const JobPlan &plan) = 0;
     virtual void pause() = 0;
@@ -46,6 +67,7 @@ class ControllerSession : public QObject {
     virtual bool overrides(int feed, int power) = 0;
   signals:
     void changed();
+    void connectionRequestFinished(quint64 requestId, bool opened, const QString &reason);
 };
 namespace ControllerSessions {
 // Construction does not enumerate/open endpoints or grant hardware access.
