@@ -34,15 +34,23 @@ class ControllerAdapterTest : public QObject {
         return plan;
     }
   private slots:
-    void m3AuxiliaryOutputBracketsOnlyTheM3Job() {
+    void disconnectedEmittingSegmentIsRejectedBeforeEncoding() {
+        auto plan = smallPlan();
+        plan.moves.append({{30, 30}, {40, 30}, 1000, 20, 0, false});
+        QVERIFY(!plan.encodedProgram().valid());
+        QVERIFY(plan.gcode().isEmpty());
+        plan.moves.replace(1, {{10, 10}, {30, 30}, 1000, 0, 0, true});
+        plan.moves.append({{30, 30}, {40, 30}, 1000, 20, 0, false});
+        QVERIFY(plan.encodedProgram().valid());
+    }
+    void exportsNeverGuessAccessoryWiringAndReachFirstEdgeWithLaserOff() {
         const auto plan = smallPlan();
         const auto lines = plan.gcode();
-        QCOMPARE(lines.count("M8"), 1);
-        QCOMPARE(lines.count("M9"), 1);
-        QVERIFY(lines.indexOf("M8") < lines.indexOf("M4 S200"));
+        QVERIFY(!lines.contains("M8"));
+        QVERIFY(!lines.contains("M9"));
         QVERIFY(lines.indexOf("G0 X0.000 Y0.000") >= 0);
         QVERIFY(lines.indexOf("G0 X0.000 Y0.000") < lines.indexOf("M4 S200"));
-        QVERIFY(lines.indexOf("M9") > lines.indexOf("M5 S0"));
+
         auto data = DeviceProfile::m3Reference().toJson();
         data["id"] = "other-grbl-machine";
         auto workspace = data["workspace"].toObject();

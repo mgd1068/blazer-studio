@@ -168,17 +168,168 @@ class Controller : public QObject {
 };
 class GrblTest : public QObject {
     Q_OBJECT
+    void supplySyntheticContract(GrblSession &session) {
+        // This is an independent fixture assumption, never a real-machine claim.
+        session.commissionedEnvelope = QRectF(0, 0, 200, 150);
+        session.commissionedModalContract = true;
+    }
     void requireReference(ControllerSession &session) {
-        if (session.status().positionReferenced) return;
+        if (auto grbl = dynamic_cast<GrblSession *>(&session))
+            supplySyntheticContract(*grbl);
+        if (session.status().positionReferenced)
+            return;
         session.home();
         QTRY_VERIFY(session.status().ready && session.status().positionReferenced);
     }
     void requireReference(Machine &machine) {
-        if (machine.positionReferenced()) return;
+        supplySyntheticContract(*static_cast<GrblSession *>(machine.session.get()));
+        if (machine.positionReferenced())
+            return;
         machine.home();
         QTRY_VERIFY(machine.ready() && machine.positionReferenced());
     }
   private slots:
+    void homingAloneNeverCommissionsARealMachineCoordinateContract() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        s.home();
+        QTRY_VERIFY(s.status().positionReferenced && s.ready());
+        QVERIFY(!s.motionSafetyError().isEmpty());
+        s.commissionedEnvelope = QRectF(0, 0, 200, 150);
+        QVERIFY(!s.motionSafetyError().isEmpty()); // Geometry alone proves no modal mapping.
+        s.commissionedEnvelope.reset();
+        s.commissionedModalContract = true;
+        QVERIFY(!s.motionSafetyError().isEmpty()); // Modal mapping alone proves no travel limits.
+        s.commissionedModalContract = false;
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        const auto before = c.commands;
+        s.start(document.job());
+        s.jog(1, 0);
+        s.zero();
+        s.frame({{"valid", true}, {"x", 0}, {"y", 0}, {"width", 20}, {"height", 20}});
+        s.focus(true);
+        QTest::qWait(50);
+        QCOMPARE(c.commands, before);
+        QVERIFY(!s.firing);
+        QVERIFY(s.ready()); // Connection diagnostics remain available.
+    }
+    void machineFacadeExposesCommissioningBlockAndSimulatorRemainsUsable() {
+        Controller c;
+        Document document;
+        Machine machine(&document);
+        QVERIFY(machine.motionSafetyError().isEmpty());
+        QVERIFY(machine.connectHardware(c.port));
+        QTRY_VERIFY(machine.ready());
+        QVERIFY(!machine.motionSafetyError().isEmpty());
+        machine.home();
+        QTRY_VERIFY(machine.positionReferenced());
+        QVERIFY(!machine.motionSafetyError().isEmpty());
+        machine.useSimulator();
+        QVERIFY(machine.motionSafetyError().isEmpty());
+        QVERIFY(machine.ready());
+    }
+    void staleIdlePositionCannotAuthorizeMotionOrEmission() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        requireReference(s);
+        c.respondToStatus = false;
+        QTest::qWait(1700);
+        QVERIFY(!s.ready());
+        QVERIFY(!s.verified());
+        QVERIFY(!s.motionSafetyError().isEmpty());
+        const auto before = c.commands;
+        s.jog(1, 0);
+        s.focus(true);
+        QTest::qWait(40);
+        QCOMPARE(c.commands, before);
+        c.report();
+        QTRY_VERIFY(s.ready());
+    }
+    void signedPhysicalEnvelopeUsesMachineCoordinatesRatherThanModelOrigin() {
+        Controller c;
+        c.machinePosition = {-100, -75};
+        c.workOffset = {-200, -150};
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        requireReference(s);
+        s.commissionedEnvelope = QRectF(-200, -150, 200, 150);
+        JobPlan plan;
+        plan.moves = {{{0, 0}, {200, 0}, 1000, 20, 0, false},
+                      {{200, 0}, {200, 150}, 1000, 20, 0, false}};
+        QVERIFY(plan.valid());
+        s.start(plan);
+        QTRY_VERIFY(c.commands.contains("G0 X0.000 Y0.000"));
+        QTRY_VERIFY(c.commands.contains("G1 X200.000 Y150.000"));
+        QTRY_VERIFY(s.ready());
+    }
+    void firstLaserOffApproachMustFitPhysicalEnvelope() {
+        Controller c;
+        c.machinePosition = {5, 5};
+        c.workOffset = {-10, 0};
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        requireReference(s);
+        JobPlan plan;
+        plan.moves = {{{0, 0}, {20, 0}, 1000, 20, 0, false}};
+        QVERIFY(plan.encodedProgram().valid());
+        const auto before = c.commands;
+        s.start(plan);
+        QTest::qWait(40);
+        QCOMPARE(c.commands, before);
+    }
+    void contradictoryMachineAndWorkCoordinatesAbortReference() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        requireReference(s);
+        c.respondToStatus = false;
+        c.reply("<Idle|MPos:100,75,0|WPos:0,0,0|WCO:0,0,0|FS:0,0>\r\n");
+        QTRY_VERIFY(!s.connected());
+        QVERIFY(!s.status().positionReferenced);
+    }
+    void unexpectedOffsetChangeInvalidatesReferenceAndBufferedQueue() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        requireReference(s);
+        c.workOffset = {1, 0};
+        c.report();
+        QTRY_VERIFY(!s.connected());
+        QVERIFY(!s.status().positionReferenced);
+    }
+    void bufferedCommandErrorNeverPumpsRemainingJobOrResumes() {
+        Controller c;
+        GrblSession s;
+        QVERIFY(s.open(c.port));
+        QTRY_VERIFY(s.ready());
+        requireReference(s);
+        c.autoAck = false;
+        JobPlan plan;
+        for (int i = 0; i < 100; ++i)
+            plan.moves.append({{double(i), 0}, {double(i + 1), 0}, 1000, 20, 0, false});
+        s.start(plan);
+        QTRY_VERIFY(s.busy());
+        QTest::qWait(40);
+        const auto before = c.commands.size();
+        const auto resets = c.realtime.count(char(0x18));
+        c.reply("error:20\r\nok\r\nok\r\n");
+        QTRY_VERIFY(!s.connected());
+        QTRY_COMPARE(c.realtime.count(char(0x18)), resets + 1);
+        QCOMPARE(c.commands.size(), before);
+        QVERIFY(!c.commands.contains("G1 X100.000 Y0.000"));
+        QVERIFY(!c.realtime.contains('~'));
+        QVERIFY(!s.status().positionReferenced);
+    }
     void reportedZeroAfterConnectIsNotAReferencedStartPosition() {
         Controller controller;
         GrblSession session;
@@ -188,7 +339,8 @@ class GrblTest : public QObject {
         QVERIFY(!session.status().positionReferenced);
         QVERIFY(!controller.commands.contains("$H"));
         Document document;
-        document.newProject(); document.addShape("rect");
+        document.newProject();
+        document.addShape("rect");
         const auto before = controller.commands;
         session.start(document.job());
         session.frame({{"valid", true}, {"x", 0}, {"y", 0}, {"width", 200}, {"height", 150}});
@@ -216,15 +368,18 @@ class GrblTest : public QObject {
     void idleWithoutHomingAcknowledgementDoesNotEstablishReference() {
         Controller controller;
         GrblSession session;
-        QVERIFY(session.open(controller.port)); QTRY_VERIFY(session.ready());
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
         controller.autoAck = false;
         session.home();
         QTRY_VERIFY(controller.commands.contains("M5"));
-        controller.report(); QTest::qWait(30);
+        controller.report();
+        QTest::qWait(30);
         QVERIFY(!session.status().positionReferenced);
         controller.reply("ok\r\n");
         QTRY_VERIFY(controller.commands.contains("$H"));
-        controller.report(); QTest::qWait(30);
+        controller.report();
+        QTest::qWait(30);
         QVERIFY(!session.status().positionReferenced);
         controller.reply("error:9\r\n");
         QTRY_VERIFY(!session.connected());
@@ -1040,6 +1195,7 @@ class GrblTest : public QObject {
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        requireReference(s);
         s.focus(true);
         QVERIFY(s.firing);
         QTRY_VERIFY_WITH_TIMEOUT(!s.firing, 3000);

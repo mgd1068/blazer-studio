@@ -4,13 +4,11 @@ Blazer Studio startet im **Simulator**. Eine echte Verbindung entsteht erst im B
 
 ## Gehäuselüfter am vorhandenen M3
 
-Beim unveränderten M3-Referenzprofil wird vor den Bearbeitungsbahnen `M8` und
-nach `M5 S0` am Auftragsende `M9` ausgegeben. Diese Zuordnung folgt der lokalen
-LightBurn-Einstellung (`AirAssistM7=false`) und der vorhandenen Datei `001.nc`.
-Der Nutzer meldete am 20.11.2026 weiterhin einen ausgeschalteten Gehäuselüfter. Diese Befehlsfolge ist damit keine nachgewiesene Lüfterlösung. Andere Profile
-und die laserfreie Rahmenfahrt erhalten diese Befehle nicht. Eine Bestätigung
-des Befehls durch GRBL belegt keinen tatsächlichen Luftstrom; ein automatischer
-Nachlauf oder eine Lüfterüberwachung sind damit nicht implementiert.
+Ausgabeprofile erzeugen keine automatischen `M8`/`M9`-Befehle mehr. Die frühere
+Zuordnung aus `AirAssistM7=false` und `001.nc` belegte keine Verdrahtung des
+Gehäuselüfters. Der Nutzer meldete am 20.11.2026 trotz dieser Ausgabe weiterhin
+einen ausgeschalteten Lüfter. GRBL-Quittierung ist kein Luftstromnachweis.
+Eine getrennte Geräte-/Zubehörverifikation bleibt erforderlich.
 
 ## Maschinenreferenz und Arbeitsnullpunkt
 
@@ -18,15 +16,22 @@ Eine serielle Verbindung, `Idle` und ein Statuswert von 0/0 belegen keine
 physisch bekannte Maschinenposition. Nach Verbindung/Reset/STOPP/Alarm wird
 keine Referenz übernommen. Erst ein ausdrücklich ausgelöstes und vollständig
 quittiertes `$H` mit anschließend frischem Positions-/WCO-Bericht im Leerlauf
-setzt die Referenzfreigabe. Ohne sie sind Jobstart, Rahmenfahrt, Joggen und
+bestätigt ausschließlich die protokollierte Referenzfahrt. Ohne sie sind Jobstart, Rahmenfahrt, Joggen und
 Setzen des Arbeitsnullpunkts im Backend gesperrt. Die Oberfläche erklärt die
 fehlende Referenz. Die Verbindung selbst bleibt für Diagnose und STOPP nutzbar.
 Es gibt keine automatische Referenzfahrt oder Fortsetzung eines alten Auftrags.
 
-Diese Protokollprüfung beweist keine korrekte Achsrichtung, keinen mechanisch
-kalibrierten Verfahrbereich und keine korrekte M3-Firmwarekoordinatenkonvention.
-Nach der gemeldeten Kollision bleiben diese Punkte offen; daraus entsteht keine
-Freigabe für einen neuen Hardwareversuch.
+**Reale Ausgabe bleibt auch nach erfolgreicher Referenzfahrt gesperrt.** Es gibt
+noch keinen hardwareverifizierten Vertrag für die vorzeichenbehafteten
+Maschinengrenzen und die G54-Zuordnung des angeschlossenen Controllers.
+`motionSafetyError` nennt diesen Grund; Verbindung, Diagnose und ausdrücklich
+angeforderte Referenzfahrt bleiben davon getrennt. Profile, importierte Projekte
+und gemeldete Positionen können diesen Vertrag nicht freigeben. Simulator,
+Planung und Datei-Export bleiben verfügbar; Export ist keine Hardwarefreigabe.
+
+Die [Koordinaten-Sicherheitsarchitektur](MOTION_SAFETY.md) beschreibt die
+bekannten Fehler, die reine PTY-Prüfung und den noch erforderlichen
+Inbetriebnahmevertrag. Kein neuer Hardwareversuch wurde ausgeführt.
 
 ## Projekt → Pfade → Vorschau → Ausgabe
 
@@ -62,7 +67,7 @@ Jobübertragung verwendet Zeichenkredite: höchstens 100 Bytes stehen gleichzeit
 
 Jog verwendet relative `$J`-Bewegungen und begrenzt die Zielposition im Arbeitsraum. [Rahmenfahrt](FRAMING.md) benutzt Laser-Aus und Eilgänge; ihr Ziel kann der berechnete Auftrag, die sichtbare Auswahl oder T1/T2 sein. Referenzfahrt ist eine ausdrücklich ausgelöste Aktion bei aktiviertem Homing; **Arbeitsnullpunkt hier setzen** setzt X/Y in G54 am aktuellen Ort.
 
-Beim M3 fordert der Hardware-Fokusknopf einen **0,2-s-Puls mit S20 (2 % Sollwert)** an. Puls, Verweilen und M5/S0 werden gemeinsam in den RX-Puffer geschickt; Loslassen fordert einen Abbruch an, zusätzlich besteht ein Host-Zeitlimit. Ein beschädigter oder ausgefallener Kommunikationsweg kann keinen garantierten Laser-Aus-Befehl liefern. Die optische Wirkung und geräteseitige Abschaltung dieses Pulses wurden am realen Gerät noch nicht abgenommen. Absaugung und Lasermodulkühlung werden nicht als austauschbare Funktionen behandelt; keine ungeprüften Lüfterparameter werden umgeschrieben.
+Nach künftig nachgewiesenem Koordinaten-/Zubehörvertrag würde der M3-Hardware-Fokusknopf einen **0,2-s-Puls mit S20 (2 % Sollwert)** an. Puls, Verweilen und M5/S0 werden gemeinsam in den RX-Puffer geschickt; Loslassen fordert einen Abbruch an, zusätzlich besteht ein Host-Zeitlimit. Ein beschädigter oder ausgefallener Kommunikationsweg kann keinen garantierten Laser-Aus-Befehl liefern. Die optische Wirkung und geräteseitige Abschaltung dieses Pulses wurden am realen Gerät noch nicht abgenommen. Absaugung und Lasermodulkühlung werden nicht als austauschbare Funktionen behandelt; keine ungeprüften Lüfterparameter werden umgeschrieben.
 
 ## Tatsächlich geprüfter Geräteumfang am 10.11.2026
 
@@ -70,15 +75,10 @@ Controller: **Blaze X M3_C_V01**, **Grbl-ESP32 1.3a.20211103**, 115200 Baud. Aus
 
 Der Nutzer hatte kein Material eingelegt und hat den Gehäuselüfter für Tests ohne Laseremission ausschalten lassen; Lüfter-Aus wurde von ihm bestätigt. Es wurde keine reale Gravur, kein Schnitt und kein Fokus-Laserpuls ausgeführt. Vor einer Bearbeitungsprobe sind passendes Material und betriebsbereite Absaugung erforderlich. Die Herstellerwerte für M3 Pro sind weiterhin keine abgeschlossene Materialvalidierung des vorhandenen M3.
 
-Reproduzierbare Entwicklerprüfung, **mit mechanischer Bewegung nur bei ausdrücklich gewähltem `--motion` oder `--dry-job`**:
-
-```bash
-./build/blazer-grbl-probe /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
-./build/blazer-grbl-probe /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 --motion
-./build/blazer-grbl-probe /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 --dry-job
-```
-
-Das Prüfwerkzeug ist für diesen eingerichteten M3 bestimmt. Es setzt Homing und freien Bewegungsraum voraus; es enthält keine M3-/M4-Laserfreigabe. Es ersetzt keine Material- und Emissionsabnahme.
+Das Entwicklerwerkzeug `blazer-grbl-probe PORT` prüft ausschließlich die
+Verbindung (einschließlich Reset und Einstellungsabfrage). Die früheren Modi
+`--motion`, `--dry-job`, `--aux-on` und `--aux-off` werden vor Portöffnung
+abgewiesen. Die historischen Tests oben sind keine Freigabe für erneute Fahrten.
 
 Protokollquellen: [GRBL Interface](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md), [GRBL Laser Mode](https://github.com/gnea/grbl/blob/master/doc/markdown/laser_mode.md), [Grbl-ESP32](https://github.com/bdring/Grbl_Esp32). Die Implementierung ist eigenständig; keine Firmwarequellen werden mitgeliefert.
 
@@ -92,6 +92,6 @@ Während der Einstellungsabfrage pausiert das Statuspolling. Werden Status und E
 Die erweiterten PTY-Prüfungen und ihre Grenzen stehen im [Prüfbericht](QA_REPORT.md); reale Ergebnisse im [Geräteprotokoll](HARDWARE_ACCEPTANCE.md). Der Laser blieb während dieser Entwicklungsrunde ausgeschaltet.
 
 
-Arbeitskoordinaten werden vor Ausgabe mit dem bestätigten G54-Versatz in Maschinenkoordinaten geprüft. Ein im Editor gültiger Job kann nach Verschieben des Arbeitsnullpunkts physisch außerhalb des 200×150-mm-Raums liegen; dann wird der ganze Job vor dem ersten Befehl abgelehnt. Dieselbe Prüfung gilt für Schrittbewegung, Rahmenfahrt und Fokusposition. WPos allein ohne bestätigten Versatz gibt keine Bewegung frei.
+Nach einem künftig verifizierten Vertrag müssen Arbeitskoordinaten mit dem frisch bestätigten G54-Gesamtversatz in den nachgewiesenen vorzeichenbehafteten Maschinenraum umgerechnet werden. Ein im Editor gültiger Job kann physisch außerhalb dieses Raums liegen. Dieselbe Prüfung gilt für Schrittbewegung, Rahmenfahrt und Fokusposition. Der bisher pauschal positive 200×150-mm-Maschinenraum ist keine gültige Hardwareannahme; reale Ausgabe bleibt deshalb gesperrt.
 
 Nach **Arbeitsnullpunkt hier setzen** muss ein neuer Offset nach Abschluss der G10/G54-Befehle gemeldet sein. Ein während der Befehlsfolge eingetroffener alter WCO-Wert gibt keine Folgebewegung frei.

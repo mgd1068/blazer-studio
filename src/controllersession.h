@@ -16,6 +16,7 @@ struct ControllerStatus {
     QString state = "Getrennt";
     bool verified = false;
     bool positionReferenced = false;
+    QString motionSafetyError;
 };
 class ControllerSession : public QObject {
     Q_OBJECT

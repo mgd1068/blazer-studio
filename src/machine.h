@@ -8,6 +8,7 @@ class Machine : public Simulator {
     Q_PROPERTY(bool simulation READ simulation NOTIFY changed)
     Q_PROPERTY(QVariantList capabilities READ capabilities CONSTANT)
     Q_PROPERTY(bool connectionVerified READ connectionVerified NOTIFY changed)
+    Q_PROPERTY(QString motionSafetyError READ motionSafetyError NOTIFY changed)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
@@ -17,11 +18,14 @@ class Machine : public Simulator {
     QStringList ports() const;
     bool connectionVerified() const { return live && session && session->status().verified; }
     QVariantList capabilities() const;
+    QString motionSafetyError() const {
+        return live && session ? session->status().motionSafetyError : QString();
+    }
     Q_INVOKABLE bool setOverrides(int feed, int power) {
         return live && session && session->overrides(feed, power);
     }
 
-    Q_INVOKABLE bool connectHardware(const QString &port);
+    bool connectHardware(const QString &port);
     Q_INVOKABLE void useSimulator();
     Q_INVOKABLE void refreshPorts() { emit changed(); }
     Q_INVOKABLE void setWorkZero() {
@@ -60,6 +64,7 @@ class Machine : public Simulator {
     void disconnectFault() override;
 
   private:
+    friend class GrblTest; // Synthetic PTY commissioning, never a public release switch.
     Document *document;
     std::unique_ptr<ControllerSession> session;
     void syncDeviceProfile();

@@ -1,11 +1,14 @@
 #pragma once
 #include "controllersession.h"
 #include "job.h"
+#include <QElapsedTimer>
 #include <QObject>
 #include <QPointF>
+#include <QRectF>
 #include <QSerialPort>
 #include <QStringList>
 #include <QTimer>
+#include <optional>
 class GrblSession : public ControllerSession {
     Q_OBJECT
   public:
@@ -14,8 +17,18 @@ class GrblSession : public ControllerSession {
     ~GrblSession() override;
     bool open(const QString &port) override;
     ControllerStatus status() const override {
-        return {connected(), ready(),  busy(),   executing(), paused,
-                firing,      progress, position, state,       verified(), positionReferenced};
+        return {connected(),
+                ready(),
+                busy(),
+                executing(),
+                paused,
+                firing,
+                progress,
+                position,
+                state,
+                verified(),
+                positionReferenced,
+                motionSafetyError()};
     }
     QStringList logEntries() const override { return log; }
     const DeviceProfile &deviceProfile() const override { return m_deviceProfile; }
@@ -23,9 +36,9 @@ class GrblSession : public ControllerSession {
     bool connected() const { return serial.isOpen(); }
     bool ready() const;
     bool verified() const {
-        return connectionVerified && connected() && !handshaking && !awaitingReset &&
-               configurationValid() && knownPosition && knownOffset && knownOutput &&
-               !activeInputs && (!overrideFeedback || powerOverride <= 100);
+        return statusFresh() && connectionVerified && connected() && !handshaking &&
+               !awaitingReset && configurationValid() && knownPosition && knownOffset &&
+               knownOutput && !activeInputs && (!overrideFeedback || powerOverride <= 100);
     }
     bool configurationValid() const {
         return version && laserMode && powerScale && minimumPower && reportMm && coordinateSystem &&
@@ -42,7 +55,7 @@ class GrblSession : public ControllerSession {
     bool overrides(int feed, int power) override;
     int feedOverride = 100, powerOverride = 100;
     bool overrideFeedback = false;
-    bool commands(const QStringList &lines, bool buffered = false);
+    QString motionSafetyError() const;
     void pause() override;
     void stop() override;
     void jog(double dx, double dy) override;
@@ -52,6 +65,15 @@ class GrblSession : public ControllerSession {
     void frame(const QVariantMap &bounds) override;
 
   private:
+    friend class GrblTest; // Offline PTY fixtures may supply a synthetic machine contract.
+    bool commands(const QStringList &lines, bool buffered = false);
+    bool statusFresh() const;
+    // Deliberately absent on real sessions: neither a profile nor a homing ACK
+    // proves signed travel limits or the active WCO/G54 modal contract. A future
+    // commissioning workflow must bind these to a verified controller identity.
+    std::optional<QRectF> commissionedEnvelope;
+    bool commissionedModalContract = false;
+    QElapsedTimer lastStatus;
     void receive();
     void line(const QByteArray &line);
     void pump();

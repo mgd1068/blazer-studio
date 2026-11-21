@@ -86,6 +86,17 @@ class GrblControllerAdapter final : public ControllerAdapter {
                         profile, sourceFingerprint,
                         "Ausgabeplan außerhalb des Profil-Arbeitsraums.");
         }
+        // A discontinuous emitting segment would otherwise cut a connector from
+        // the previous target instead of beginning at its declared from point.
+        for (qsizetype i = 1; i < plan.moves.size(); ++i) {
+            const auto &previous = plan.moves[i - 1];
+            const auto &move = plan.moves[i];
+            if (!move.rapid && (num(previous.to.x()) != num(move.from.x()) ||
+                                num(previous.to.y()) != num(move.from.y())))
+                return ControllerProgram::failure(
+                    profile, sourceFingerprint,
+                    "Unterbrochener Bearbeitungspfad ohne laserfreie Anfahrt.");
+        }
         const double powerScale = profile.driverSettings()["powerScale"].toDouble();
         QStringList lines{"M5",
                           "(Blazer Studio: GRBL laser mode, $30=" +
@@ -96,12 +107,6 @@ class GrblControllerAdapter final : public ControllerAdapter {
                           "G17",
                           "G94",
                           "S0"};
-        // Match the existing M3 / LightBurn setup. Do not enable auxiliary
-        // outputs on other profiles; their wiring has not been established.
-        const bool m3EnclosureFan =
-            profile.outputFingerprint() == DeviceProfile::m3Reference().outputFingerprint();
-        if (m3EnclosureFan)
-            lines << "M8";
         // A shape touching the model origin may have no initial rapid move.
         // The real head can be elsewhere: reach the first edge with output off.
         if (!plan.moves.isEmpty() && !plan.moves[0].rapid)
@@ -146,8 +151,6 @@ class GrblControllerAdapter final : public ControllerAdapter {
             }
         }
         lines << "M5 S0";
-        if (m3EnclosureFan)
-            lines << "M9";
         lines << "G0";
         if (isCancelled(cancel))
             return ControllerProgram::failure(profile, sourceFingerprint, "Ausgabe abgebrochen.",

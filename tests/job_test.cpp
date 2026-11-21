@@ -288,7 +288,7 @@ class JobTest : public QObject {
         QVERIFY(d.exportGcode(file));
         QFile f(file.toLocalFile());
         QVERIFY(f.open(QIODevice::ReadOnly));
-        QVERIFY(f.readAll().endsWith("M5 S0\nM9\nG0\n"));
+        QVERIFY(f.readAll().endsWith("M5 S0\nG0\n"));
         QImage image(20, 20, QImage::Format_ARGB32);
         image.fill(Qt::black);
         QVERIFY(image.save(dir.filePath("test.png")));

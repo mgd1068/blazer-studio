@@ -34,8 +34,12 @@ GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
             fail("Serieller Fehler: " + serial.errorString());
     });
     connect(&poll, &QTimer::timeout, this, [this] {
-        if (connected())
+        if (connected()) {
             serial.write("?");
+            // Expiry must also update the UI when a controller goes silent.
+            if (!statusFresh())
+                emit changed();
+        }
     });
     connect(&timeout, &QTimer::timeout, this,
             [this] { fail("GRBL antwortet nicht rechtzeitig; Übertragung abgebrochen."); });
@@ -55,14 +59,29 @@ void GrblSession::append(const QString &s) {
         log.removeLast();
     emit changed();
 }
+bool GrblSession::statusFresh() const {
+    return lastStatus.isValid() && lastStatus.elapsed() <= 1500;
+}
+QString GrblSession::motionSafetyError() const {
+    if (!commissionedEnvelope || !commissionedModalContract)
+        return "Reale Ausgabe gesperrt: Maschinenkoordinaten, Fahrgrenzen und G54-Zuordnung "
+               "sind für diesen Controller nicht hardwareverifiziert. Referenzfahrt allein "
+               "bestätigt diese Zuordnung nicht.";
+    if (!positionReferenced)
+        return "Reale Ausgabe gesperrt: bestätigte Maschinenreferenz fehlt.";
+    if (!statusFresh())
+        return "Reale Ausgabe gesperrt: aktuelle Controllerposition nicht frisch bestätigt.";
+    return {};
+}
 bool GrblSession::ready() const {
-    return connected() && !handshaking && configurationValid() && knownPosition && knownOffset &&
-           knownOutput && reportedOutput == 0 && !activeInputs &&
+    return statusFresh() && connected() && !handshaking && configurationValid() && knownPosition &&
+           knownOffset && knownOutput && reportedOutput == 0 && !activeInputs &&
            (!overrideFeedback || powerOverride <= 100) && controllerState == "Idle" && !busy() &&
            !firing;
 }
 bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
-    if (!knownOffset || !std::isfinite(workPoint.x()) || !std::isfinite(workPoint.y()))
+    if (!commissionedEnvelope || !commissionedModalContract || !knownOffset ||
+        !std::isfinite(workPoint.x()) || !std::isfinite(workPoint.y()))
         return false;
     // Match the three-decimal coordinates actually sent in GCode. G54 changes
     // the work origin, not the physical travel available to the machine.
@@ -70,9 +89,10 @@ bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
                                std::round(workPoint.y() * 1000) / 1000 + offset.y()};
     constexpr double epsilon = .0000001;
     return std::isfinite(machinePoint.x()) && std::isfinite(machinePoint.y()) &&
-           machinePoint.x() >= -epsilon && machinePoint.y() >= -epsilon &&
-           machinePoint.x() <= m_deviceProfile.workArea().width() + epsilon &&
-           machinePoint.y() <= m_deviceProfile.workArea().height() + epsilon;
+           machinePoint.x() >= commissionedEnvelope->left() - epsilon &&
+           machinePoint.y() >= commissionedEnvelope->top() - epsilon &&
+           machinePoint.x() <= commissionedEnvelope->right() + epsilon &&
+           machinePoint.y() <= commissionedEnvelope->bottom() + epsilon;
 }
 bool GrblSession::open(const QString &port) {
     if (port.isEmpty() || connected())
@@ -121,6 +141,8 @@ bool GrblSession::open(const QString &port) {
     return true;
 }
 void GrblSession::handshake() {
+    lastStatus.invalidate();
+    commissionedModalContract = false;
     positionReferenced = homingPending = false;
     awaitingReset = false;
     connectionVerified = false;
@@ -149,6 +171,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    commissionedModalContract = false;
     positionReferenced = homingPending = false;
     const bool active = busy() || firing;
     poll.stop();
@@ -165,9 +188,10 @@ void GrblSession::close() {
     knownPosition = knownOffset = knownOutput = false;
     overrideFeedback = false;
     if (serial.isOpen()) {
-        if (active)
+        if (active) {
+            serial.clear(QSerialPort::Output);
             serial.write("!\x18", 2);
-        else
+        } else
             serial.write("M5 S0\n");
         serial.flush();
         serial.close();
@@ -177,6 +201,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message) {
+    commissionedModalContract = false;
     positionReferenced = homingPending = false;
     // A write/flush on a lost USB port can synchronously emit another serial
     // error. Do not recurse while attempting the best-effort shutdown.
@@ -198,6 +223,7 @@ void GrblSession::fail(const QString &message) {
     overrideFeedback = false;
     version = laserMode = powerScale = knownPosition = false;
     if (serial.isOpen()) {
+        serial.clear(QSerialPort::Output);
         serial.write("!\x18", 2);
         serial.flush();
         serial.close();
@@ -314,6 +340,8 @@ void GrblSession::line(const QByteArray &s) {
     if (s.startsWith('<') && s.endsWith('>')) {
         auto fields = s.mid(1, s.size() - 2).split('|');
         controllerState = QString::fromLatin1(fields.first()).section(':', 0, 0);
+        const auto previousOffset = offset;
+        const bool hadOffset = knownOffset;
         QPointF machine, work;
         bool hasMachine = false, hasWork = false;
         knownPosition = knownOutput = activeInputs = false;
@@ -346,6 +374,17 @@ void GrblSession::line(const QByteArray &s) {
             if (field.startsWith("WPos:"))
                 hasWork = point(field.mid(5), work);
         }
+        if (hasMachine && hasWork && knownOffset &&
+            (std::abs(machine.x() - work.x() - offset.x()) > .002 ||
+             std::abs(machine.y() - work.y() - offset.y()) > .002)) {
+            fail("Widersprüchliche Maschinen-/Arbeitskoordinaten; Referenz verworfen.");
+            return;
+        }
+        if (positionReferenced && hadOffset && knownOffset && previousOffset != offset &&
+            !zeroPending && !homingPending) {
+            fail("Arbeitskoordinaten unerwartet verändert; Referenz und Auftrag verworfen.");
+            return;
+        }
         if (hasWork) {
             position = work;
             knownPosition = true;
@@ -353,7 +392,12 @@ void GrblSession::line(const QByteArray &s) {
             position = machine - offset;
             knownPosition = true;
         }
+        if (knownPosition && knownOffset && knownOutput)
+            lastStatus.restart();
+        else
+            lastStatus.invalidate();
         if (controllerState == "Alarm" || controllerState == "Door") {
+            commissionedModalContract = false;
             positionReferenced = homingPending = false;
             connectionVerified = false;
             if (executing() || firing) {
@@ -525,8 +569,13 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     return connected() && busy();
 }
 void GrblSession::start(const JobPlan &job) {
+    if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        append(error);
+        return;
+    }
     if (!positionReferenced) {
-        append("Start gesperrt: Maschinenreferenz fehlt. Eine gemeldete Position allein genügt nicht.");
+        append("Start gesperrt: Maschinenreferenz fehlt. Eine gemeldete Position allein genügt "
+               "nicht.");
         return;
     }
     if (job.deviceProfile().outputFingerprint() != m_deviceProfile.outputFingerprint()) {
@@ -541,10 +590,11 @@ void GrblSession::start(const JobPlan &job) {
         append(job.errors.join("; "));
         return;
     }
-    // Only targets are emitted. The first move's model origin is not the
-    // current physical start position, which was checked above.
+    // The encoder can insert a laser-off rapid to the first move.from. Check
+    // both emitting endpoints and all targets, plus the actual current head
+    // position. A rapid.from is a preview origin and is never emitted.
     for (const auto &move : job.moves)
-        if (!insideMachineBed(move.to)) {
+        if ((!move.rapid && !insideMachineBed(move.from)) || !insideMachineBed(move.to)) {
             append("Auftrag mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
             return;
         }
@@ -578,6 +628,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    commissionedModalContract = false;
     positionReferenced = homingPending = false;
     if (!connected())
         return;
@@ -596,6 +647,7 @@ void GrblSession::stop() {
     version = laserMode = powerScale = knownPosition = false;
     awaitingReset = true;
     state = "Abbruch · warte auf GRBL-Neustart";
+    serial.clear(QSerialPort::Output);
     serial.write("!\x18", 2);
     if (!connected())
         return;
@@ -603,6 +655,10 @@ void GrblSession::stop() {
     append("Feed Hold und Soft-Reset gesendet; keine automatische Fortsetzung.");
 }
 void GrblSession::jog(double dx, double dy) {
+    if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        append(error);
+        return;
+    }
     if (!positionReferenced) {
         append("Bewegung gesperrt: Maschinenreferenz fehlt.");
         return;
@@ -616,7 +672,8 @@ void GrblSession::jog(double dx, double dy) {
     commands({"M5", "$J=G91 G21 X" + n(dx) + " Y" + n(dy) + " F600"});
 }
 void GrblSession::home() {
-    if (busy() || firing) return;
+    if (busy() || firing)
+        return;
     if (!homing) {
         append("Referenzfahrt nicht aktiviert ($22).");
         return;
@@ -636,10 +693,15 @@ void GrblSession::home() {
     } else if (ready()) {
         positionReferenced = false;
         homingPending = true;
-        if (!commands({"M5", "$H"})) homingPending = false;
+        if (!commands({"M5", "$H"}))
+            homingPending = false;
     }
 }
 void GrblSession::zero() {
+    if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        append(error);
+        return;
+    }
     if (!positionReferenced) {
         append("Arbeitsnullpunkt nicht gesetzt: Maschinenreferenz fehlt.");
         return;
@@ -651,6 +713,10 @@ void GrblSession::zero() {
     }
 }
 void GrblSession::frame(const QVariantMap &b) {
+    if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        append(error);
+        return;
+    }
     if (!positionReferenced) {
         append("Rahmenfahrt gesperrt: Maschinenreferenz fehlt.");
         return;
@@ -676,6 +742,10 @@ void GrblSession::focus(bool on) {
     if (!on) {
         if (firing)
             stop();
+        return;
+    }
+    if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        append(error);
         return;
     }
     if (!ready())
