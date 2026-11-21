@@ -26,6 +26,13 @@ GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
     poll.setInterval(200);
     timeout.setSingleShot(true);
     timeout.setInterval(10000);
+    workZeroDeadline.setSingleShot(true);
+    workZeroDeadline.setInterval(5000);
+    connect(&workZeroDeadline, &QTimer::timeout, this, [this] {
+        if (workZero)
+            fail("Arbeitsnullpunkt nicht rechtzeitig eindeutig bestätigt; Referenz verworfen.",
+                 ControllerDiagnostics::FaultCause::Timeout);
+    });
     focusTimer.setSingleShot(true);
     focusTimer.setInterval(3000);
     connect(&serial, &QSerialPort::readyRead, this, &GrblSession::receive);
@@ -182,6 +189,69 @@ void GrblSession::auditDispatch(const QByteArray &bytes) {
 bool GrblSession::statusFresh() const {
     return lastStatus.isValid() && lastStatus.elapsed() <= 1500;
 }
+void GrblSession::clearWorkZero() {
+    workZeroDeadline.stop();
+    workZero.reset();
+    ++workZeroEpoch; // Queued callbacks from an old transaction cannot arm a new one.
+}
+void GrblSession::armWorkZeroReadback(quint64 epoch) {
+    if (!workZero || epoch != workZeroEpoch ||
+        workZero->phase != WorkZeroTransaction::Phase::Readback)
+        return;
+    // Process complete RX observations already queued before asking again.
+    // Never discard alarms or quietly accept a partial old report as fresh.
+    if (serial.bytesAvailable())
+        receive();
+    if (!workZero || epoch != workZeroEpoch)
+        return;
+    if (!input.isEmpty()) {
+        fail("Arbeitsnullpunkt: alte unvollständige Rückmeldung am Abgleichrand.",
+             ControllerDiagnostics::FaultCause::InvalidReply);
+        return;
+    }
+    knownPosition = knownOffset = knownReportedMachinePosition = false;
+    lastStatus.invalidate();
+    workZero->queryArmed = true;
+    const bool accepted = serial.write("?") == 1;
+    diagnostic.statusQuery(accepted);
+    if (!accepted)
+        fail("Arbeitsnullpunkt: Positionsabfrage nicht gesendet.",
+             ControllerDiagnostics::FaultCause::WriteFailure);
+}
+bool GrblSession::checkWorkZeroStatus(bool hasMachine, bool offsetReported) {
+    const auto same = [](QPointF a, QPointF b) {
+        return std::abs(a.x() - b.x()) <= 1e-6 && std::abs(a.y() - b.y()) <= 1e-6;
+    };
+    const auto reject = [this] {
+        fail("Arbeitsnullpunkt: Bewegung, Ausgang oder Koordinatenrückmeldung unerwartet; "
+             "Referenz verworfen.",
+             ControllerDiagnostics::FaultCause::CoordinateMismatch);
+        return false;
+    };
+    if (controllerState != "Idle" || !knownOutput || reportedOutput != 0 || activeInputs ||
+        !configurationValid() || !reportMm || !commissionedModalContract || !positionReferenced ||
+        (overrideFeedback && powerOverride > 100) || !knownReportedMachinePosition ||
+        !same(reportedMachinePosition, workZero->machine) || (!hasMachine && !offsetReported))
+        return reject();
+    if (offsetReported &&
+        (!knownOffset || (!same(offset, workZero->previousOffset) &&
+                          !(workZero->g10Dispatched && same(offset, workZero->machine)))))
+        return reject();
+    if (workZero->phase != WorkZeroTransaction::Phase::Readback || !workZero->queryArmed)
+        return true; // ACK-phase observations never complete a work-zero transaction.
+    if (!offsetReported || !knownPosition || !knownOffset || !same(position, {}) ||
+        !same(offset, workZero->machine) || !insideReportedMachineBed())
+        return reject();
+    clearWorkZero();
+    waitingIdle = false;
+    timeout.stop();
+    progress = 1;
+    state = "Bereit";
+    diagnostic.beginStream(false, diagnosticState());
+    append("Arbeitsnullpunkt bestätigt: frisches Idle/S0 und unveränderte gemeldete "
+           "Maschinenposition.");
+    return true;
+}
 QString GrblSession::motionSafetyError() const {
     if (!commissionedEnvelope || !commissionedModalContract)
         return "Reale Ausgabe gesperrt: Maschinenkoordinaten, Fahrgrenzen und G54-Zuordnung "
@@ -282,13 +352,14 @@ bool GrblSession::open(const QString &port) {
         append(serial.errorString());
         return false;
     }
+    clearWorkZero();
     input.clear();
     knownReportedMachinePosition = false;
     version = laserMode = powerScale = knownPosition = knownOffset = false;
-    minimumPower = knownOutput = activeInputs = pauseRequested = zeroPending = false;
+    minimumPower = knownOutput = activeInputs = pauseRequested = false;
     contaminatedConfiguration = false;
     configurationRetries = 0;
-    overrideFeedback = false;
+    overrideFeedback = overrideReadbackPending = false;
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
     controllerState.clear();
     firing = paused = false;
@@ -316,6 +387,7 @@ bool GrblSession::open(const QString &port) {
     return true;
 }
 void GrblSession::handshake() {
+    clearWorkZero();
     lastStatus.invalidate();
     knownReportedMachinePosition = false;
     commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
@@ -333,11 +405,11 @@ void GrblSession::handshake() {
     timeout.stop();
     reportMm = coordinateSystem = bedWidth = bedHeight = false;
     laserMode = powerScale = minimumPower = knownPosition = knownOffset = knownOutput = false;
-    activeInputs = pauseRequested = contaminatedConfiguration = zeroPending = false;
+    activeInputs = pauseRequested = contaminatedConfiguration = false;
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
-    overrideFeedback = false;
+    overrideFeedback = overrideReadbackPending = false;
     queue = {"M5 S0", "$I", "$$", "$G"};
     total = queue.size();
     acked = 0;
@@ -347,6 +419,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    clearWorkZero();
     knownReportedMachinePosition = false;
     commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
@@ -361,9 +434,9 @@ void GrblSession::close() {
     waitingAck = waitingIdle = handshaking = false;
     awaitingReset = connectionVerified = false;
     firing = paused = false;
-    pauseRequested = zeroPending = false;
+    pauseRequested = false;
     knownPosition = knownOffset = knownOutput = false;
-    overrideFeedback = false;
+    overrideFeedback = overrideReadbackPending = false;
     if (serial.isOpen()) {
         if (active) {
             serial.clear(QSerialPort::Output);
@@ -382,6 +455,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause cause) {
+    clearWorkZero();
     knownReportedMachinePosition = false;
     commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
@@ -401,9 +475,9 @@ void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause
     waitingAck = waitingIdle = handshaking = false;
     awaitingReset = connectionVerified = false;
     firing = paused = false;
-    pauseRequested = zeroPending = false;
+    pauseRequested = false;
     knownOutput = knownOffset = false;
-    overrideFeedback = false;
+    overrideFeedback = overrideReadbackPending = false;
     version = laserMode = powerScale = knownPosition = false;
     if (serial.isOpen()) {
         serial.clear(QSerialPort::Output);
@@ -463,6 +537,11 @@ void GrblSession::line(const QByteArray &s) {
     }
     if (awaitingReset && !s.startsWith("Grbl "))
         return;
+    if (workZero && (s.startsWith("Grbl ") || s.startsWith("[VER:") || s.startsWith('$'))) {
+        fail("Arbeitsnullpunkt: Controller-/Konfigurationsepoche verändert.",
+             ControllerDiagnostics::FaultCause::CoordinateMismatch);
+        return;
+    }
     if (s.startsWith("Grbl ")) {
         diagnostic.startupObserved();
         version = s.startsWith("Grbl 1.1") || s.startsWith("Grbl 1.3a");
@@ -518,6 +597,16 @@ void GrblSession::line(const QByteArray &s) {
                     ++distanceCount;
                 }
             }
+        }
+        if (workZero) {
+            if (!workZero->modalRequested || workZero->modalReadback || coordinateCount != 1 ||
+                unitsCount != 1 || distanceCount != 1 || coordinateCode != 54 || unitsCode != 21 ||
+                distanceCode != 90) {
+                fail("Arbeitsnullpunkt: unerwarteter oder mehrdeutiger Modalzustand.",
+                     ControllerDiagnostics::FaultCause::CoordinateMismatch);
+                return;
+            }
+            workZero->modalReadback = true;
         }
         diagnostic.reportedModal(coordinateCount == 1 ? coordinateCode : -1,
                                  unitsCount == 1 ? unitsCode : -1,
@@ -586,6 +675,7 @@ void GrblSession::line(const QByteArray &s) {
         const auto previousOffset = offset;
         const bool hadOffset = knownOffset;
         QPointF machine, work;
+        bool freshOverrideFeedback = false;
         bool hasMachine = false, hasWork = false, machineField = false, workField = false,
              offsetField = false;
         knownPosition = knownOutput = activeInputs = false;
@@ -613,8 +703,10 @@ void GrblSession::line(const QByteArray &s) {
                     overrideFeedback = validFeed && validRapid && validPower &&
                                        feedOverride >= 10 && feedOverride <= 200 &&
                                        powerOverride >= 10 && powerOverride <= 200;
-                    if (overrideFeedback)
+                    if (overrideFeedback) {
                         lastOverrideFeedback.restart();
+                        freshOverrideFeedback = true;
+                    }
                 }
             }
             if (field.startsWith("WCO:")) {
@@ -661,7 +753,7 @@ void GrblSession::line(const QByteArray &s) {
             return;
         }
         if (positionReferenced && hadOffset && knownOffset && previousOffset != offset &&
-            !zeroPending && !homingPending) {
+            !workZero && !homingPending) {
             diagnostic.coordinate(ControllerDiagnostics::Coordinate::Work, std::nullopt);
             fail("Arbeitskoordinaten unerwartet verändert; Referenz und Auftrag verworfen.",
                  ControllerDiagnostics::FaultCause::OffsetChanged);
@@ -690,10 +782,17 @@ void GrblSession::line(const QByteArray &s) {
             lastStatus.restart();
         else
             lastStatus.invalidate();
+        if (freshOverrideFeedback && statusFresh() && overrideReadbackPending &&
+            serial.bytesToWrite() == 0 && feedOverride == requestedFeedOverride &&
+            powerOverride == requestedPowerOverride)
+            overrideReadbackPending = false;
+        if (workZero && !checkWorkZeroStatus(hasMachine, offsetField))
+            return;
         if (rejectUnsafeReportedMachinePosition())
             return;
         if (controllerState == "Alarm" || controllerState == "Door") {
-            commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
+            commissionedOverrideContract = commissionedModalContract = commissionedHomingContract =
+                false;
             positionReferenced = homingPending = false;
             connectionVerified = false;
             if (executing() || firing) {
@@ -723,7 +822,7 @@ void GrblSession::line(const QByteArray &s) {
                  ControllerDiagnostics::FaultCause::ExcessOverride);
             return;
         }
-        if (waitingIdle && controllerState == "Idle" && knownPosition && knownOffset &&
+        if (waitingIdle && !workZero && controllerState == "Idle" && knownPosition && knownOffset &&
             knownOutput && reportedOutput == 0 && !activeInputs) {
             waitingIdle = false;
             diagnostic.beginStream(false, diagnosticState());
@@ -771,8 +870,14 @@ void GrblSession::line(const QByteArray &s) {
         emit changed();
         return;
     }
-    if (s == "ok" && !waitingAck)
+    if (s == "ok" && !waitingAck) {
         diagnostic.unmatchedAcknowledgement();
+        if (workZero) {
+            fail("Arbeitsnullpunkt: unerwartete Quittierung; Referenz verworfen.",
+                 ControllerDiagnostics::FaultCause::UnexpectedAck);
+            return;
+        }
+    }
     if (s == "ok" && waitingAck) {
         if (!diagnosticNormalizedAck) {
             if (buffering && inFlight.isEmpty())
@@ -813,22 +918,40 @@ void GrblSession::line(const QByteArray &s) {
                 diagnostic.statusQuery(serial.write("?") == 1);
                 poll.start();
             } else {
-                if (zeroPending || homingPending) {
-                    // Reports queued before G10 or $H completed may describe
-                    // the old origin/position. Require fresh position and WCO.
-                    knownPosition = knownOffset = false;
-                    zeroPending = false;
+                if (workZero) {
+                    if (!workZero->modalReadback) {
+                        fail("Arbeitsnullpunkt: Modalrückmeldung vor ACK fehlt.",
+                             ControllerDiagnostics::FaultCause::CoordinateMismatch);
+                        return;
+                    }
+                    workZero->phase = WorkZeroTransaction::Phase::Readback;
+                    knownPosition = knownOffset = knownReportedMachinePosition = false;
+                    lastStatus.invalidate();
+                    waitingIdle = true;
+                    // Reports trailing the last ACK in this RX batch are old
+                    // observations, not responses to the query sent next turn.
+                    QMetaObject::invokeMethod(
+                        this, [this, epoch = workZeroEpoch] { armWorkZeroReadback(epoch); },
+                        Qt::QueuedConnection);
+                } else {
+                    if (homingPending)
+                        knownPosition = knownOffset = false;
+                    waitingIdle = true;
+                    diagnostic.statusQuery(serial.write("?") == 1);
+                    if (!paused)
+                        timeout.start(30000);
+                    else
+                        timeout.stop();
                 }
-                waitingIdle = true;
-                diagnostic.statusQuery(serial.write("?") == 1);
-                if (!paused)
-                    timeout.start(30000);
-                else
-                    timeout.stop();
             }
         } else
             pump();
         emit changed();
+        return;
+    }
+    if (workZero && !s.startsWith("[GC:")) {
+        fail("Arbeitsnullpunkt: unerwartete oder unvollständige Controllerantwort.",
+             ControllerDiagnostics::FaultCause::InvalidReply);
         return;
     }
     if (s.startsWith("[MSG:"))
@@ -849,6 +972,12 @@ void GrblSession::pump() {
         }
         if (buffering && rxBytes + bytes.size() > 100)
             break;
+        if (workZero) {
+            if (queue[index] == "G10 L20 P1 X0 Y0")
+                workZero->g10Dispatched = true;
+            if (queue[index] == "$G")
+                workZero->modalRequested = true;
+        }
         if (serial.write(bytes) != bytes.size()) {
             fail("Serieller Schreibfehler.", ControllerDiagnostics::FaultCause::WriteFailure);
             return;
@@ -938,7 +1067,7 @@ void GrblSession::start(const JobPlan &job) {
     commands(program.gcodeLines(), true);
 }
 void GrblSession::pause() {
-    if (awaitingReset || homingPending) {
+    if (awaitingReset || homingPending || workZero) {
         diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
                         ControllerDiagnostics::Denial::ControllerNotReady);
         return;
@@ -975,6 +1104,8 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    clearWorkZero();
+    overrideReadbackPending = false;
     knownReportedMachinePosition = false;
     commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
@@ -983,7 +1114,7 @@ void GrblSession::stop() {
     focusTimer.stop();
     firing = false;
     paused = false;
-    pauseRequested = zeroPending = false;
+    pauseRequested = false;
     knownOutput = false;
     queue.clear();
     inFlight.clear();
@@ -1061,16 +1192,28 @@ void GrblSession::zero() {
         append(error);
         return;
     }
-    if (!positionReferenced) {
-        append("Arbeitsnullpunkt nicht gesetzt: Maschinenreferenz fehlt.");
+    if (!ready() || !verified() || paused || firing || overrideReadbackPending ||
+        serial.bytesToWrite() != 0 || !positionReferenced || !insideReportedMachineBed()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Zero,
+                        ControllerDiagnostics::Denial::ControllerNotReady);
+        append("Arbeitsnullpunkt gesperrt: geprüfter referenzierter Idle/S0-Zustand fehlt.");
         return;
     }
-    if (commands({"M5", "G10 L20 P1 X0 Y0", "G54"})) {
-        zeroPending = true;
-        knownPosition = false;
-        knownOffset = false;
-        knownReportedMachinePosition = false;
-    }
+    // Install the typed boundary BEFORE a write or notification can re-enter
+    // the facade. This is never an exemption for an active output lease.
+    workZero = WorkZeroTransaction{reportedMachinePosition, offset};
+    diagnostic.beginStream(false, diagnosticState());
+    inFlight.clear();
+    sent = rxBytes = 0;
+    buffering = false;
+    queue = {"M5 S0", "G21", "G90", "G10 L20 P1 X0 Y0", "G54", "$G"};
+    total = queue.size();
+    acked = 0;
+    progress = 0;
+    state = "Arbeitsnullpunkt wird geprüft";
+    workZeroDeadline.start(); // Absolute bound; status/ACK traffic cannot extend it.
+    pump();
+    emit changed();
 }
 void GrblSession::frame(const QVariantMap &b) {
     diagnostic.request(ControllerDiagnostics::Action::Frame);
@@ -1143,7 +1286,7 @@ QString GrblSession::overridesSafetyError() const {
     if (!commissionedOverrideContract)
         return "Echtzeit-Overrides gesperrt: geordnete Einzelverarbeitung und 10–200-%-Begrenzung "
                "dieses Controllers sind nicht gesondert verifiziert.";
-    if (!connected() || homingPending || awaitingReset || handshaking)
+    if (!connected() || homingPending || awaitingReset || handshaking || workZero)
         return "Echtzeit-Overrides gesperrt: Verbindung, Referenzfahrt oder Reset noch nicht "
                "abgeschlossen.";
     if (firing)
@@ -1185,8 +1328,13 @@ bool GrblSession::overrides(int feed, int power) {
     int powerDelta = power - 10;
     bytes.append(QByteArray(powerDelta / 10, char(0x9a)));
     bytes.append(QByteArray(powerDelta % 10, char(0x9c)));
-    diagnostic.realtime(ControllerDiagnostics::Command::Override,
-                        serial.write(bytes) == bytes.size());
+    const bool accepted = serial.write(bytes) == bytes.size();
+    if (accepted) {
+        overrideReadbackPending = true;
+        requestedFeedOverride = feed;
+        requestedPowerOverride = power;
+    }
+    diagnostic.realtime(ControllerDiagnostics::Command::Override, accepted);
     diagnostic.statusQuery(serial.write("?") == 1);
-    return true;
+    return accepted;
 }

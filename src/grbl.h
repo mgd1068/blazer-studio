@@ -34,7 +34,8 @@ class GrblSession : public ControllerSession {
                 homingPending,
                 awaitingReset,
                 overridesReady(),
-                overridesSafetyError()};
+                overridesSafetyError(),
+                workZero.has_value()};
     }
     QStringList logEntries() const override { return log; }
     QVariantMap diagnosticSnapshot() const override;
@@ -44,14 +45,17 @@ class GrblSession : public ControllerSession {
     bool ready() const;
     bool verified() const {
         return statusFresh() && connectionVerified && connected() && !handshaking &&
-               !awaitingReset && configurationValid() && knownPosition && knownOffset &&
-               knownOutput && !activeInputs && (!overrideFeedback || powerOverride <= 100);
+               !awaitingReset && !workZero && configurationValid() && knownPosition &&
+               knownOffset && knownOutput && !activeInputs &&
+               (!overrideFeedback || powerOverride <= 100);
     }
     bool configurationValid() const {
         return version && laserMode && powerScale && minimumPower && reportMm && coordinateSystem &&
                bedWidth && bedHeight;
     }
-    bool busy() const { return awaitingReset || !queue.isEmpty() || waitingIdle || waitingAck; }
+    bool busy() const {
+        return awaitingReset || workZero || !queue.isEmpty() || waitingIdle || waitingAck;
+    }
     bool executing() const { return busy() && !handshaking; }
     bool paused = false, firing = false;
     double progress = 0;
@@ -99,6 +103,20 @@ class GrblSession : public ControllerSession {
     bool commissionedHomingContract = false;
     QElapsedTimer lastStatus;
     QElapsedTimer lastOverrideFeedback;
+    bool overrideReadbackPending = false;
+    int requestedFeedOverride = 100, requestedPowerOverride = 100;
+    struct WorkZeroTransaction {
+        QPointF machine, previousOffset;
+        enum class Phase { Acknowledgements, Readback } phase = Phase::Acknowledgements;
+        bool g10Dispatched = false, modalRequested = false, modalReadback = false;
+        bool queryArmed = false;
+    };
+    std::optional<WorkZeroTransaction> workZero;
+    quint64 workZeroEpoch = 0;
+    QTimer workZeroDeadline;
+    void clearWorkZero();
+    void armWorkZeroReadback(quint64 epoch);
+    bool checkWorkZeroStatus(bool hasMachine, bool offsetReported);
     void receive();
     void line(const QByteArray &line);
     void pump();
@@ -126,7 +144,6 @@ class GrblSession : public ControllerSession {
     double reportedOutput = 0;
     bool contaminatedConfiguration = false, pauseRequested = false;
     bool handlingFailure = false;
-    bool zeroPending = false;
     bool positionReferenced = false, homingPending = false;
     int configurationRetries = 0;
     QString controllerState;

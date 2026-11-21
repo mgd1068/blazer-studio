@@ -156,6 +156,70 @@ class GrblTest : public QObject {
         QVERIFY(session.motionSafetyError().isEmpty());
     }
   private slots:
+    void workZeroChangesOnlyG54AndPreservesPhysicalHead_data() {
+        QTest::addColumn<QRectF>("envelope");
+        QTest::addColumn<QPointF>("actual");
+        QTest::addColumn<QPointF>("home");
+        QTest::addColumn<QPointF>("initialOffset");
+        QTest::addColumn<QPointF>("expectedHead");
+        QTest::newRow("positive-shifted") << QRectF(0,0,200,150) << QPointF(80,60)
+            << QPointF(20,10) << QPointF(20,-10) << QPointF(50,30);
+        QTest::newRow("signed-negative") << QRectF(-200,-150,200,150) << QPointF(-80,-60)
+            << QPointF(-180,-130) << QPointF(-200,-150) << QPointF(-150,-110);
+    }
+    void workZeroChangesOnlyG54AndPreservesPhysicalHead() {
+        QFETCH(QRectF, envelope);
+        QFETCH(QPointF, actual);
+        QFETCH(QPointF, home);
+        QFETCH(QPointF, initialOffset);
+        QFETCH(QPointF, expectedHead);
+        PlantPort port(envelope,actual,initialOffset,home);
+        GrblSession session;
+        QVERIFY(session.open(port.endpoint));
+        QTRY_VERIFY(session.ready());
+        homeAndSupplySyntheticContract(session, envelope);
+        session.jog(30, 20);
+        QTRY_VERIFY(session.ready());
+        QCOMPARE(port.plant.physical, expectedHead);
+        const auto travels = port.plant.travel.size();
+        const auto cut = port.received.size();
+        session.zero();
+        QVERIFY(session.status().coordinateUpdatePending);
+        QTRY_VERIFY(session.ready());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(session.status().verified && session.status().positionReferenced);
+        QCOMPARE(port.plant.physical, expectedHead);
+        QCOMPARE(port.plant.counter(), expectedHead);
+        QCOMPARE(port.plant.g54, expectedHead);
+        QCOMPARE(port.plant.work(), QPointF());
+        QCOMPARE(port.plant.travel.size(), travels);
+        QCOMPARE(port.plant.modal.spindle, 0);
+        QCOMPARE(port.plant.modal.power, 0.);
+        QCOMPARE(port.plant.limits, 0);
+        QCOMPARE(port.plant.rejected, 0);
+        QCOMPARE(port.received.mid(cut),
+                 QStringList({"M5 S0", "G21", "G90", "G10 L20 P1 X0 Y0", "G54", "$G"}));
+    }
+    void workZeroPhysicalPlantMovementIsNotHiddenByAnOffsetUpdate() {
+        PlantPort port;
+        GrblSession session;
+        QVERIFY(session.open(port.endpoint));
+        QTRY_VERIFY(session.ready());
+        homeAndSupplySyntheticContract(session, {0, 0, 200, 150});
+        session.jog(30, 20);
+        QTRY_VERIFY(session.ready());
+        QCOMPARE(port.plant.physical, QPointF(32, 22));
+        port.ackEnabled = false;
+        session.zero();
+        QVERIFY(session.status().coordinateUpdatePending);
+        port.plant.physical = QPointF(32.001, 22); // Independent external displacement.
+        port.plant.g54 = port.plant.counter();     // WPos zero cannot hide changed raw MPos.
+        port.report();
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().positionReferenced);
+        QCOMPARE(port.plant.physical, QPointF(32.001, 22));
+    }
     void diagnosticChronologyRetainsOnlyFirstApproachAndPoweredTargetWithProtocolAcks() {
         PlantPort port;
         GrblSession session;

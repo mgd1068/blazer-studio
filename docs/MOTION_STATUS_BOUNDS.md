@@ -28,16 +28,16 @@ Sie prüfen den Verbindungsabbruch, fehlende weitere G1/M4-Ausgabe trotz später
 ACKs und die fehlende Wiederherstellung durch einen falschen In-Range-Bericht.
 Kein realer Anschluss oder Laser wurde dafür geöffnet oder bedient.
 
-## Noch offene reale Arbeitsnullpunkt-Transaktion
+## Reale Arbeitsnullpunkt-Freigabe bleibt offen
 
-Die tatsächliche M3-Nullpunktbedienung ist weiter nicht freigegeben. G10 ändert
-absichtlich den WCO-Vertrag; der bestehende allgemeine Machine-Verlustwächter
-kann diese derzeit noch nicht als eigenen erwarteten, begrenzten Ablauf
-behandeln. Eine spätere Umsetzung benötigt einen expliziten Typ für
-M5/G10/G54/ACK/neues WCO/Idle mit unabhängiger Regression und Fehlergrenzen.
-Sie darf einen aktiven Job oder eine Fokus-/Absaugungslease niemals unter eine
-solche Ausnahme fallen lassen. Das wird durch diese Bereichsprüfung nicht
-implementiert oder kaschiert; Beta6 bleibt Entwicklung/offline.
+Das Backend besitzt jetzt eine ausdrücklich begrenzte
+[WorkZero-Transaktion](WORK_ZERO_TRANSACTION.md) mit eingefrorenem rohem MPos,
+ACK-/Modal-/Readbackgrenzen und fester Deadline. Das ist keine reale
+M3-Inbetriebnahme oder allgemeine Ausnahme vom Machine-Verlustwächter.
+Die Fassade darf ausschließlich diese kontrollierte Phase ohne tatsächlich
+aktive Outputlease, Job-/Fokusflag oder Firing behandeln. Ein aktiver Job darf
+niemals unter eine Koordinaten-Ausnahme fallen. Machine-/UI-Integration wird
+separat geprüft; Beta6 bleibt Entwicklung/offline.
 
 ## Echtzeit-Overrides
 

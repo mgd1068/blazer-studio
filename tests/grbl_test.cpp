@@ -17,12 +17,12 @@ class Controller : public QObject {
     QStringList commands;
     QString status = "Idle";
     bool banner = false, wrongPower = false, autoAck = true, withOverrides = false;
-    bool respondToStatus = true, interleaveSettingsOnce = false;
+    bool respondToStatus = true, respondToModal = true, interleaveSettingsOnce = false;
     bool interleaveSettingsAlways = false;
     QByteArray minimumPower = "0";
     bool respondToReset = true, holdBlocksCommands = false, rejectHandshakeSafetyOff = false;
     QString resetState = "Idle";
-    int settingsRequests = 0;
+    int settingsRequests = 0, statusQueries = 0;
     QSocketNotifier *notifier = nullptr;
     QByteArray realtime;
     int feed = 100, power = 100;
@@ -88,6 +88,7 @@ class Controller : public QObject {
                         continue;
                     }
                     if (c == '?') {
+                        ++statusQueries;
                         if (respondToStatus)
                             report();
                         continue;
@@ -125,9 +126,11 @@ class Controller : public QObject {
                         commands << line;
                         if (holdBlocksCommands && status == "Hold")
                             continue;
+                        if (line == "G10 L20 P1 X0 Y0")
+                            workOffset = machinePosition;
                         if (line == "$I")
                             reply("[VER:1.3a.20211103:]\r\n");
-                        if (line == "$G")
+                        if (line == "$G" && respondToModal)
                             reply("[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]\r\n");
                         if (line == "$$") {
                             ++settingsRequests;
@@ -211,7 +214,378 @@ class GrblTest : public QObject {
                                           AccessoryContract::PhysicalState::Flowing,
                                           "virtual airflow fixture", now, now));
     }
+    const QStringList workZeroCommands{"M5 S0", "G21", "G90", "G10 L20 P1 X0 Y0", "G54", "$G"};
+    void acknowledgeWorkZero(Controller &controller, GrblSession &session, int cut,
+                             bool acknowledgeLast = true) {
+        for (int i = 0; i < workZeroCommands.size(); ++i) {
+            QTRY_COMPARE(controller.commands.value(cut + i), workZeroCommands[i]);
+            if (i + 1 == workZeroCommands.size() && !acknowledgeLast)
+                break;
+            controller.reply("ok\r\n");
+        }
+        if (acknowledgeLast)
+            QTRY_VERIFY(session.workZero && session.workZero->queryArmed);
+        else
+            QTRY_VERIFY(session.workZero && session.workZero->modalReadback);
+    }
   private slots:
+    void zeroCannotTrustAChangedMachinePointEvenWhenWorkReportsZero() {
+        Controller controller;
+        controller.machinePosition = {100, 75};
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.respondToStatus = controller.respondToReset = false;
+        session.zero();
+        QTRY_VERIFY(session.waitingIdle);
+        controller.machinePosition = controller.workOffset = {101, 75};
+        controller.report(); // A self-consistent WPos0 must not conceal this movement.
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().positionReferenced);
+    }
+    void workZeroBlocksOtherActionsAndExplicitStopCancelsItsEpoch() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        session.zero();
+        QTRY_VERIFY(controller.commands.last() == "M5 S0");
+        const auto cut = controller.commands.size();
+        const auto rtCut = controller.realtime.size();
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        session.start(document.job());
+        session.jog(1, 0);
+        session.frame({{"valid", true}, {"x", 0}, {"y", 0}, {"width", 10}, {"height", 10}});
+        session.focus(true);
+        session.home();
+        session.pause();
+        session.zero();
+        QVERIFY(!session.overrides(125, 70));
+        QTest::qWait(40);
+        QCOMPARE(controller.commands.size(), cut);
+        QCOMPARE(controller.realtime.mid(rtCut), QByteArray());
+        QVERIFY(session.status().coordinateUpdatePending);
+        session.stop();
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(session.status().resetting);
+        controller.reply("ok\r\n<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0>\r\n");
+        QTest::qWait(40);
+        QVERIFY(session.status().resetting);
+        QVERIFY(!session.status().positionReferenced);
+        QVERIFY(!session.ready());
+    }
+    void workZeroRequiresItsModalReplyBeforeTheFinalAcknowledgement() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        controller.respondToModal = false;
+        const auto cut = controller.commands.size();
+        session.zero();
+        for (int i = 0; i < workZeroCommands.size(); ++i) {
+            QTRY_COMPARE(controller.commands.value(cut + i), workZeroCommands[i]);
+            controller.reply("ok\r\n");
+        }
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().positionReferenced);
+    }
+    void workZeroRejectsWrongOrAmbiguousFinalModalReadback_data() {
+        QTest::addColumn<QByteArray>("modal");
+        QTest::newRow("units-inches") << QByteArray("[GC:G0 G54 G17 G20 G90 G94 M5 T0 F0 S0]");
+        QTest::newRow("relative") << QByteArray("[GC:G0 G54 G17 G21 G91 G94 M5 T0 F0 S0]");
+        QTest::newRow("foreign-wcs") << QByteArray("[GC:G0 G55 G17 G21 G90 G94 M5 T0 F0 S0]");
+        QTest::newRow("duplicate-wcs") << QByteArray("[GC:G0 G54 G55 G17 G21 G90 G94 M5 T0 F0 S0]");
+        QTest::newRow("duplicate-units")
+            << QByteArray("[GC:G0 G54 G17 G21 G20 G90 G94 M5 T0 F0 S0]");
+        QTest::newRow("missing-distance") << QByteArray("[GC:G0 G54 G17 G21 G94 M5 T0 F0 S0]");
+    }
+    void workZeroRejectsWrongOrAmbiguousFinalModalReadback() {
+        QFETCH(QByteArray, modal);
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToModal = controller.respondToStatus =
+            controller.respondToReset = false;
+        const auto cut = controller.commands.size();
+        session.zero();
+        for (int i = 0; i < workZeroCommands.size(); ++i) {
+            QTRY_COMPARE(controller.commands.value(cut + i), workZeroCommands[i]);
+            if (i + 1 < workZeroCommands.size())
+                controller.reply("ok\r\n");
+        }
+        controller.reply(modal + "\r\nok\r\n");
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().positionReferenced);
+    }
+    void workZeroDoesNotSpliceAnOldPartialReportAcrossItsQueryBoundary() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        const auto cut = controller.commands.size();
+        session.zero();
+        acknowledgeWorkZero(controller, session, cut, false);
+        controller.reply("ok\r\n<Idle|MPos:0");
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().positionReferenced);
+    }
+    void stoppedWorkZeroCannotArmItsQueuedOldReadbackCallback() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        session.poll.stop(); // Isolate the queued transaction query from periodic diagnostics.
+        const auto cut = controller.commands.size();
+        session.zero();
+        acknowledgeWorkZero(controller, session, cut, false);
+        const auto queries = controller.statusQueries;
+        bool cancel = true;
+        connect(&session, &GrblSession::changed, &session, [&] {
+            if (cancel && session.workZero &&
+                session.workZero->phase == GrblSession::WorkZeroTransaction::Phase::Readback) {
+                cancel = false;
+                session.stop();
+            }
+        });
+        controller.reply("ok\r\n");
+        QTest::qWait(50);
+        QVERIFY(!cancel);
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(session.status().resetting);
+        QVERIFY(!session.status().positionReferenced);
+        QCOMPARE(controller.statusQueries, queries);
+    }
+    void workZeroPreservesRawMachinePointAndCommitsOnlyAfterReadback_data() {
+        QTest::addColumn<QPointF>("machine");
+        QTest::addColumn<QPointF>("oldOffset");
+        QTest::addColumn<QRectF>("envelope");
+        QTest::addColumn<bool>("workOnly");
+        QTest::newRow("shifted-positive")
+            << QPointF(100, 75) << QPointF(10, -5) << QRectF(0, 0, 200, 150) << false;
+        QTest::newRow("signed-negative")
+            << QPointF(-120, -40) << QPointF(-10, 5) << QRectF(-200, -150, 200, 150) << false;
+        QTest::newRow("work-plus-offset")
+            << QPointF(25, 10) << QPointF(5, -2) << QRectF(0, 0, 200, 150) << true;
+    }
+    void workZeroPreservesRawMachinePointAndCommitsOnlyAfterReadback() {
+        QFETCH(QPointF, machine);
+        QFETCH(QPointF, oldOffset);
+        QFETCH(QRectF, envelope);
+        QFETCH(bool, workOnly);
+        Controller controller;
+        controller.machinePosition = machine;
+        controller.workOffset = oldOffset;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        session.commissionedEnvelope = envelope;
+        controller.autoAck = controller.respondToStatus = false;
+        const auto cut = controller.commands.size();
+        session.zero();
+        QVERIFY(session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().verified && !session.ready());
+        QTest::qWait(80); // Longer than the facade's safety watchdog cadence.
+        QVERIFY(session.status().coordinateUpdatePending);
+        acknowledgeWorkZero(controller, session, cut);
+        QVERIFY(session.status().coordinateUpdatePending);
+        QVERIFY(session.status().positionReferenced);
+        if (workOnly)
+            controller.reply("<Idle|WPos:0,0,0|WCO:25,10,0|FS:0,0>\r\n");
+        else
+            controller.report();
+        QTRY_VERIFY(session.ready());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(session.status().verified && session.status().positionReferenced);
+        QCOMPARE(session.position, QPointF());
+        QCOMPARE(session.reportedMachinePosition, machine);
+        QCOMPARE(session.offset, machine);
+        QCOMPARE(controller.machinePosition, machine);
+        QCOMPARE(controller.commands.mid(cut), workZeroCommands);
+    }
+    void workZeroNeverCommitsAnIdleInTheFinalAckBatch() {
+        Controller controller;
+        controller.machinePosition = controller.workOffset = {100, 75}; // Already zero.
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = false;
+        const auto cut = controller.commands.size();
+        session.zero();
+        acknowledgeWorkZero(controller, session, cut, false);
+        controller.reply("ok\r\n<Idle|MPos:100,75,0|WCO:100,75,0|FS:0,0>\r\n");
+        QTRY_VERIFY(session.workZero && session.workZero->queryArmed);
+        QVERIFY(!session.ready());
+        QVERIFY(session.status().coordinateUpdatePending);
+        QVERIFY(!session.knownPosition && !session.knownOffset);
+        controller.report();
+        QTRY_VERIFY(session.ready());
+        QVERIFY(!session.status().coordinateUpdatePending);
+    }
+    void workZeroRejectsUnexpectedEvidenceAndNeverRetries_data() {
+        QTest::addColumn<QByteArray>("reply");
+        QTest::addColumn<bool>("readback");
+        QTest::newRow("raw-movement-small")
+            << QByteArray("<Idle|MPos:100.0001,75,0|WCO:10,-5,0|FS:0,0>") << false;
+        QTest::newRow("wrong-offset-before-g10")
+            << QByteArray("<Idle|MPos:100,75,0|WCO:100,75,0|FS:0,0>") << false;
+        QTest::newRow("unexpected-offset")
+            << QByteArray("<Idle|MPos:100,75,0|WCO:11,-5,0|FS:0,0>") << false;
+        QTest::newRow("run") << QByteArray("<Run|MPos:100,75,0|WCO:10,-5,0|FS:0,0>") << false;
+        QTest::newRow("hold") << QByteArray("<Hold:0|MPos:100,75,0|WCO:10,-5,0|FS:0,0>") << false;
+        QTest::newRow("output") << QByteArray("<Idle|MPos:100,75,0|WCO:10,-5,0|FS:0,5>") << false;
+        QTest::newRow("invalid-position")
+            << QByteArray("<Idle|MPos:nan,75,0|WCO:10,-5,0|FS:0,0>") << false;
+        QTest::newRow("units") << QByteArray("[GC:G0 G54 G17 G20 G90 G94 M5 T0 F0 S0]") << false;
+        QTest::newRow("settings-epoch") << QByteArray("$13=0") << false;
+        QTest::newRow("firmware-epoch") << QByteArray("[VER:1.3a.changed:]") << false;
+        QTest::newRow("startup") << QByteArray("Grbl 1.3a ['$' for help]") << false;
+        QTest::newRow("malformed") << QByteArray("garbage") << false;
+        QTest::newRow("error") << QByteArray("error:9") << false;
+        QTest::newRow("alarm") << QByteArray("ALARM:1") << false;
+        QTest::newRow("missing-wco") << QByteArray("<Idle|MPos:100,75,0|FS:0,0>") << true;
+        QTest::newRow("wrong-work-position")
+            << QByteArray("<Idle|WPos:1,0,0|WCO:100,75,0|FS:0,0>") << true;
+        QTest::newRow("stale-old-offset")
+            << QByteArray("<Idle|MPos:100,75,0|WCO:10,-5,0|FS:0,0>") << true;
+        QTest::newRow("unexpected-extra-ack") << QByteArray("ok") << true;
+    }
+    void workZeroRejectsUnexpectedEvidenceAndNeverRetries() {
+        QFETCH(QByteArray, reply);
+        QFETCH(bool, readback);
+        Controller controller;
+        controller.machinePosition = {100, 75};
+        controller.workOffset = {10, -5};
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        const auto cut = controller.commands.size();
+        session.zero();
+        QVERIFY(session.status().coordinateUpdatePending);
+        if (readback)
+            acknowledgeWorkZero(controller, session, cut);
+        controller.reply(reply + "\r\n<Idle|MPos:100,75,0|WCO:100,75,0|FS:0,0>\r\nok\r\n");
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().positionReferenced);
+        QVERIFY(!session.commissionedModalContract);
+        session.zero();
+        session.home();
+        QTest::qWait(30);
+        QVERIFY(controller.commands.mid(cut).count("G10 L20 P1 X0 Y0") <= 1);
+        QVERIFY(!controller.commands.mid(cut).contains("$H"));
+        QVERIFY(controller.realtime.contains(char(0x18)));
+    }
+    void workZeroMissingAckOrReadbackHasAnAbsoluteDeadline_data() {
+        QTest::addColumn<bool>("allAcks");
+        QTest::newRow("missing-ack") << false;
+        QTest::newRow("missing-fresh-readback") << true;
+    }
+    void workZeroMissingAckOrReadbackHasAnAbsoluteDeadline() {
+        QFETCH(bool, allAcks);
+        Controller controller;
+        controller.machinePosition = {100, 75};
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        const auto cut = controller.commands.size();
+        session.zero();
+        if (allAcks)
+            acknowledgeWorkZero(controller, session, cut);
+        session.workZeroDeadline.start(120); // Bounded fixture clock, not a production API.
+        for (int i = 0; i < 4 && session.connected(); ++i) {
+            if (!allAcks)
+                controller.report(); // Valid old Idle traffic cannot replace an ACK.
+            QTest::qWait(40);
+        }
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().positionReferenced);
+        QVERIFY(controller.commands.mid(cut).count("G10 L20 P1 X0 Y0") <= 1);
+    }
+    void workZeroCannotOverrideAnActiveMotionOrOutputAction_data() {
+        QTest::addColumn<QString>("action");
+        for (const auto &action : {"job", "frame", "jog", "focus", "pause", "home", "reset"})
+            QTest::newRow(action) << QString(action);
+    }
+    void workZeroCannotOverrideAnActiveMotionOrOutputAction() {
+        QFETCH(QString, action);
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        if (action == "job") {
+            Document document;
+            document.setBackgroundPlanning(false);
+            document.newProject();
+            document.addShape("rect");
+            session.start(document.job());
+            QVERIFY(session.busy());
+        } else if (action == "frame")
+            session.frame({{"valid", true}, {"x", 0}, {"y", 0}, {"width", 10}, {"height", 10}});
+        else if (action == "jog")
+            session.jog(1, 0);
+        else if (action == "focus")
+            session.focus(true);
+        else if (action == "pause")
+            session.paused = true;
+        else if (action == "home")
+            session.home();
+        else if (action == "reset")
+            session.stop();
+        const auto before = controller.commands.count("G10 L20 P1 X0 Y0");
+        session.zero();
+        QTest::qWait(30);
+        QCOMPARE(controller.commands.count("G10 L20 P1 X0 Y0"), before);
+        QVERIFY(!session.status().coordinateUpdatePending);
+    }
+    void workZeroWaitsForOverrideReadbackAndCancelsOnDisconnect() {
+        Controller controller;
+        controller.withOverrides = true;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.respondToStatus = false;
+        QVERIFY(session.overrides(125, 70));
+        QTest::qWait(20);
+        QVERIFY(session.overrideReadbackPending);
+        session.zero();
+        QVERIFY(!session.status().coordinateUpdatePending);
+        controller.report();
+        QTRY_VERIFY(!session.overrideReadbackPending);
+        controller.autoAck = false;
+        session.zero();
+        QVERIFY(session.status().coordinateUpdatePending);
+        controller.disconnectPort();
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().coordinateUpdatePending);
+        QVERIFY(!session.status().positionReferenced);
+    }
     void repeatedOverridesRemainBoundedWithDelayedOrOldFeedback_data() {
         QTest::addColumn<int>("initialFeed");
         QTest::addColumn<int>("initialPower");
@@ -2082,32 +2456,6 @@ class GrblTest : public QObject {
         QVERIFY(!s.ready());
         c.report();
         QTRY_VERIFY(s.ready());
-    }
-    void zeroRequiresOffsetReportedAfterCommandCompletion() {
-        Controller c;
-        c.machinePosition = {100, 75};
-        GrblSession s;
-        QVERIFY(s.open(c.port));
-        QTRY_VERIFY(s.ready());
-        requireReference(s);
-        c.autoAck = c.respondToStatus = false;
-        s.zero();
-        QTRY_VERIFY(c.commands.contains("M5"));
-        c.report(); // Old WCO arriving before the G10 operation.
-        QTest::qWait(30);
-        c.reply("ok\r\n");
-        QTRY_VERIFY(c.commands.contains("G10 L20 P1 X0 Y0"));
-        c.reply("ok\r\n");
-        QTRY_VERIFY(c.commands.contains("G54"));
-        c.reply("ok\r\n");
-        QTRY_COMPARE(s.progress, .99);
-        c.reply("<Idle|MPos:100,75,0|FS:0,0>\r\n");
-        QTest::qWait(30);
-        QVERIFY(!s.ready());
-        c.workOffset = {100, 75};
-        c.report();
-        QTRY_VERIFY(s.ready());
-        QCOMPARE(s.position, QPointF(0, 0));
     }
     void idleRequiresFreshValidStatus_data() {
         QTest::addColumn<QByteArray>("status");

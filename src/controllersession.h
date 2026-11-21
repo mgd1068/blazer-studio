@@ -21,6 +21,8 @@ struct ControllerStatus {
     bool referencing = false, resetting = false;
     bool overridesReady = false;
     QString overridesSafetyError = "Echtzeit-Overrides sind für diese Sitzung nicht freigegeben.";
+    // A bounded non-motion work-coordinate transaction, never a lease exemption.
+    bool coordinateUpdatePending = false;
 };
 class ControllerSession : public QObject {
     Q_OBJECT
