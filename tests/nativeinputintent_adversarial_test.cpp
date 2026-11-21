@@ -52,7 +52,7 @@ private slots:
         NativeInputIntentAdapter adapter(nullptr,false);
         QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
         QTRY_VERIFY(window.isActive());
-        QQuickItem control(window.contentItem());control.setSize({40,40});
+        QQuickItem control(window.contentItem());control.setSize({40,40});control.setProperty("pressed",true);
         adapter.registerControl(&control,"focus");
         NativeInputIntentTestAccess::calibrate(adapter);
         NativeInputIntentTestAccess::capture(adapter,window);
@@ -67,7 +67,7 @@ private slots:
         QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
         QTRY_VERIFY(window.isActive());
         QQuickItem control(window.contentItem()),other(window.contentItem());
-        control.setSize({40,40});other.setPosition({60,0});other.setSize({30,30});
+        control.setSize({40,40});control.setProperty("pressed",true);other.setPosition({60,0});other.setSize({30,30});
         adapter.registerControl(&control,"focus");control.forceActiveFocus();
         QVERIFY(control.hasActiveFocus());
         NativeInputIntentTestAccess::calibrate(adapter);
@@ -79,7 +79,7 @@ private slots:
         NativeInputIntentAdapter adapter(nullptr,false);
         QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
         QTRY_VERIFY(window.isActive());
-        QQuickItem control(window.contentItem());control.setSize({40,40});
+        QQuickItem control(window.contentItem());control.setSize({40,40});control.setProperty("pressed",true);
         adapter.registerControl(&control,"focus");
         NativeInputIntentTestAccess::calibrate(adapter);
         NativeInputIntentTestAccess::capture(adapter,window);
@@ -91,7 +91,7 @@ private slots:
     void delayedConsumptionRetainsOriginalDeadline() {
         NativeInputIntentAdapter adapter(nullptr,false);
         QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
-        QTRY_VERIFY(window.isActive());QQuickItem control(window.contentItem());control.setSize({40,40});
+        QTRY_VERIFY(window.isActive());QQuickItem control(window.contentItem());control.setSize({40,40});control.setProperty("pressed",true);
         adapter.registerControl(&control,"focus");NativeInputIntentTestAccess::calibrate(adapter);
         const auto before=NativeInputIntentTestAccess::now();NativeInputIntentTestAccess::capture(adapter,window);
         QTest::qSleep(80);auto proof=adapter.consume("focus");QVERIFY(proof);
@@ -103,7 +103,7 @@ private slots:
     void registrationWindowVisibilityAndDestroyedControlRevoke() {
         NativeInputIntentAdapter adapter(nullptr,false);
         QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
-        QTRY_VERIFY(window.isActive());QQuickItem control(window.contentItem());control.setSize({40,40});
+        QTRY_VERIFY(window.isActive());QQuickItem control(window.contentItem());control.setSize({40,40});control.setProperty("pressed",true);
         QQuickItem other(window.contentItem());other.setPosition({60,0});other.setSize({30,30});
         adapter.registerControl(&control,"focus");
         auto capture=[&]{NativeInputIntentTestAccess::calibrate(adapter);NativeInputIntentTestAccess::capture(adapter,window);};
@@ -115,11 +115,37 @@ private slots:
         auto transient=new QQuickItem(window.contentItem());transient->setSize({40,40});
         adapter.registerControl(transient,"focus");capture();delete transient;QVERIFY(!adapter.consume("focus"));
     }
+    void continuityRevocationCanDestroyCollectorDirectly() {
+        auto adapter=new NativeInputIntentAdapter(nullptr,false);
+        QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
+        QTRY_VERIFY(window.isActive());QQuickItem control(window.contentItem());control.setSize({40,40});control.setProperty("pressed",true);
+        adapter->registerControl(&control,"focus");NativeInputIntentTestAccess::calibrate(*adapter);
+        NativeInputIntentTestAccess::capture(*adapter,window);
+        NativeInputIntentTestAccess::suspendedSinceCapture(*adapter);
+        QPointer<NativeInputIntentAdapter> alive(adapter);
+        connect(adapter,&NativeInputIntentAdapter::invalidated,adapter,[adapter]{delete adapter;});
+        QVERIFY(!adapter->consume("focus"));QVERIFY(!alive);
+    }
+    void actualControlAcceptanceAndOcclusionRequired() {
+        NativeInputIntentAdapter adapter(nullptr,false);
+        QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
+        QTRY_VERIFY(window.isActive());QQuickItem control(window.contentItem());control.setSize({40,40});
+        adapter.registerControl(&control,"focus");
+        auto capture=[&]{NativeInputIntentTestAccess::calibrate(adapter);NativeInputIntentTestAccess::capture(adapter,window);};
+        capture();QVERIFY(!adapter.consume("focus")); // No readable bool pressed property.
+        control.setProperty("pressed",false);capture();QVERIFY(!adapter.consume("focus"));
+        control.setProperty("pressed",QString("true"));capture();QVERIFY(!adapter.consume("focus"));
+        control.setProperty("pressed",true);
+        QQuickItem overlay(window.contentItem());overlay.setSize({40,40});overlay.setZ(10);
+        capture();QVERIFY(!adapter.consume("focus")); // Registered item is behind another item.
+        overlay.setVisible(false);capture();QVERIFY(adapter.consume("focus"));
+        capture();control.setProperty("pressed",false);QVERIFY(!adapter.consume("focus"));
+    }
     void fakeAndRepeatedSignalsCannotMint() {
         NativeInputIntentAdapter adapter(nullptr,false);
         QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
         QTRY_VERIFY(window.isActive());
-        QQuickItem control(window.contentItem());control.setSize({40,40});
+        QQuickItem control(window.contentItem());control.setSize({40,40});control.setProperty("pressed",true);
         adapter.registerControl(&control,"focus");
         NativeInputIntentTestAccess::calibrate(adapter);
         NativeInputIntentTestAccess::capture(adapter,window,false,false);

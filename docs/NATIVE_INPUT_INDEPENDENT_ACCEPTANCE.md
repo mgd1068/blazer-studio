@@ -42,3 +42,27 @@ The corrected test against immutable adapter fix ae49013 passes all18 results bo
 normally (349ms) and with ASan/UBSan (363ms). Leak detection is disabled for Qt
 process globals; no leak-free or hardware acceptance claim follows. Evidence is
 under `benslab/analysis/blazer-native-input-independent-20261121`.
+
+The followup adapter4610de3 requires a readable bool `pressed` property on the
+registered item at consumption. Fixtures explicitly model accepted Button state;
+missing/false/string values and a top overlay deny. Hiding the overlay permits the
+same registered item, proving that those negative checks do not always deny.
+Private dynamic properties are test data, not a production clock/grant API.
+
+`tests/nativefocusruntime_test.cpp` drives actual Machine.beginFocus through the
+adapter and original-time seal into a real worker with the independent child PTY
+peer. Private worker-only synthetic envelope/modal/airflow evidence permits this
+specific offline output oracle. No physical device or physical-human claim is
+made. Six scenarios cover fresh finite burst, direct QML begin without pending
+proof, stale before consume, stale after worker enqueue, public cancel before
+consume, and public cancel after worker enqueue. The fresh path checks the literal
+seven-block finite S20/0.2s pulse, M5 before power and M5 S0 after dwell, no XY or
+M8/M9, and no second pulse without a second capture. A destruction fence keeps the
+child peer alive until worker teardown.
+
+On4610de3 the explicit public cancel-before-consume row is red: Machine.endFocus
+revokes the runtime generation, but leaves the collector pending, so later begin
+seals that old input against the new generation. This is an explicit cancellation
+retirement gap. Actual native release already revokes the collector, and a real
+Button's pressed=false separately prevents consumption; this red fixture keeps
+pressed=true intentionally to isolate the public cancel contract.
