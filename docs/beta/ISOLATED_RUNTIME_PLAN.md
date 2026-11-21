@@ -61,11 +61,13 @@ git -C "$evidence/source" checkout --detach "$revision"
 test "$(git -C "$evidence/source" rev-parse HEAD)" = "$revision"
 mkdir "$evidence/package"
 docker run --rm --user "$(id -u):$(id -g)" \
-  --env HOME=/tmp/blazer-builder-home \
+  --env GIT_CONFIG_COUNT=1 \
+  --env GIT_CONFIG_KEY_0=safe.directory \
+  --env GIT_CONFIG_VALUE_0=/source \
   --mount "type=bind,src=$evidence/source,dst=/source,readonly" \
   --mount "type=bind,src=$evidence/package,dst=/output" \
   sha256:a3a6c2d249f561c0fc08a6d37204d2306c24d7bb203d1cd0491ed39ec05366d7 \
-  bash -c 'mkdir -p "$HOME"; git config --global --add safe.directory /source; bash /source/tools/package-linux.sh /output' \
+  bash /source/tools/package-linux.sh /output \
   > "$evidence/build.log" 2>&1
 ```
 
