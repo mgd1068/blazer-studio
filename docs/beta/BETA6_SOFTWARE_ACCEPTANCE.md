@@ -46,6 +46,12 @@ fill/raster, accessory commands or implicit finish return. GCode SHA256:
 
 ## Limits and evidence
 
+Subsequent independent review found absolute wire-rounding and relative-jog
+target gate defects in this source. They were fixed **after** this freeze in
+`d0df81c`; see [coordinate precision regressions](../GRBL_COORDINATE_PRECISION.md).
+This archived package does not contain that correction. Its passing package
+checks must not be treated as a current deployment or physical-operation release.
+
 The incident oracle proves logical absolute-mm/G54 output only. It does not
 prove physical origin, WCO, signed travel limits, referencing, airflow or optical
 shutdown. Real motion/output remains blocked by uncommissioned contracts. The
