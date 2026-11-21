@@ -163,3 +163,15 @@ normal execution. Expected loss of reference during homing invalidates old
 accessory evidence without interrupting that separately commissioned procedure.
 A reset wait must never provoke repeated STOPP/reset writes every watchdog tick.
 Active output leases and reported emission still require unconditional handling.
+
+An adapter-initiated host reset faults and releases the Machine's active lease
+flags without requesting another reset in its notification callback. A mere
+handshake after an unsolicited startup is not a host-reset-pending boundary;
+active output still requires protective handling there. The typed `resetting`
+flag denotes the host reset wait, not the configuration-check phase.
+
+Resume remains conservative about extraction, including a paused non-emitting
+frame. An exception needs an explicit immutable non-emission operation type and
+fresh reported zero output; missing output-lease flags alone must never grant
+such an exception. Jog-cancel/resume semantics also need separate controller
+validation. These are remaining workflow limitations, not new output permissions.

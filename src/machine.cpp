@@ -95,7 +95,13 @@ void Machine::syncDeviceProfile() {
                 sessionWasVerified = status.verified;
                 sessionWasReferenced = status.positionReferenced;
                 accessory.transition(AccessoryContract::Event::Fault);
-                if (mustStop) {
+                if (status.resetting && !status.firing) {
+                    // The adapter has already requested a host reset. Fault the
+                    // lease without sending a second reset from its callback.
+                    // A mere handshake is not this host-reset boundary.
+                    accessoryJobActive = false;
+                    accessoryFocusActive = false;
+                } else if (mustStop) {
                     document->notify("Auftrag abgebrochen: Positions- oder Verbindungsnachweis verloren.");
                     stop();
                     return;
