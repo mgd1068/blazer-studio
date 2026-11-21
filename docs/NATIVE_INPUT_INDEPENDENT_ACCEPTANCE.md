@@ -17,8 +17,9 @@ and destroyed controls.
 
 Two deterministic red regressions on immutable91d4adf and successor32895ca:
 
-1. Capture valid X11 pending input, then change the fixture's recorded BOOTTIME−
-   MONOTONIC baseline by1000ms. This represents suspend while MONOTONIC pauses.
+1. Capture valid X11 pending input, then increase the fixture's recorded BOOTTIME−
+   MONOTONIC baseline by1000ms while leaving both actual clocks unchanged. This
+   exercises a valid nonnegative but inconsistent continuity baseline.
    Consume incorrectly succeeds because only new mapping checks clock continuity.
 2. Capture an X11 keyboard press with the registered control focused; focus another
    item before consume. Consume incorrectly succeeds because keyboard provenance
@@ -33,3 +34,11 @@ CMake registration of this new independent test remains integration-owner work.
 This layer cannot establish physical movement, airflow, user identity or release
 latency by itself. Runtime worker expiry/revocation/output gates need separate PTY
 end-to-end evidence; existing runtime fixture stamps are explicitly synthetic.
+
+A fixture correction changes its original `baseline -= 1000` to `baseline += 1000`:
+the former can become negative on a never-suspended host, explicitly disabling the
+baseline check. This is a synthetic clock-continuity mismatch, not a real suspend.
+The corrected test against immutable adapter fix ae49013 passes all18 results both
+normally (349ms) and with ASan/UBSan (363ms). Leak detection is disabled for Qt
+process globals; no leak-free or hardware acceptance claim follows. Evidence is
+under `benslab/analysis/blazer-native-input-independent-20261121`.

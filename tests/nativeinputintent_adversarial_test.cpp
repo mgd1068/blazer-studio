@@ -21,7 +21,7 @@ public:
     static void fixture(NativeInputIntentAdapter &a,quint32 server,qint64 before,qint64 after) {
         a.m_domain=NativeInputIntentAdapter::Domain::X11Server32; a.m_contextStarted=before-1000;a.m_sample={server,before,after};
     }
-    static void suspendedSinceCapture(NativeInputIntentAdapter &a) {a.m_suspendGap-=1000;}
+    static void suspendedSinceCapture(NativeInputIntentAdapter &a) {a.m_suspendGap+=1000;}
 };
 class NativeInputAdversarialTest:public QObject {
     Q_OBJECT
@@ -48,7 +48,7 @@ private slots:
         QCOMPARE(bool(proof),expectedObserved>=0);
         if(proof){QCOMPARE(proof->observedAtMs,expectedObserved);QCOMPARE(proof->expiresAtMs,expectedObserved+250);}
     }
-    void pendingCaptureCannotSurviveSuspend() {
+    void pendingCaptureCannotSurviveClockDiscontinuity() {
         NativeInputIntentAdapter adapter(nullptr,false);
         QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();
         QTRY_VERIFY(window.isActive());
@@ -57,8 +57,9 @@ private slots:
         NativeInputIntentTestAccess::calibrate(adapter);
         NativeInputIntentTestAccess::capture(adapter,window);
         NativeInputIntentTestAccess::suspendedSinceCapture(adapter);
-        // CLOCK_MONOTONIC does not advance during suspend. Consumption must
-        // recheck BOOTTIME gap, rather than wait for another press/map call.
+        // Keep the baseline valid/nonnegative on never-suspended hosts. A
+        // deliberately inconsistent BOOTTIME-MONOTONIC baseline must be
+        // rechecked at consume, without another press/map call.
         QVERIFY(!adapter.consume("focus"));
     }
     void keyboardProofCannotFollowControlFocusLoss() {
