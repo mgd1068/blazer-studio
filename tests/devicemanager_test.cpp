@@ -17,6 +17,102 @@ class DeviceManagerTest : public QObject {
         return *result;
     }
   private slots:
+    void maskedParameterHashTracksActualObjectParameters() {
+        QTemporaryDir storage;
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        document.setObjectSetting("power", 23.);
+        document.setObjectSetting("speed", 731.);
+        document.addShape("rect");
+        document.setObjectSetting("power", 61.);
+        document.setObjectSetting("speed", 1423.);
+        Machine machine(&document, nullptr, Machine::HardwareAccess::Disabled);
+        DeviceManager manager(&document, &machine, storage.filePath("devices.json"));
+        QVERIFY(manager.activate(manager.addCurrent("Offline fixture", "")));
+        const auto all = manager.parameterHash();
+        QVERIFY(all.size() == 64);
+        document.select(0);
+        QCOMPARE(manager.parameterHash(),
+                 all); // Editor selection is irrelevant without output masking.
+        document.select(1);
+        QCOMPARE(manager.parameterHash(), all);
+        document.setCutSelectedGraphics(true);
+        const auto second = manager.parameterHash();
+        QSignalSpy notified(&manager, &DeviceManager::changed);
+        document.select(0);
+        QVERIFY(notified.size() > 0);
+        const auto first = manager.parameterHash();
+        QVERIFY2(first != second,
+                 "Different selected power/feed must not reuse the previous material context.");
+        QVERIFY2(second != all,
+                 "Enabling selected output must change the material parameter contract.");
+        QVERIFY(document.job().valid());
+        for (const auto &move : document.job().moves)
+            if (!move.rapid && move.power > 0) {
+                QCOMPARE(move.power, 23.);
+                QCOMPARE(move.speed, 731.);
+            }
+        document.setProperty("x", 45.);
+        document.setProperty("width", 17.);
+        QCOMPARE(manager.parameterHash(), first); // Layout alone is not a material recipe.
+        document.select(1);
+        document.setObjectSetting("power", 62.);
+        document.select(0);
+        QCOMPARE(manager.parameterHash(),
+                 first); // An unselected object's override is not the active recipe.
+        document.select(-1);
+        const auto empty = manager.parameterHash();
+        QVERIFY(!document.job().valid());
+        QVERIFY(empty != first);
+        QVERIFY(empty != second);
+        document.setCutSelectedGraphics(false);
+        QVERIFY(manager.parameterHash() != empty);
+    }
+    void parameterHashExcludesIneligibleObjectsButRetainsExtraOperations() {
+        QTemporaryDir storage;
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        document.setObjectSetting("power", 23.);
+        document.addShape("rect");
+        document.setObjectSetting("power", 61.);
+        Machine machine(&document, nullptr, Machine::HardwareAccess::Disabled);
+        DeviceManager manager(&document, &machine, storage.filePath("devices.json"));
+        QVERIFY(manager.activate(manager.addCurrent("Offline fixture", "")));
+        document.setCutSelectedGraphics(true);
+        // Selected helpers and hidden graphics never turn their overrides into output parameters.
+        QVERIFY(document.setToolLayer(1));
+        auto before = manager.parameterHash();
+        document.setObjectSetting("power", 62.);
+        QCOMPARE(manager.parameterHash(), before);
+        QVERIFY(document.setToolLayer(2));
+        before = manager.parameterHash();
+        document.setObjectSetting("power", 63.);
+        QCOMPARE(manager.parameterHash(), before);
+        QVERIFY(document.setToolLayer(0));
+        document.toggleVisible(1);
+        before = manager.parameterHash();
+        document.setObjectSetting("power", 64.);
+        QCOMPARE(manager.parameterHash(), before);
+        document.toggleVisible(1);
+        // A disabled primary operation excludes the shape until an enabled extra operation exists.
+        document.setLayerSetting(1, "enabled", false);
+        before = manager.parameterHash();
+        document.setObjectSetting("power", 65.);
+        QCOMPARE(manager.parameterHash(), before);
+        document.assignOperations({1, 0});
+        const auto extra = manager.parameterHash();
+        QVERIFY2(extra != before,
+                 "Enabled extra operation is genuine output even when primary is disabled.");
+        document.setLayerSetting(0, "power", 34.);
+        QVERIFY(manager.parameterHash() != extra);
+        QVERIFY(document.job().valid());
+        document.assignOperations({1});
+        QVERIFY(!document.job().valid());
+        document.setLayerSetting(1, "enabled", true);
+        QVERIFY(document.job().valid());
+    }
     void identicalModelsHaveDistinctBindingsAndNeverAutoConnect() {
         QTemporaryDir storage;
         Document document; document.setBackgroundPlanning(false); document.newProject();
