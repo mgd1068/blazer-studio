@@ -298,10 +298,20 @@ void GrblSession::line(const QByteArray &s) {
         bedWidth = std::abs(s.mid(5).toDouble() - m_deviceProfile.workArea().width()) < .0001;
     if (s.startsWith("$131="))
         bedHeight = std::abs(s.mid(5).toDouble() - m_deviceProfile.workArea().height()) < .0001;
-    if (s.startsWith("[GC:"))
+    if (s.startsWith("[GC:")) {
         coordinateSystem = QRegularExpression("(?:^| )G54(?: |$)")
                                .match(QString::fromLatin1(s.mid(4, s.size() - 5)))
                                .hasMatch();
+        if (!coordinateSystem) {
+            // Returning to G54 later cannot resurrect evidence established
+            // before an unexpected coordinate-system change.
+            commissionedModalContract = false;
+            if (executing() || firing) {
+                fail("Aktives Arbeitskoordinatensystem verändert; Auftrag verworfen.");
+                return;
+            }
+        }
+    }
     if (s.startsWith("$30="))
         powerScale = std::abs(s.mid(4).toDouble() -
                               m_deviceProfile.driverSettings()["powerScale"].toDouble()) < .0001;
