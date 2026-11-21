@@ -13,8 +13,7 @@ Dialog {
     readonly property color muted: dark ? "#adc0ce" : "#5f7687"
     readonly property bool editable: manager && manager.changeBlockReason.length === 0
     readonly property var chosenDetails: {
-        if (!manager) return ({})
-        const count = manager.instances.length
+        if (!manager || manager.instances.length === 0) return ({})
         return manager.details(chosenId)
     }
     readonly property bool dirty: chosenId.length > 0 && (nameInput.text !== (chosenDetails.name || "") || endpointInput.text !== (chosenDetails.endpoint || ""))
@@ -31,15 +30,19 @@ Dialog {
         endpointInput.text = row.endpoint || ""
     }
     onAboutToShow: { load(manager ? manager.activeId : ""); if (manager) manager.refreshEndpoints() }
-    contentItem: ColumnLayout {
-        spacing: 10
+    contentItem: ScrollView {
+      id: deviceScroll
+      clip: true
+      contentWidth: availableWidth
+      ColumnLayout {
+        width: deviceScroll.availableWidth; spacing: 10
         Label {
             Layout.fillWidth: true; color: dialog.ink; wrapMode: Text.WordWrap
             text: "Jeder physische Laser erhält einen eigenen Eintrag – auch zwei gleiche Modelle. Auswählen öffnet keine Verbindung und bestätigt keine Maschinenkalibrierung."
         }
         ListView {
             objectName: "deviceInstanceList"
-            Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 110
+            Layout.fillWidth: true; Layout.preferredHeight: 140
             clip: true; spacing: 4
             model: dialog.manager ? dialog.manager.instances : []
             ScrollBar.vertical: ScrollBar {}
@@ -55,9 +58,9 @@ Dialog {
         }
         Label { visible: dialog.manager && dialog.manager.instances.length === 0; text: "Noch kein physisches Gerät angelegt."; color: dialog.muted }
         Label { text: "Name des einzelnen Geräts"; color: dialog.ink }
-        TextField { id: nameInput; objectName: "deviceInstanceName"; Layout.fillWidth: true; maximumLength: 100; selectByMouse: true; placeholderText: "z. B. M3 an der linken Werkbank" }
+        DialogField { dark: dialog.dark; id: nameInput; objectName: "deviceInstanceName"; Layout.fillWidth: true; maximumLength: 100; selectByMouse: true; placeholderText: "z. B. M3 an der linken Werkbank" }
         Label { text: "Lokaler Anschluss (optional für Offline-Projekte)"; color: dialog.ink }
-        TextField { id: endpointInput; objectName: "deviceInstanceEndpoint"; Layout.fillWidth: true; maximumLength: 512; selectByMouse: true; placeholderText: "z. B. /dev/serial/by-id/…" }
+        DialogField { dark: dialog.dark; id: endpointInput; objectName: "deviceInstanceEndpoint"; Layout.fillWidth: true; maximumLength: 512; selectByMouse: true; placeholderText: "z. B. /dev/serial/by-id/…" }
         RowLayout {
             Layout.fillWidth: true
             ComboBox { objectName: "discoveredDeviceEndpoints"; Layout.fillWidth: true; model: dialog.manager ? dialog.manager.endpoints : []; displayText: currentIndex >= 0 ? currentText : "Kein Anschluss erkannt"; onActivated: index => endpointInput.text = currentText }
@@ -86,6 +89,7 @@ Dialog {
             text: dialog.manager ? (dialog.manager.changeBlockReason || (dialog.dirty ? "Ungespeicherte Änderungen: erst speichern, bevor dieses Gerät ausgewählt wird." : dialog.manager.message)) : "Geräteverwaltung in dieser Ansicht nicht verfügbar."
             Accessible.role: Accessible.StaticText; Accessible.name: text
         }
+      }
     }
     footer: RowLayout {
         spacing: 8

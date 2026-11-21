@@ -50,7 +50,7 @@ if(BLAZER_COVERAGE)
 endif()
 
 set(blazer_qml
-    qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
+    qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
     qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml qml/ProjectDialog.qml qml/RecentProjectsDialog.qml qml/HistoryDialog.qml)
 qt_add_executable(blazer-studio src/main.cpp)

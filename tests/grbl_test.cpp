@@ -200,6 +200,22 @@ class GrblTest : public QObject {
                                          "virtual airflow fixture", now, now));
     }
   private slots:
+    void focusAcquiresExtractionLeaseUntilReleaseOrFault() {
+        Controller controller;
+        Document document; document.setBackgroundPlanning(false);
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        controller.autoAck = false;
+        machine.focus(true);
+        QVERIFY(machine.firing()); QVERIFY(machine.accessoryFocusActive);
+        QVERIFY(!machine.accessory.releaseAfterSafeClearance(true));
+        QVERIFY(!machine.accessory.request(AccessoryContract::Role::EnclosureExtraction,false));
+        machine.focus(false);
+        QVERIFY(!machine.firing()); QVERIFY(!machine.accessoryFocusActive);
+        QVERIFY(!machine.extractionSafetyError().isEmpty());
+        QVERIFY(!controller.commands.contains("M9"));
+    }
     void idleDisconnectAndUnsolicitedResetInvalidateAccessoryEvidence() {
         for (const bool reset : {false, true}) {
             Controller controller;

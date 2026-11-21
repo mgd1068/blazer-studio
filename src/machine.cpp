@@ -11,7 +11,7 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
             lastProcessingSafetyErrors = errors;
             emit changed(); // Also refresh stale airflow/status evidence while idle.
         }
-        if (live && (accessoryJobActive || firing()) && !errors.isEmpty()) {
+        if (live && (accessoryJobActive || accessoryFocusActive || firing()) && !errors.isEmpty()) {
             document->notify("Auftrag abgebrochen: " + errors.join("\n"));
             stop();
         }
@@ -31,6 +31,7 @@ void Machine::syncDeviceProfile() {
     live = false;
     accessory = AccessoryContract(true);
     accessoryJobActive = false;
+    accessoryFocusActive = false;
     sessionWasVerified = sessionWasReferenced = false;
     QString error;
     session = ControllerSessions::create(document->deviceProfile(), error);
@@ -40,12 +41,15 @@ void Machine::syncDeviceProfile() {
             if (live && !status.connected) {
                 accessory.transition(AccessoryContract::Event::Disconnect);
                 accessoryJobActive = false;
+                accessoryFocusActive = false;
             } else if (live && ((sessionWasVerified && !status.verified) ||
                                 (sessionWasReferenced && !status.positionReferenced))) {
                 accessory.transition(AccessoryContract::Event::Fault);
                 accessoryJobActive = false;
-            } else if (live && accessoryJobActive && !status.executing) {
+                accessoryFocusActive = false;
+            } else if (live && (accessoryJobActive || accessoryFocusActive) && !status.executing && !status.firing) {
                 accessoryJobActive = false;
+                accessoryFocusActive = false;
                 accessory.transition(AccessoryContract::Event::Complete);
             }
             sessionWasVerified = status.verified;
@@ -83,6 +87,7 @@ bool Machine::connectHardware(const QString &port) {
     Simulator::stop();
     accessory = AccessoryContract(true);
     accessoryJobActive = false;
+    accessoryFocusActive = false;
     live = true;
     bool result = session->open(port);
     emit changed();
@@ -91,6 +96,7 @@ bool Machine::connectHardware(const QString &port) {
 void Machine::useSimulator() {
     accessory.transition(AccessoryContract::Event::Disconnect);
     accessoryJobActive = false;
+    accessoryFocusActive = false;
     if (session)
         session->close();
     live = false;
@@ -115,13 +121,20 @@ void Machine::home() {
         Simulator::home();
 }
 void Machine::focus(bool on) {
+    if (on && live && (busy() || firing())) return;
     if (on && live && !processingSafetyErrors().isEmpty()) {
         document->notify(processingSafetyErrors().join("\n"));
         return;
     }
-    if (live)
+    if (live) {
+        if (on && !accessory.begin(accessoryClock.elapsed())) {
+            document->notify(extractionSafetyError()); return;
+        }
+        if (on) accessoryFocusActive = true;
         session->focus(on);
-    else
+        accessoryFocusActive = session->status().firing;
+        if (!accessoryFocusActive && !accessoryJobActive) accessory.transition(AccessoryContract::Event::Complete);
+    } else
         Simulator::focus(on);
 }
 void Machine::frame(const QVariantMap &b) {
@@ -182,6 +195,7 @@ void Machine::stop() {
     accessory.transition(AccessoryContract::Event::Stop);
     if (live) accessory.transition(AccessoryContract::Event::Fault); // GRBL stop uses reset: physical output becomes unknown.
     accessoryJobActive = false;
+    accessoryFocusActive = false;
     if (live)
         session->stop();
     else
@@ -190,6 +204,7 @@ void Machine::stop() {
 void Machine::disconnectFault() {
     accessory.transition(AccessoryContract::Event::Disconnect);
     accessoryJobActive = false;
+    accessoryFocusActive = false;
     if (live)
         session->close();
     else

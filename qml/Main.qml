@@ -997,7 +997,7 @@ ApplicationWindow {
                                                 Repeater { model: [1,10,25]; delegate: ActionButton { required property int modelData; text: modelData + " mm"; dark: win.night; compact: true; selected: win.step === modelData; onClicked: win.step = modelData } }
                                             }
                                             ActionButton { visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: win.positioningReady; onClicked: machine.setWorkZero() }
-                                            ActionButton { text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.home() }
+                                            ActionButton { text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing && (win.simulationMode || (typeof machine.homingSafetyError !== "undefined" && machine.homingSafetyError.length === 0)); onClicked: machine.home() }
                                         }
                                         GridLayout {
                                             columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: win.positioningReady

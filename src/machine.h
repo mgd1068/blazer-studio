@@ -36,7 +36,10 @@ class Machine : public Simulator {
         if (!live) return {};
         QStringList errors;
         if (!motionSafetyError().isEmpty()) errors << motionSafetyError();
-        if (!positionReferenced()) errors << "Maschinenreferenz fehlt.";
+        if (!positionReferenced()) {
+            errors << "Maschinenreferenz fehlt.";
+            if (!homingSafetyError().isEmpty()) errors << homingSafetyError();
+        }
         if (!extractionSafetyError().isEmpty()) errors << extractionSafetyError();
         return errors;
     }
@@ -92,6 +95,7 @@ class Machine : public Simulator {
     AccessoryContract accessory{true};
     QElapsedTimer accessoryClock;
     bool accessoryJobActive = false;
+    bool accessoryFocusActive = false;
     QTimer accessoryWatchdog;
     QStringList lastProcessingSafetyErrors;
     bool sessionWasVerified = false, sessionWasReferenced = false;

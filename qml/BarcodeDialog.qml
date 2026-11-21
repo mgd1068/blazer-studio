@@ -28,7 +28,7 @@ Dialog {
         spacing: 10
         Label { Layout.fillWidth: true; text: "Code128-B für 1–128 druckbare ASCII-Zeichen. Das Ergebnis ist bearbeitbare Vektorgeometrie. Links und rechts bleiben jeweils zehn Module als freie Ruhezone reserviert."; color: dialog.ink; wrapMode: Text.WordWrap }
         Label { text: "Zu codierender Text (Leerzeichen werden erhalten)"; color: dialog.ink }
-        TextField { id: code; objectName: "barcodeText"; Layout.fillWidth: true; text: "CODE128"; selectByMouse: true }
+        DialogField { dark: dialog.dark; id: code; objectName: "barcodeText"; Layout.fillWidth: true; text: "CODE128"; selectByMouse: true }
         NumberField { id: module; objectName: "barcodeModuleWidth"; Layout.fillWidth: true; label: "Modulbreite"; value: dialog.moduleWidth; decimals: 3; unit: "mm"; dark: dialog.dark; onEdited: newValue => dialog.moduleWidth = newValue }
         NumberField { id: heightField; objectName: "barcodeHeight"; Layout.fillWidth: true; label: "Balkenhöhe"; value: dialog.barHeight; unit: "mm"; dark: dialog.dark; onEdited: newValue => dialog.barHeight = newValue }
         NumberField { id: xField; objectName: "barcodeLeft"; Layout.fillWidth: true; label: "Links"; value: dialog.left; unit: "mm"; dark: dialog.dark; onEdited: newValue => dialog.left = newValue }
