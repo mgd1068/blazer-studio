@@ -63,3 +63,7 @@ was rounded and commanded. Both plain and registered rows remain usable on the
 baseline. Expanded baseline:6passed/3failed/0skipped in5ms. The earlier seven-result
 baseline also reproduced its same three functional failures under ASan/UBSan in
 25ms, without a sanitizer finding (leak detection disabled).
+
+## Independent fix verification
+
+The common encoder correction `0f8f1f9` and registration gate `1ecbfc8` resolve the reproduced failures. The same nine independent QtTest results pass normally (18 ms) and with ASan/UBSan (52 ms), without skips. The unsafe Document commit and both registered/plain outward-rounded targets are rejected. Safe targets and both non-emitted rapid-origin controls remain usable. These runs use a read-only copy of the exact post-commit Print-and-Cut core; they do not establish physical coordinates or authorize hardware. The regression is registered as `manualregistration_precision` in the combined suite.
