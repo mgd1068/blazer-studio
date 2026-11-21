@@ -66,6 +66,8 @@ class Simulator : public QObject {
     double m_x = 100, m_y = 75, m_progress = 0;
     qint64 m_elapsedMs = 0;
     QRectF m_frame;
+    QVector<QPointF> m_framePath;
+    double m_frameTravelLength = 0;
     QElapsedTimer m_clock;
     QTimer m_tick, m_focusLimit;
     QStringList m_log;

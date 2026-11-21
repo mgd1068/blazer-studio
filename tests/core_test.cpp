@@ -765,6 +765,34 @@ class CoreTest : public QObject {
         QCOMPARE(d.count(), 0);
         QVERIFY(!d.activeBounds()["valid"].toBool());
     }
+    void simulatedFrameAbortsAtActualInterpolatedHead_data() {
+        QTest::addColumn<int>("action");
+        QTest::newRow("stop") << 0;
+        QTest::newRow("fault") << 1;
+        QTest::newRow("disconnect") << 2;
+    }
+    void simulatedFrameAbortsAtActualInterpolatedHead() {
+        QFETCH(int, action);
+        Simulator simulator;
+        const QPointF start(simulator.x(), simulator.y()), corner(10, 20);
+        simulator.frame({{"valid", true}, {"x", 10.}, {"y", 20.}, {"width", 40.}, {"height", 20.}});
+        QCOMPARE(QPointF(simulator.x(), simulator.y()), start);
+        QTRY_VERIFY_WITH_TIMEOUT(QLineF(start, {simulator.x(), simulator.y()}).length() > 0, 1000);
+        const QPointF moving(simulator.x(), simulator.y());
+        QVERIFY(QLineF(start, moving).length() < QLineF(start, corner).length());
+        QVERIFY(QLineF(moving, corner).length() < QLineF(start, corner).length());
+        QVERIFY(!simulator.firing());
+        if (action == 0) simulator.stop();
+        else if (action == 1) simulator.disconnectFault();
+        else simulator.toggleConnection();
+        QVERIFY(!simulator.busy());
+        QCOMPARE(QPointF(simulator.x(), simulator.y()), moving);
+        QTest::qWait(100);
+        QCOMPARE(QPointF(simulator.x(), simulator.y()), moving); // Never return on abort.
+        if (action != 0) QVERIFY(!simulator.connected());
+        simulator.stop();
+        QCOMPARE(QPointF(simulator.x(), simulator.y()), moving);
+    }
     void geometryAndFrame() {
         QCOMPARE(Geometry::worldToCanvas(QPointF(20, 30)), QPointF(20, 120));
         const QRectF bounds(10, 20, 40, 20);
@@ -778,9 +806,11 @@ class CoreTest : public QObject {
         s.frame({{"valid", true}, {"x", 10.}, {"y", 20.}, {"width", 40.}, {"height", 20.}});
         QVERIFY(s.busy());
         QVERIFY(!s.firing());
+        QCOMPARE(s.x(), 100.); // No teleportation to the first rectangle vertex.
+        QCOMPARE(s.y(), 75.);
         QTRY_VERIFY_WITH_TIMEOUT(!s.busy(), 4500);
-        QCOMPARE(s.x(), 10.);
-        QCOMPARE(s.y(), 20.);
+        QCOMPARE(s.x(), 100.); // Completed framing preserves Current Position placement.
+        QCOMPARE(s.y(), 75.);
         s.disconnectFault();
         s.stop();
         QVERIFY(!s.connected());

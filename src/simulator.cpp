@@ -21,6 +21,8 @@ bool Simulator::setDeviceProfile(const DeviceProfile &profile) {
     m_x = profile.workArea().width() / 2;
     m_y = profile.workArea().height() / 2;
     m_frame = {};
+    m_framePath.clear();
+    m_frameTravelLength = 0;
     m_progress = 0;
     emit changed();
     return true;
@@ -54,6 +56,8 @@ void Simulator::clearOutputs() {
     m_firing = false;
     m_progress = 0;
     m_elapsedMs = 0;
+    m_framePath.clear();
+    m_frameTravelLength = 0;
 }
 void Simulator::toggleConnection() {
     bool wasConnected = connected();
@@ -109,15 +113,19 @@ void Simulator::frame(const QVariantMap &bounds) {
         return;
     }
     m_frame = rect;
+    const QPointF start(m_x, m_y);
+    m_framePath = {start, rect.topLeft(), rect.topRight(), rect.bottomRight(),
+                   rect.bottomLeft(), rect.topLeft(), start};
+    m_frameTravelLength = 0;
+    for (qsizetype i = 1; i < m_framePath.size(); ++i)
+        m_frameTravelLength += QLineF(m_framePath[i - 1], m_framePath[i]).length();
     m_mode = Mode::Framing;
     m_progress = 0;
     m_elapsedMs = 0;
     m_clock.start();
     m_tick.start();
-    auto p = Geometry::framePoint(rect, 0);
-    m_x = p.x();
-    m_y = p.y();
-    append("Rahmenfahrt um aktive Objektgrenzen simuliert · ohne Emission");
+    // Keep the actual head at its known start until the first interpolated tick.
+    append("Rahmenfahrt mit laserfreier Anfahrt und Rückfahrt simuliert · ohne Emission");
 }
 void Simulator::start() {
     if (m_mode != Mode::Ready || m_firing)
@@ -157,9 +165,21 @@ void Simulator::tick() {
                                 (m_mode == Mode::Framing ? 4000. : 16000.),
                             0., 1.);
     if (m_mode == Mode::Framing) {
-        auto p = Geometry::framePoint(m_frame, m_progress);
-        m_x = p.x();
-        m_y = p.y();
+        double remaining = m_progress * m_frameTravelLength;
+        auto point = m_framePath.last();
+        for (qsizetype i = 1; i < m_framePath.size(); ++i) {
+            const auto from = m_framePath[i - 1], to = m_framePath[i];
+            const double length = QLineF(from, to).length();
+            if (length <= 0) continue;
+            if (remaining <= length) {
+                point = from + (to - from) * std::clamp(remaining / length, 0., 1.);
+                break;
+            }
+            remaining -= length;
+        }
+        if (m_progress >= 1) point = m_framePath.first(); // Exact only on normal completion.
+        m_x = point.x();
+        m_y = point.y();
     } else if (m_job.valid()) {
         double time = m_progress * m_job.seconds;
         for (const auto &move : m_job.moves) {
