@@ -2,7 +2,7 @@
 
 Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Entwicklungsstand:** `0.9.0-beta.7-dev` für Ubuntu 26.04 / x86_64. Blazer Studio erfüllt noch nicht den vollständigen Funktionsumfang von LightBurn 2.2.01. Die [Abnahmematrix](docs/FUNCTION_ACCEPTANCE.md) trennt vorhandene Softwarefunktionen, unabhängige Tests und verbleibende Lücken.
+**Entwicklungsstand:** `0.9.0-beta.7-dev` für Ubuntu 26.04 / x86_64. Blazer Studio erfüllt noch nicht den vollständigen Funktionsumfang von LightBurn 2.2.01. Die [Abnahmematrix](docs/FUNCTION_ACCEPTANCE.md) trennt vorhandene Softwarefunktionen, unabhängige Tests und verbleibende Lücken. Die lokal installierte und veröffentlichte Fassung ist im [beta.7-Lieferbericht](docs/beta/BETA7_SOFTWARE_ACCEPTANCE.md) mit Prüfumfang und Artefaktidentität dokumentiert.
 
 Nach der gemeldeten Kollision und dem ausgebliebenen Gehäuselüfter ist der reale Gerätebetrieb gesperrt: Bewegung, Referenzfahrt und Laserfreigabe benötigen getrennte, tatsächlich nachgewiesene Geräteverträge. Ein Profilimport, eine Quittierung oder eine angezeigte Position erteilt diese Freigabe nicht. Der notwendige Inbetriebnahmeworkflow ist noch offen. Simulator, Planung und Datei-Export sind verfügbar; ein Export bestätigt keine Maschinenkalibrierung.
 
