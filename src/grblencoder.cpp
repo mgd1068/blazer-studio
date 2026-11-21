@@ -68,6 +68,12 @@ class GrblControllerAdapter final : public ControllerAdapter {
             return ControllerProgram::failure(profile, sourceFingerprint,
                                               "Kein gültiger Bewegungsplan.");
         const auto bed = profile.workArea();
+        const auto wireInside = [&](QPointF point) {
+            const auto x = GrblWireNumbers::coordinate(point.x());
+            const auto y = GrblWireNumbers::coordinate(point.y());
+            return std::isfinite(x) && std::isfinite(y) && x >= 0 && y >= 0 &&
+                   x <= bed.width() && y <= bed.height();
+        };
         for (const auto &move : plan.moves) {
             if (isCancelled(cancel))
                 return ControllerProgram::failure(profile, sourceFingerprint,
@@ -84,6 +90,13 @@ class GrblControllerAdapter final : public ControllerAdapter {
                     return ControllerProgram::failure(
                         profile, sourceFingerprint,
                         "Ausgabeplan außerhalb des Profil-Arbeitsraums.");
+            // Check the actual decimal words too: a fractional raw boundary
+            // such as 200.0006 must not emit 200.001 outside that profile.
+            // Rapid.from is preview-only and is never an emitted target.
+            if (!wireInside(move.to) || (!move.rapid && !wireInside(move.from)))
+                return ControllerProgram::failure(
+                    profile, sourceFingerprint,
+                    "Gerundete GRBL-Koordinate außerhalb des Profil-Arbeitsraums.");
         }
         // A discontinuous emitting segment would otherwise cut a connector from
         // the previous target instead of beginning at its declared from point.
