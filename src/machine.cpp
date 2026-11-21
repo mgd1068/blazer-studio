@@ -249,7 +249,9 @@ bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,
     if(!runtime||!kind)return false;
     const auto snapshot=runtime->status();
     const auto binding=nativeBinding(action,arguments,snapshot);
+    const QPointer<Machine> alive(this);
     const auto input=binding.isEmpty()?std::nullopt:nativeInput->consumeMatching(action,binding);
+    if(!alive)return false;
     if(!input){document->notify("Geräteaktion gesperrt: frischer nativer Druck und zugehöriges Loslassen am passenden Bedienelement fehlen.");return false;}
     QByteArray source;if(prepared)source=prepared->sourceFingerprint()+prepared->profileFingerprint();
     const auto digest=ControllerNativeDigest::request(*kind,action=="override"?double(feed):x,action=="override"?double(power):y,bounds,source);
@@ -262,7 +264,9 @@ void Machine::beginFocus() {
     if (!live) { Simulator::focus(true); return; }
     auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
     const auto snapshot=runtime?runtime->status():ControllerStatus{};
+    const QPointer<Machine> alive(this);
     const auto input=nativeInput->consume("focus");
+    if(!alive)return;
     if (!runtime || !input || input->binding!=nativeBinding("focus",{},snapshot)) {
         const auto reason=nativeInput->reason();
         document->notify(reason.isEmpty() ? QString("Fokus gesperrt: frischer nativer Druck auf das Fokusfeld fehlt.") : reason);
