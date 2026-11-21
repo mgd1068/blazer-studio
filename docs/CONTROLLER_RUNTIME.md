@@ -55,11 +55,11 @@ work can still delay servicing. Runtime and airflow fixtures use a separate PTY
 peer process so GUI sleep does not stop the synthetic controller as well.
 
 Real motion, homing and override commissioning contracts still default closed.
-No real airflow producer or trusted native-input clock adapter is supplied by
-this thread refactor. Legacy `focus(true)` cannot bypass the sealed input proof;
-Machine's real native focus entry remains closed until its OS event provenance
-and clock domain are independently established. Timestamping a delayed callback
-at receipt is insufficient, including for Start/Jog/Home/Frame. Firmware startup
+No real airflow producer is supplied by this thread refactor. The separate
+[native focus adapter](NATIVE_INPUT_INTENT.md) supports explicitly reviewed clock
+domains; unknown domains remain closed. Legacy `focus(true)` cannot bypass the
+sealed input proof. Timestamping a delayed callback at receipt is insufficient,
+including for Start/Jog/Home/Frame. Firmware startup
 blocks and physical coordinates remain commissioning requirements. None of the
 PTY or sanitizer results establishes actual movement, optical shutdown,
 extraction flow or hardware safety.

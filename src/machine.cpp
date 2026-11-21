@@ -1,5 +1,7 @@
 #include "machine.h"
 #include "controllerruntime.h"
+#include "controllerruntimemailbox.h"
+#include "nativeinputintent.h"
 #include "document.h"
 #include <QPointer>
 #include <QCryptographicHash>
@@ -7,6 +9,11 @@
 #include <QUuid>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
+    nativeInput = new NativeInputIntentAdapter(this);
+    connect(nativeInput,&NativeInputIntentAdapter::invalidated,this,[this] {
+        if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()))
+            runtime->revokeFocusContext();
+    });
     simulatorFrameNonce = QUuid::createUuid().toRfc4122();
     document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
         return !self || (!self->occupied() && !self->requestPending() && !self->busy() && !self->firing() &&
@@ -34,6 +41,9 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
 }
 void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
     if (previewDeviceBinding == binding) return;
+    const QPointer<Machine> alive(this);
+    nativeInput->revoke();
+    if (!alive) return;
     previewDeviceBinding = binding; // Publish before STOPP notifications can reenter the manager.
     if (live && (connected() || occupied() || requestPending())) {
         document->notify("Gerätebindung geändert. Verbindung vor weiterer Bearbeitung erneut prüfen.");
@@ -77,12 +87,24 @@ void Machine::syncDeviceProfile() {
     if (session && session->deviceProfile().outputFingerprint() ==
                        document->deviceProfile().outputFingerprint())
         return;
+    const QPointer<Machine> alive(this);
+    nativeInput->revoke();
+    if (!alive) return;
     live = false;
     QString error;
     session = ControllerSessions::create(document->deviceProfile(), error);
     if (session)
         connect(session.get(), &ControllerSession::changed, this, [this] {
             const QPointer<Machine> alive(this);
+            const auto status=session->status();
+            const bool revokeInput=status.connectionEpoch!=nativeConnectionEpoch ||
+                                   (nativeSessionVerified && !status.verified);
+            nativeConnectionEpoch=status.connectionEpoch;
+            nativeSessionVerified=status.verified;
+            if (revokeInput) {
+                nativeInput->revoke();
+                if (!alive) return;
+            }
             if (pendingSimulator && !session->status().connected && !session->status().occupied) {
                 pendingSimulator = false;
                 live = false;
@@ -118,6 +140,8 @@ ControllerSubmission Machine::requestConnectHardware(const QString &port, const 
     if (!session || occupied() || session->status().connected)
         return {0,false,"Verbindung oder Geräteaktion noch belegt."};
     const QPointer<Machine> alive(this);
+    nativeInput->revoke();
+    if (!alive) return {0,false,"Verbindungsbesitzer beendet."};
     Simulator::stop();
     if (!alive) return {0,false,"Verbindungsbesitzer beendet."};
     live = true; pendingSimulator = false;
@@ -140,14 +164,29 @@ bool Machine::jobPreparing() const { const auto runtime=dynamic_cast<ControllerR
 bool Machine::jobPrepared() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return !live || (runtime&&runtime->jobPrepared()); }
 QString Machine::prepareReason() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return live&&runtime?runtime->prepareReason():QString(); }
 
-void Machine::registerFocusControl(QObject *control) { focusControl = control; }
+QString Machine::nativeInputSafetyError() const { return live ? nativeInput->reason() : QString(); }
+void Machine::registerFocusControl(QObject *control) {
+    focusControl = control;
+    nativeInput->registerControl(control,"focus");
+}
 void Machine::beginFocus() {
     if (!live) { Simulator::focus(true); return; }
-    document->notify("Fokus gesperrt: gültiger nativer Press-Zeitnachweis fehlt.");
+    auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
+    const auto input=nativeInput->consume("focus");
+    if (!runtime || !input) {
+        const auto reason=nativeInput->reason();
+        document->notify(reason.isEmpty() ? QString("Fokus gesperrt: frischer nativer Druck auf das Fokusfeld fehlt.") : reason);
+        return;
+    }
+    const auto stamp=runtime->sealNativePress(input->interaction,
+        runtime->m_mailbox->focusWindowEpoch.load(),input->observedAtMs);
+    runtime->beginFocus(stamp);
 }
 void Machine::endFocus() { focus(false); }
 void Machine::useSimulator() {
     const QPointer<Machine> alive(this);
+    nativeInput->revoke();
+    if (!alive) return;
     if (live && session && (session->status().connected || session->status().occupied)) {
         pendingSimulator = true; session->close(); if (!alive) return; emit changed(); return;
     }
@@ -248,12 +287,18 @@ void Machine::pause() {
         Simulator::pause();
 }
 void Machine::stop() {
+    const QPointer<Machine> alive(this);
+    nativeInput->revoke();
+    if (!alive) return;
     if (live)
         session->stop();
     else
         Simulator::stop();
 }
 void Machine::disconnectFault() {
+    const QPointer<Machine> alive(this);
+    nativeInput->revoke();
+    if (!alive) return;
     if (live)
         session->close();
     else

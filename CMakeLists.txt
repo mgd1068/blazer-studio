@@ -9,15 +9,17 @@ add_custom_target(blazer-build-info
     VERBATIM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Svg SerialPort Xml Concurrent)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Svg SerialPort Xml Concurrent DBus)
 qt_standard_project_setup(REQUIRES 6.8)
 include(CTest)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(QRCODE REQUIRED IMPORTED_TARGET qrcodegencpp)
+pkg_check_modules(XCB_INPUT_CLOCK QUIET IMPORTED_TARGET xcb)
 option(BLAZER_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
+    src/nativeinputintent.cpp src/nativeinputintent.h
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
     src/artlibrary.cpp src/artlibrary.h src/geometryassetcodec.cpp src/geometryassetcodec.h
     src/artlibrarycontroller.cpp src/artlibrarycontroller.h src/documentartlibrary.cpp
@@ -45,7 +47,11 @@ qt_add_library(blazer-core STATIC
     src/simulator.cpp src/simulator.h src/workspace.cpp src/workspace.h)
 qt_add_resources(blazer-core manufacturer_catalog PREFIX /catalog FILES profiles/manufacturer-materials.json)
 target_include_directories(blazer-core PUBLIC src)
-target_link_libraries(blazer-core PUBLIC Qt6::Quick Qt6::Svg Qt6::SerialPort Qt6::Xml Qt6::Concurrent PkgConfig::QRCODE)
+target_link_libraries(blazer-core PUBLIC Qt6::Quick Qt6::Svg Qt6::SerialPort Qt6::Xml Qt6::Concurrent Qt6::DBus PkgConfig::QRCODE)
+if(XCB_INPUT_CLOCK_FOUND)
+    target_link_libraries(blazer-core PUBLIC PkgConfig::XCB_INPUT_CLOCK)
+    target_compile_definitions(blazer-core PRIVATE BLAZER_HAS_XCB_INPUT_CLOCK=1)
+endif()
 add_dependencies(blazer-core blazer-build-info)
 target_include_directories(blazer-core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(blazer-core PRIVATE -Wall -Wextra -Wpedantic)
@@ -74,6 +80,9 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-offline-machine-tests tests/offline_machine_test.cpp)
     target_link_libraries(blazer-offline-machine-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME offline_machine COMMAND blazer-offline-machine-tests -platform offscreen)
+    qt_add_executable(blazer-nativeinputintent-tests tests/nativeinputintent_test.cpp)
+    target_link_libraries(blazer-nativeinputintent-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME nativeinputintent COMMAND blazer-nativeinputintent-tests -platform offscreen)
     qt_add_executable(blazer-controllerjobpreparation-tests tests/controllerjobpreparation_test.cpp)
     target_link_libraries(blazer-controllerjobpreparation-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME controllerjobpreparation COMMAND blazer-controllerjobpreparation-tests)

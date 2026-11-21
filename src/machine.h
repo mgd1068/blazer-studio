@@ -6,6 +6,7 @@
 #include <QPointer>
 #include <memory>
 class Document;
+class NativeInputIntentAdapter;
 class Machine : public Simulator {
     Q_OBJECT
     Q_PROPERTY(bool simulation READ simulation NOTIFY changed)
@@ -26,6 +27,7 @@ class Machine : public Simulator {
     Q_PROPERTY(bool jobPreparing READ jobPreparing NOTIFY changed)
     Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
     Q_PROPERTY(QString prepareReason READ prepareReason NOTIFY changed)
+    Q_PROPERTY(QString nativeInputSafetyError READ nativeInputSafetyError NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
     explicit Machine(Document *document, QObject *parent = nullptr,
@@ -83,6 +85,7 @@ class Machine : public Simulator {
     bool jobPreparing() const;
     bool jobPrepared() const;
     QString prepareReason() const;
+    QString nativeInputSafetyError() const;
     Q_INVOKABLE void registerFocusControl(QObject *control);
     Q_INVOKABLE void beginFocus();
     Q_INVOKABLE void endFocus();
@@ -138,6 +141,9 @@ class Machine : public Simulator {
     const HardwareAccess hardwareAccess;
     bool pendingSimulator = false;
     QPointer<QObject> focusControl;
+    NativeInputIntentAdapter *nativeInput = nullptr;
+    quint64 nativeConnectionEpoch = 0;
+    bool nativeSessionVerified = false;
     QStringList lastProcessingSafetyErrors;
     QByteArray previewDeviceBinding, simulatorFrameNonce, previewFrame;
     QPointF previewPoint;
