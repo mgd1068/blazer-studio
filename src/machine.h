@@ -52,7 +52,10 @@ class Machine : public Simulator {
         if (!live || !session) return "Live-Overrides sind nur für eine eingerichtete reale Verbindung verfügbar.";
         const auto errors = processingSafetyErrors();
         if (!errors.isEmpty()) return errors.join("\n");
-        return session->status().overridesSafetyError;
+        const auto status = session->status();
+        if (!status.overridesReady && status.overridesSafetyError.isEmpty())
+            return "Live-Overrides sind für diesen Controller nicht eingerichtet.";
+        return status.overridesSafetyError;
     }
     bool overridesReady() const { return overridesSafetyError().isEmpty(); }
     Q_INVOKABLE bool setOverrides(int feed, int power) {
