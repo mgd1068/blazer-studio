@@ -1057,6 +1057,8 @@ bool Document::removePage(int page) {
     return true;
 }
 bool Document::outputs(const Artwork &a) const {
+    if (cutSelectedGraphics() && !selectedArtworkIds().contains(a.id))
+        return false;
     if (a.toolLayer != 0 || !a.visible || a.page != m_activePage)
         return false;
     QList<int> operations{a.layer};

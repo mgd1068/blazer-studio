@@ -15,6 +15,8 @@ struct JobInput {
     QVariantList layers;
     int activePage = 0;
     DeviceProfile deviceProfile = DeviceProfile::m3Reference();
+    bool cutSelectedGraphics = false;
+    QStringList selectedIds; // Immutable editor selection; never a physical permission.
 };
 class Document;
 struct JobMove {

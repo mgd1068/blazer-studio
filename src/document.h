@@ -16,6 +16,8 @@
 
 class Document : public QAbstractListModel {
     Q_OBJECT
+    Q_PROPERTY(bool cutSelectedGraphics READ cutSelectedGraphics NOTIFY changed)
+    Q_PROPERTY(bool useSelectionOrigin READ useSelectionOrigin NOTIFY changed)
     Q_PROPERTY(StartMode startMode READ startMode NOTIFY changed)
     Q_PROPERTY(JobOrigin jobOrigin READ jobOrigin NOTIFY changed)
     Q_PROPERTY(QVariantMap placementSummary READ placementSummary NOTIFY changed)
@@ -62,6 +64,10 @@ class Document : public QAbstractListModel {
     Q_ENUM(JobOrigin)
     StartMode startMode() const { return StartMode(m_placementIntent.mode); }
     JobOrigin jobOrigin() const { return JobOrigin(m_placementIntent.anchor); }
+    bool cutSelectedGraphics() const { return m_placementIntent.cutSelectedGraphics; }
+    bool useSelectionOrigin() const { return m_placementIntent.useSelectionOrigin; }
+    Q_INVOKABLE void setCutSelectedGraphics(bool enabled);
+    Q_INVOKABLE void setUseSelectionOrigin(bool enabled);
     Q_INVOKABLE bool setStartMode(StartMode mode);
     Q_INVOKABLE bool setJobOrigin(JobOrigin anchor);
     Q_INVOKABLE bool captureUserOrigin();
@@ -260,6 +266,9 @@ class Document : public QAbstractListModel {
     void clearHistory();
     void refresh(int row = -1);
     void refreshPlanning();
+    QStringList selectedArtworkIds() const;
+    void selectionPlanningChanged();
+    QStringList m_plannedSelectedIds;
     void refreshGuides();
     void markClean();
     void setFileUrl(const QUrl &url);

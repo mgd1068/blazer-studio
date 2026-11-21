@@ -1,6 +1,35 @@
 #include "document.h"
 
+QStringList Document::selectedArtworkIds() const {
+    QStringList ids;
+    for (const int row : m_selection)
+        if (row >= 0 && row < m_items.size())
+            ids.append(m_items[row].id);
+    ids.sort();
+    return ids;
+}
+void Document::selectionPlanningChanged() {
+    if (cutSelectedGraphics() && selectedArtworkIds() != m_plannedSelectedIds) {
+        refreshPlanning();
+        emit changed();
+    }
+}
+void Document::setCutSelectedGraphics(bool enabled) {
+    if (cutSelectedGraphics() == enabled)
+        return;
+    checkpoint("Nur ausgewählte Grafik ausgeben");
+    m_placementIntent.cutSelectedGraphics = enabled;
+    refresh();
+}
+void Document::setUseSelectionOrigin(bool enabled) {
+    if (useSelectionOrigin() == enabled)
+        return;
+    checkpoint("Auswahl als Ursprungsbezug");
+    m_placementIntent.useSelectionOrigin = enabled;
+    refresh();
+}
 void Document::refreshPlanning() {
+    m_plannedSelectedIds = selectedArtworkIds();
     ++m_framingRevision;
     m_job.reset();
     m_syncPlacementSummary.clear();
@@ -114,6 +143,10 @@ void Document::clearUserOrigin() {
 QVariantMap Document::placementSummary() const {
     const auto &plan = job();
     auto summary = m_background ? m_preparation.placementSummary() : m_syncPlacementSummary;
+    summary["cutSelectedGraphics"] = cutSelectedGraphics();
+    summary["useSelectionOrigin"] = useSelectionOrigin();
+    summary["selectionOriginActive"] =
+        cutSelectedGraphics() && useSelectionOrigin() && startMode() != AbsoluteCoordinates;
     summary["mode"] = int(startMode());
     summary["anchor"] = int(jobOrigin());
     summary["valid"] = plan.valid();

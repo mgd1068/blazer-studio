@@ -346,6 +346,24 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
                 return job;
             }
     }
+    QSet<QString> selected;
+    if (d.cutSelectedGraphics) {
+        if (d.selectedIds.isEmpty() || d.selectedIds.size() > Geometry::objectLimit) {
+            job.errors = {"Auswahlauftrag benötigt eine nichtleere, begrenzte Auswahl."};
+            return job;
+        }
+        QSet<QString> available;
+        for (const auto &art : d.items)
+            available.insert(art.id);
+        for (const auto &id : d.selectedIds) {
+            if (id.isEmpty() || id.size() > 1000 || selected.contains(id) ||
+                !available.contains(id)) {
+                job.errors = {"Auswahlauftrag enthält ungültige oder veraltete Objektkennungen."};
+                return job;
+            }
+            selected.insert(id);
+        }
+    }
     QPointF head(0, 0);
     auto add = [&](QPointF point, double feed, double power, int layer, bool rapid, int slice = 0) {
         if (isCancelled(cancel))
@@ -386,6 +404,8 @@ JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     QList<Shape> shapes;
     QList<QPair<const Artwork *, int>> reliefs, images;
     for (const auto &original : d.items) {
+        if (d.cutSelectedGraphics && !selected.contains(original.id))
+            continue;
         if (isCancelled(cancel))
             return aborted();
         if (original.toolLayer != 0 || original.page != d.activePage)

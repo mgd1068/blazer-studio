@@ -4,6 +4,7 @@
 #include <QDataStream>
 #include <QIODevice>
 #include <QJsonObject>
+#include <QSet>
 #include <cmath>
 namespace {
 bool pointValid(QPointF point) {
@@ -41,10 +42,13 @@ struct GeometrySnapshot {
     QByteArray fingerprint;
     bool any = false;
 };
-GeometrySnapshot graphics(const JobInput &input, const Cancellation &cancel) {
+GeometrySnapshot graphics(const JobInput &input, bool selectedOnly, const Cancellation &cancel) {
     GeometrySnapshot result;
     if (input.items.size() > Geometry::objectLimit)
         return result;
+    QSet<QString> selected;
+    if (selectedOnly)
+        selected = QSet<QString>(input.selectedIds.begin(), input.selectedIds.end());
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     stream.setVersion(QDataStream::Qt_6_0);
@@ -55,7 +59,7 @@ GeometrySnapshot graphics(const JobInput &input, const Cancellation &cancel) {
     for (const auto &art : input.items) {
         if (isCancelled(cancel))
             return {};
-        if (!outputs(art, input))
+        if (!outputs(art, input) || (selectedOnly && !selected.contains(art.id)))
             continue;
         result.bounds = result.any ? result.bounds.united(art.bounds) : art.bounds;
         result.any = true;
@@ -90,21 +94,29 @@ bool PlacedJobPlanning::defaultIntent(const Intent &intent) {
     return intent == Intent{};
 }
 QJsonObject PlacedJobPlanning::serializeIntent(const Intent &intent) {
-    return {{"version", 1},
-            {"mode", int(intent.mode)},
-            {"anchor", int(intent.anchor)},
-            {"userOrigin", intent.userOrigin
-                               ? QJsonValue(QJsonObject{{"x", intent.userOrigin->x()},
-                                                        {"y", intent.userOrigin->y()}})
-                               : QJsonValue(QJsonValue::Null)}};
+    const bool selection = intent.cutSelectedGraphics || intent.useSelectionOrigin;
+    QJsonObject object{{"version", selection ? 2 : 1},
+                       {"mode", int(intent.mode)},
+                       {"anchor", int(intent.anchor)},
+                       {"userOrigin", intent.userOrigin
+                                          ? QJsonValue(QJsonObject{{"x", intent.userOrigin->x()},
+                                                                   {"y", intent.userOrigin->y()}})
+                                          : QJsonValue(QJsonValue::Null)}};
+    if (selection) {
+        object["cutSelectedGraphics"] = intent.cutSelectedGraphics;
+        object["useSelectionOrigin"] = intent.useSelectionOrigin;
+    }
+    return object;
 }
-std::optional<PlacedJobPlanning::Intent> PlacedJobPlanning::parseIntent(const QJsonValue &json) {
+std::optional<PlacedJobPlanning::Intent> PlacedJobPlanning::parseIntent(const QJsonValue &json,
+                                                                        int schemaVersion) {
     if (!json.isObject())
         return {};
     const auto object = json.toObject();
-    if (object.size() != 4 || !object.contains("version") || !object.contains("mode") ||
-        !object.contains("anchor") || !object.contains("userOrigin") ||
-        !object["version"].isDouble() || object["version"].toDouble() != 1 ||
+    if ((schemaVersion != 1 && schemaVersion != 2) ||
+        object.size() != (schemaVersion == 2 ? 6 : 4) || !object.contains("version") ||
+        !object.contains("mode") || !object.contains("anchor") || !object.contains("userOrigin") ||
+        !object["version"].isDouble() || object["version"].toDouble() != schemaVersion ||
         !object["mode"].isDouble() || !object["anchor"].isDouble())
         return {};
     const double mode = object["mode"].toDouble(), anchor = object["anchor"].toDouble();
@@ -112,6 +124,12 @@ std::optional<PlacedJobPlanning::Intent> PlacedJobPlanning::parseIntent(const QJ
         !std::isfinite(anchor) || anchor < 0 || anchor > 8 || std::floor(anchor) != anchor)
         return {};
     Intent intent;
+    if (schemaVersion == 2) {
+        if (!object["cutSelectedGraphics"].isBool() || !object["useSelectionOrigin"].isBool())
+            return {};
+        intent.cutSelectedGraphics = object["cutSelectedGraphics"].toBool();
+        intent.useSelectionOrigin = object["useSelectionOrigin"].toBool();
+    }
     intent.mode = JobPlacement::Mode(int(mode));
     intent.anchor = JobPlacement::Anchor(int(anchor));
     if (!object["userOrigin"].isNull()) {
@@ -129,10 +147,15 @@ std::optional<PlacedJobPlanning::Intent> PlacedJobPlanning::parseIntent(const QJ
 PlacedJobPlanning::Result PlacedJobPlanning::finish(const Input &input, JobPlan canonical,
                                                     const Cancellation &cancel) {
     const auto &context = input.placement;
+    const bool selectedOrigin = context.intent.cutSelectedGraphics &&
+                                context.intent.useSelectionOrigin &&
+                                context.intent.mode != JobPlacement::Mode::Absolute;
     Result result{std::move(canonical),
                   {{"mode", int(context.intent.mode)},
                    {"anchor", int(context.intent.anchor)},
-                   {"originScope", "design"},
+                   {"originScope", selectedOrigin ? "selection" : "design"},
+                   {"outputScope", context.intent.cutSelectedGraphics ? "selection" : "design"},
+                   {"selectionOriginActive", selectedOrigin},
                    {"approachKnown", false}}};
     auto fail = [&](const QString &reason) {
         result.plan = JobPlan(input.document.deviceProfile);
@@ -146,6 +169,11 @@ PlacedJobPlanning::Result PlacedJobPlanning::finish(const Input &input, JobPlan 
         aborted.plan.cancelled = true;
         return aborted;
     }
+    if (input.document.cutSelectedGraphics &&
+        input.document.selectedIds.size() > Geometry::objectLimit)
+        return fail("Auswahlauftrag überschreitet die begrenzte Objektzahl.");
+    if (input.document.cutSelectedGraphics != context.intent.cutSelectedGraphics)
+        return fail("Auswahlmaske und Platzierungsabsicht gehören nicht zum selben Quellstand.");
     if (result.plan.deviceProfile().outputFingerprint() !=
         input.document.deviceProfile.outputFingerprint())
         return fail("Berechnungsprofil passt nicht zum unveränderlichen Quellstand.");
@@ -155,14 +183,35 @@ PlacedJobPlanning::Result PlacedJobPlanning::finish(const Input &input, JobPlan 
             result.plan.cancelled ? "Berechnung abgebrochen." : result.plan.errors.join("; ");
         return result;
     }
-    const auto geometry = graphics(input.document, cancel);
+    const auto design = graphics(input.document, false, cancel);
+    const auto output =
+        input.document.cutSelectedGraphics ? graphics(input.document, true, cancel) : design;
+    const auto &geometry = selectedOrigin ? output : design;
+    if (design.any)
+        result.summary["designGraphicsBounds"] = bounds(design.bounds);
+    if (output.any)
+        result.summary["sourceGraphicsBounds"] = bounds(output.bounds);
     if (geometry.any)
-        result.summary["sourceGraphicsBounds"] = bounds(geometry.bounds);
+        result.summary["sourceOriginBounds"] = bounds(geometry.bounds);
+    // Bind output identity separately from the reference bbox. Selection membership matters
+    // even if two objects have identical geometry and generate identical controller moves.
+    QByteArray binding = design.fingerprint + output.fingerprint;
+    if (input.document.cutSelectedGraphics) {
+        auto ids = input.document.selectedIds;
+        ids.sort();
+        QDataStream stream(&binding, QIODevice::Append);
+        stream.setVersion(QDataStream::Qt_6_0);
+        stream << ids << selectedOrigin;
+    }
+    const auto fingerprint = QCryptographicHash::hash(binding, QCryptographicHash::Sha256).toHex();
     JobPlacement::SourceSnapshot source;
-    if (geometry.any && !geometry.fingerprint.isEmpty())
-        source = JobPlacement::SourceSnapshot::capture(result.plan, geometry.bounds,
-                                                       geometry.fingerprint,
-                                                       JobPlacement::OriginScope::Design, cancel);
+    if (geometry.any && output.any && !geometry.fingerprint.isEmpty() &&
+        !output.fingerprint.isEmpty())
+        source = JobPlacement::SourceSnapshot::capture(result.plan, geometry.bounds, fingerprint,
+                                                       selectedOrigin
+                                                           ? JobPlacement::OriginScope::Selection
+                                                           : JobPlacement::OriginScope::Design,
+                                                       cancel);
     if (source.valid())
         result.summary["sourceFingerprint"] = QString::fromLatin1(source.fingerprint());
     if (isCancelled(cancel)) {
@@ -176,7 +225,9 @@ PlacedJobPlanning::Result PlacedJobPlanning::finish(const Input &input, JobPlan 
         result.summary["reason"] =
             "Absolute Entwurfskoordinaten; tatsächlicher Anfahrtspunkt nicht übergeben.";
         if (geometry.any)
-            result.summary["graphicsBounds"] = bounds(geometry.bounds);
+            result.summary["graphicsBounds"] = bounds(output.bounds);
+        if (geometry.any)
+            result.summary["originGraphicsBounds"] = bounds(geometry.bounds);
         result.summary["offsetX"] = 0.;
         result.summary["offsetY"] = 0.;
         return result;
@@ -204,7 +255,8 @@ PlacedJobPlanning::Result PlacedJobPlanning::finish(const Input &input, JobPlan 
     result.plan = placed.plan();
     result.summary["valid"] = true;
     result.summary["reason"] = "Offline-Platzierung geprüft; keine physische Gerätefreigabe.";
-    result.summary["graphicsBounds"] = bounds(placed.placedGraphicsBounds());
+    result.summary["graphicsBounds"] = bounds(output.bounds.translated(placed.translation()));
+    result.summary["originGraphicsBounds"] = bounds(placed.placedGraphicsBounds());
     result.summary["offsetX"] = placed.translation().x();
     result.summary["offsetY"] = placed.translation().y();
     result.summary["sourceFingerprint"] = QString::fromLatin1(placed.sourceFingerprint());

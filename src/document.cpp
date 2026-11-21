@@ -60,6 +60,7 @@ Document::Document(QObject *p) : QAbstractListModel(p) {
     connect(&m_batch, &BatchExport::finished, this, &Document::notify);
     connect(&m_imageExport, &ImageExport::changed, this, &Document::changed);
     connect(&m_imageExport, &ImageExport::finished, this, &Document::notify);
+    connect(this, &Document::selectionChanged, this, &Document::selectionPlanningChanged);
     demo();
 }
 int Document::rowCount(const QModelIndex &p) const {
@@ -1008,7 +1009,14 @@ QByteArray Document::serialize(const Snapshot &state) const {
                      {"material", QJsonObject::fromVariantMap(state.material)}};
     if (hasPlacement || hasOutline || hasProfile || hasTools || !state.guides.isEmpty() || !state.guidesVisible ||
         !state.guideSnapping) {
-        root["version"] = hasPlacement ? 13 : hasOutline ? 12 : hasProfile ? 11 : hasTools ? 10 : 9;
+        root["version"] =
+            (state.placementIntent.cutSelectedGraphics || state.placementIntent.useSelectionOrigin)
+                ? 14
+            : hasPlacement ? 13
+            : hasOutline   ? 12
+            : hasProfile   ? 11
+            : hasTools     ? 10
+                           : 9;
         if (hasPlacement || hasProfile || hasOutline)
             root["deviceProfile"] = state.deviceProfile.toJson();
         root["guidesVisible"] = state.guidesVisible;
@@ -1032,7 +1040,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 13) ||
+        !number(root, "version", 1, 14) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -1045,7 +1053,8 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
         return {};
     Snapshot state;
     if (version >= 13) {
-        const auto intent = PlacedJobPlanning::parseIntent(root["placement"]);
+        const auto intent =
+            PlacedJobPlanning::parseIntent(root["placement"], version >= 14 ? 2 : 1);
         if (!intent) return {};
         state.placementIntent = *intent;
     } else if (root.contains("placement")) return {};
@@ -1739,8 +1748,9 @@ void Document::setReliefSetting(const QString &key, const QVariant &value) {
 
 bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
                                   double minPower, double maxPower, int steps) {
-    if (m_placementIntent.mode != JobPlacement::Mode::Absolute) {
-        notify("Materialtest-Export unterstützt noch keine relativen Startmodi; keine absolute Ersatzdatei erzeugt.");
+    if (m_placementIntent.mode != JobPlacement::Mode::Absolute || cutSelectedGraphics()) {
+        notify("Materialtest-Export unterstützt noch keine relativen Startmodi oder Auswahlmasken; "
+               "keine absolute Ersatzdatei erzeugt.");
         return false;
     }
 
@@ -1870,6 +1880,8 @@ void Document::setBackgroundPlanning(bool enabled) {
 }
 JobInput Document::jobInput() const {
     JobInput result{m_items, m_layers, m_activePage, m_deviceProfile};
+    result.cutSelectedGraphics = cutSelectedGraphics();
+    result.selectedIds = selectedArtworkIds();
     // Do not transfer GUI-owned QSvgRenderer instances, even by shared_ptr.
     QHash<const SvgAsset *, std::shared_ptr<const SvgAsset>> assets;
     for (auto &art : result.items)

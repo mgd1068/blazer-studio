@@ -411,8 +411,9 @@ bool Document::importProject(const QUrl &url) {
     return true;
 }
 bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &pattern) {
-    if (startMode() != AbsoluteCoordinates) {
-        notify("CSV-Stapelexport unterstützt noch keine relativen Startmodi; keine absolute Ersatzdatei erzeugt.");
+    if (startMode() != AbsoluteCoordinates || cutSelectedGraphics()) {
+        notify("CSV-Stapelexport unterstützt noch keine relativen Startmodi oder Auswahlmasken; "
+               "keine absolute Ersatzdatei erzeugt.");
         return false;
     }
     if (m_background) {
