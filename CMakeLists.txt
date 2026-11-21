@@ -20,7 +20,7 @@ option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 qt_add_library(blazer-core STATIC
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
     src/clipboard.cpp src/guides.cpp src/guide.h src/framing.cpp
-    src/deviceprofile.cpp src/deviceprofile.h
+    src/deviceprofile.cpp src/deviceprofile.h src/devicelibrary.cpp src/devicelibrary.h src/devicemanager.cpp src/devicemanager.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/joboutput.cpp
     src/nativedesign.cpp src/nativedesign.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
@@ -58,6 +58,12 @@ target_link_libraries(blazer-studio PRIVATE blazer-core Qt6::QuickControls2)
 
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(blazer-devicelibrary-tests tests/devicelibrary_test.cpp)
+    target_link_libraries(blazer-devicelibrary-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME devicelibrary COMMAND blazer-devicelibrary-tests -platform offscreen)
+    qt_add_executable(blazer-devicemanager-tests tests/devicemanager_test.cpp)
+    target_link_libraries(blazer-devicemanager-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME devicemanager COMMAND blazer-devicemanager-tests -platform offscreen)
     qt_add_executable(blazer-controlleradapter-tests tests/controlleradapter_test.cpp)
     target_link_libraries(blazer-controlleradapter-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME controlleradapter COMMAND blazer-controlleradapter-tests -platform offscreen)
@@ -125,7 +131,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-workflow-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-workflow-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME workflow COMMAND blazer-workflow-tests -platform offscreen)
-    set_tests_properties(release stability core ui workflow job grbl relief expansion nativeimport imageexport clipboard raster toolshape deviceprofile deviceworkspace controlleradapter PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    set_tests_properties(release stability core ui workflow job grbl relief expansion nativeimport imageexport clipboard raster toolshape deviceprofile deviceworkspace controlleradapter devicelibrary devicemanager PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)
