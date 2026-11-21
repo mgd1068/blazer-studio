@@ -1,5 +1,6 @@
 #include "preparedcontrollerjob.h"
 #include "job.h"
+#include "grblwirenumbers.h"
 #include <QJsonDocument>
 #include <QRandomGenerator>
 #include <QRegularExpression>
@@ -127,9 +128,9 @@ class PreparedControllerJobTest : public QObject {
         QRandomGenerator random(0xb1a2e6);
         for (int trial=0;trial<250;++trial) {
             JobPlan plan;
-            QPointF point(random.bounded(200000)/1000.,random.bounded(150000)/1000.);
+            QPointF point(random.bounded(200000000)/1000000.,random.bounded(150000000)/1000000.);
             for (int i=0;i<20;++i) {
-                QPointF next(random.bounded(200000)/1000.,random.bounded(150000)/1000.);
+                QPointF next(random.bounded(200000000)/1000000.,random.bounded(150000000)/1000000.);
                 plan.moves.append({point,next,3000,50,0,i%5==0});
                 point=next;
             }
@@ -146,16 +147,19 @@ class PreparedControllerJobTest : public QObject {
             QRectF signedEnvelope(box.left()+offset.x()-.1, box.top()+offset.y()-.1,
                                   box.width()+.2, box.height()+.2);
             if (trial%2) signedEnvelope.setLeft(box.center().x()+offset.x());
-            const auto permitted = [&](QPointF work) {
-                const QPointF p(std::round(work.x()*1000)/1000+offset.x(),
-                                std::round(work.y()*1000)/1000+offset.y());
+            const auto permittedEncoded = [&](QPointF wire) {
+                const auto p=wire+offset; // Targets were already parsed from actual GCode.
                 return p.x()>=signedEnvelope.left() && p.x()<=signedEnvelope.right() &&
                        p.y()>=signedEnvelope.top() && p.y()<=signedEnvelope.bottom();
             };
             bool everyTarget=true;
-            for (auto target: targets) everyTarget &= permitted(target);
-            const bool corners=permitted(box.topLeft()) && permitted(box.topRight()) &&
-                               permitted(box.bottomLeft()) && permitted(box.bottomRight());
+            for (auto target: targets) everyTarget &= permittedEncoded(target);
+            const auto cornerPermitted = [&](QPointF raw) {
+                return permittedEncoded({GrblWireNumbers::coordinate(raw.x()),
+                                         GrblWireNumbers::coordinate(raw.y())});
+            };
+            const bool corners=cornerPermitted(box.topLeft()) && cornerPermitted(box.topRight()) &&
+                               cornerPermitted(box.bottomLeft()) && cornerPermitted(box.bottomRight());
             QCOMPARE(corners,everyTarget);
             QCOMPARE(everyTarget,trial%2==0);
         }

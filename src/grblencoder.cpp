@@ -1,12 +1,11 @@
 #include "controlleradapter.h"
 #include "job.h"
+#include "grblwirenumbers.h"
 #include <QJsonDocument>
 #include <cmath>
 namespace {
 QString num(double n) {
-    if (std::abs(n) < .0005)
-        n = 0;
-    return QString::number(n, 'f', 3);
+    return GrblWireNumbers::format(n);
 }
 bool number(const QJsonValue &v, double minimum, double maximum) {
     return v.isDouble() && std::isfinite(v.toDouble()) && v.toDouble() >= minimum &&

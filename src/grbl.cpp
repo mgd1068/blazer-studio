@@ -1,5 +1,6 @@
 #include "grbl.h"
 #include "geometry.h"
+#include "grblwirenumbers.h"
 #include <QMap>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
@@ -295,8 +296,8 @@ bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
         return false;
     // Match the three-decimal coordinates actually sent in GCode. G54 changes
     // the work origin, not the physical travel available to the machine.
-    const QPointF machinePoint{std::round(workPoint.x() * 1000) / 1000 + offset.x(),
-                               std::round(workPoint.y() * 1000) / 1000 + offset.y()};
+    const QPointF machinePoint{GrblWireNumbers::coordinate(workPoint.x()) + offset.x(),
+                               GrblWireNumbers::coordinate(workPoint.y()) + offset.y()};
     constexpr double epsilon = .0000001;
     return std::isfinite(machinePoint.x()) && std::isfinite(machinePoint.y()) &&
            machinePoint.x() >= commissionedEnvelope->left() - epsilon &&
@@ -305,12 +306,14 @@ bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
            machinePoint.y() <= commissionedEnvelope->bottom() + epsilon;
 }
 bool GrblSession::insideReportedMachineBed() const {
-    if (!commissionedEnvelope || !knownReportedMachinePosition || !commissionedEnvelope->isValid())
+    return knownReportedMachinePosition && insideRawMachineBed(reportedMachinePosition);
+}
+bool GrblSession::insideRawMachineBed(const QPointF &p) const {
+    if (!commissionedEnvelope || !commissionedEnvelope->isValid())
         return false;
-    // Status data are observations, not three-decimal GCode targets. Never
-    // round an out-of-envelope observation back onto an allowed boundary.
+    // Raw machine observations and G91 targets derived from them must not be
+    // rounded back onto an allowed boundary.
     const auto &bed = *commissionedEnvelope;
-    const auto &p = reportedMachinePosition;
     return std::isfinite(p.x()) && std::isfinite(p.y()) && std::isfinite(bed.left()) &&
            std::isfinite(bed.right()) && std::isfinite(bed.top()) && std::isfinite(bed.bottom()) &&
            p.x() >= bed.left() && p.x() <= bed.right() && p.y() >= bed.top() &&
@@ -1145,9 +1148,12 @@ void GrblSession::jog(double dx, double dy) {
         append("Bewegung gesperrt: Maschinenreferenz fehlt.");
         return;
     }
-    const auto target = position + QPointF(n(dx).toDouble(), n(dy).toDouble());
-    if (!std::isfinite(dx) || !std::isfinite(dy) || !insideMachineBed(position) ||
-        !insideMachineBed(target)) {
+    // G91 adds the encoded delta to the actual raw machine point. Rounding the
+    // resulting absolute target again could round an overrun back inside.
+    const auto target = reportedMachinePosition +
+        QPointF(GrblWireNumbers::coordinate(dx), GrblWireNumbers::coordinate(dy));
+    if (!std::isfinite(dx) || !std::isfinite(dy) || !insideReportedMachineBed() ||
+        !insideRawMachineBed(target)) {
         diagnostic.deny(ControllerDiagnostics::Action::Jog,
                         ControllerDiagnostics::Denial::PhysicalBounds);
         append("Bewegung außerhalb des Arbeitsraums abgelehnt.");

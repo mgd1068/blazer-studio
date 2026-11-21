@@ -29,7 +29,7 @@ qt_add_library(blazer-core STATIC
     src/deviceprofile.cpp src/deviceprofile.h src/devicelibrary.cpp src/devicelibrary.h src/devicemanager.cpp src/devicemanager.h
     src/vectorinspection.cpp src/vectorinspection.h src/vectorinspectionservice.cpp src/vectorinspectionservice.h
     src/materialtestledger.cpp src/materialtestledger.h
-    src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/joboutput.cpp
+    src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/grblwirenumbers.h src/joboutput.cpp
     src/preparedcontrollerjob.cpp src/preparedcontrollerjob.h
     src/settingsbundle.cpp src/settingsbundle.h
     src/nativedesign.cpp src/nativedesign.h src/nativecompatibility.cpp src/nativecompatibility.h src/imageexport.cpp src/imageexport.h

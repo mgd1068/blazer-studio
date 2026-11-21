@@ -23,13 +23,17 @@ in one dimension; QRectF::isValid/isEmpty is not the validity predicate for this
 artifact. Call `valid()` first.
 
 For the current straight-line XY encoder and rectangular signed machine envelope,
-the runtime can check the bounds' corners using its current command-rounding,
+the runtime can check the bounds' corners using its current exact wire conversion,
 WCO and signed-envelope predicate instead of traversing hundreds of thousands
 of moves. It must independently check current **raw reported machine position**,
 reference, modal state, connection/intent epochs, status freshness and airflow.
 Preparation, matching hashes, cached data or an accepted queue request grant none
 of those conditions. Curved/nonlinear mappings or other controller families
 would need a different bound proof and are not silently supported by this type.
+`GrblWireNumbers` is shared with the encoder. Arithmetic `std::round(x*1000)`
+is not an equivalent replacement at decimal/binary ties. Relative G91 jogs
+instead add the encoded delta to raw reported MPos and check that result without
+rounding the final absolute point a second time.
 
 Runtime integration must keep the command collection immutable, use cursors
 rather than `removeFirst()` (which could detach/copy a shared large list), and

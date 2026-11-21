@@ -126,6 +126,7 @@ class GrblSession : public ControllerSession {
     void append(const QString &message);
     void handshake();
     bool insideMachineBed(const QPointF &workPoint) const;
+    bool insideRawMachineBed(const QPointF &machinePoint) const;
     bool insideReportedMachineBed() const;
     bool rejectUnsafeReportedMachinePosition();
     QPointF reportedMachinePosition;
