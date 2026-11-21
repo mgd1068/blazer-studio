@@ -1,6 +1,7 @@
 #include "controllerjobpreparation_p.h"
 #include <QElapsedTimer>
 #include <QEvent>
+#include <QPointer>
 #include <QSemaphore>
 #include <QSignalSpy>
 #include <QThread>
@@ -246,6 +247,23 @@ class ControllerJobPreparationTest : public QObject {
         QCoreApplication::processEvents();
         QCOMPARE(finishedCount,0);
         QVERIFY(!control->timedOut);
+    }
+    void directCompletionChangedReceiverMayDestroyTheOwner() {
+        auto preparation=new ControllerJobPreparation;
+        QPointer<ControllerJobPreparation> alive(preparation);
+        auto control=blockFirst(*preparation); // Initial prepare.changed cannot complete/delete.
+        const auto state=preparation->m_state;
+        QSignalSpy finished(preparation,&ControllerJobPreparation::finished);
+        connect(preparation,&ControllerJobPreparation::changed,this,[&] {
+            if (alive && alive->result(1)) delete alive.data();
+        });
+        QVERIFY(preparation->prepare(plan(),1));
+        QVERIFY(control->entered.tryAcquire(1,1000));
+        QVERIFY(alive);
+        control->release.release();
+        QTRY_VERIFY(alive.isNull());
+        QTRY_VERIFY(stopped(state));
+        QCOMPARE(finished.size(),0);
     }
     void closeIsPermanentAndQueuedCallbackCannotResurrectIt() {
         ControllerJobPreparation preparation;
