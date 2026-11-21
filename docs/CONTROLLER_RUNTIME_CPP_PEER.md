@@ -60,7 +60,7 @@ cases cover readiness, caller-ID replacement, bounded journal, repeated lifetime
 EOF, invalid actions, peer failure, forged PID/path/marker, malformed/oversized
 JSON/stderr, mismatched correlation, hung child and forced own-child shutdown.
 
-Root owns CMake registration. On Unix:
+Root owns CMake registration. On Linux (the validated `/dev/pts` platform):
 
 ```cmake
 qt_add_executable(blazer-runtimepeer-cpp-tests tests/runtimepeer_cpp_test.cpp)
