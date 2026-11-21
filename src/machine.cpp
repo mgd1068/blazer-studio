@@ -64,6 +64,16 @@ void Machine::refreshPreviewPosition() {
     document->setPreviewPosition({point,true,profile,frame,previewPositionRevision});
 }
 void Machine::syncDeviceProfile() {
+    if (hardwareAccess == HardwareAccess::Disabled) {
+        // Offline export/self-test never needs a transport owner or its thread.
+        live = false;
+        pendingSimulator = false;
+        session.reset();
+        const QPointer<Machine> alive(this);
+        Simulator::setDeviceProfile(document->deviceProfile());
+        if (alive) emit changed();
+        return;
+    }
     if (session && session->deviceProfile().outputFingerprint() ==
                        document->deviceProfile().outputFingerprint())
         return;
