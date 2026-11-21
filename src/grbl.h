@@ -99,6 +99,10 @@ class GrblSession : public ControllerSession {
     void append(const QString &message);
     void handshake();
     bool insideMachineBed(const QPointF &workPoint) const;
+    bool insideReportedMachineBed() const;
+    bool rejectUnsafeReportedMachinePosition();
+    QPointF reportedMachinePosition;
+    bool knownReportedMachinePosition = false;
     const DeviceProfile m_deviceProfile;
     QSerialPort serial;
     QTimer poll, timeout, focusTimer;

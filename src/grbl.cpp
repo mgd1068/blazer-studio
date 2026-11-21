@@ -86,7 +86,9 @@ ControllerDiagnostics::Denial GrblSession::diagnosticMotionDenial() const {
         return ControllerDiagnostics::Denial::MotionContract;
     if (!positionReferenced)
         return ControllerDiagnostics::Denial::ReferenceMissing;
-    return ControllerDiagnostics::Denial::StaleStatus;
+    if (!statusFresh())
+        return ControllerDiagnostics::Denial::StaleStatus;
+    return ControllerDiagnostics::Denial::PhysicalBounds;
 }
 void GrblSession::auditDispatch(const QByteArray &bytes) {
     using C = ControllerDiagnostics::Command;
@@ -189,6 +191,9 @@ QString GrblSession::motionSafetyError() const {
         return "Reale Ausgabe gesperrt: bestätigte Maschinenreferenz fehlt.";
     if (!statusFresh())
         return "Reale Ausgabe gesperrt: aktuelle Controllerposition nicht frisch bestätigt.";
+    if (reportMm && knownPosition && knownOffset && !insideReportedMachineBed())
+        return "Reale Ausgabe gesperrt: gemeldete Maschinenposition liegt außerhalb des "
+               "bestätigten physischen Fahrraums oder ist nicht bestimmbar.";
     return {};
 }
 QString GrblSession::homingSafetyError() const {
@@ -229,6 +234,29 @@ bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
            machinePoint.x() <= commissionedEnvelope->right() + epsilon &&
            machinePoint.y() <= commissionedEnvelope->bottom() + epsilon;
 }
+bool GrblSession::insideReportedMachineBed() const {
+    if (!commissionedEnvelope || !knownReportedMachinePosition || !commissionedEnvelope->isValid())
+        return false;
+    // Status data are observations, not three-decimal GCode targets. Never
+    // round an out-of-envelope observation back onto an allowed boundary.
+    const auto &bed = *commissionedEnvelope;
+    const auto &p = reportedMachinePosition;
+    return std::isfinite(p.x()) && std::isfinite(p.y()) && std::isfinite(bed.left()) &&
+           std::isfinite(bed.right()) && std::isfinite(bed.top()) && std::isfinite(bed.bottom()) &&
+           p.x() >= bed.left() && p.x() <= bed.right() && p.y() >= bed.top() &&
+           p.y() <= bed.bottom();
+}
+bool GrblSession::rejectUnsafeReportedMachinePosition() {
+    if (!awaitingReset && !handshaking && !homingPending && commissionedEnvelope &&
+        commissionedModalContract && reportMm && knownPosition && knownOffset &&
+        positionReferenced && !insideReportedMachineBed()) {
+        fail("Gemeldete Maschinenposition außerhalb des bestätigten physischen Fahrraums; "
+             "Auftrag und Referenz verworfen.",
+             ControllerDiagnostics::FaultCause::ReportedPhysicalBounds);
+        return true;
+    }
+    return false;
+}
 bool GrblSession::open(const QString &port) {
     if (port.isEmpty() || connected()) {
         diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
@@ -255,6 +283,7 @@ bool GrblSession::open(const QString &port) {
         return false;
     }
     input.clear();
+    knownReportedMachinePosition = false;
     version = laserMode = powerScale = knownPosition = knownOffset = false;
     minimumPower = knownOutput = activeInputs = pauseRequested = zeroPending = false;
     contaminatedConfiguration = false;
@@ -288,6 +317,7 @@ bool GrblSession::open(const QString &port) {
 }
 void GrblSession::handshake() {
     lastStatus.invalidate();
+    knownReportedMachinePosition = false;
     commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     awaitingReset = false;
@@ -317,6 +347,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    knownReportedMachinePosition = false;
     commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     const bool active = busy() || firing;
@@ -351,6 +382,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause cause) {
+    knownReportedMachinePosition = false;
     commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     // A write/flush on a lost USB port can synchronously emit another serial
@@ -636,6 +668,15 @@ void GrblSession::line(const QByteArray &s) {
             position = machine - offset;
             knownPosition = true;
         }
+        knownReportedMachinePosition = false;
+        if (hasMachine) {
+            reportedMachinePosition = machine;
+            knownReportedMachinePosition = true;
+        } else if (hasWork && knownOffset) {
+            reportedMachinePosition = work + offset;
+            knownReportedMachinePosition = std::isfinite(reportedMachinePosition.x()) &&
+                                           std::isfinite(reportedMachinePosition.y());
+        }
         diagnostic.coordinate(ControllerDiagnostics::Coordinate::Work,
                               knownPosition && reportMm ? std::optional<QPointF>(position)
                                                         : std::nullopt);
@@ -643,6 +684,8 @@ void GrblSession::line(const QByteArray &s) {
             lastStatus.restart();
         else
             lastStatus.invalidate();
+        if (rejectUnsafeReportedMachinePosition())
+            return;
         if (controllerState == "Alarm" || controllerState == "Door") {
             commissionedModalContract = commissionedHomingContract = false;
             positionReferenced = homingPending = false;
@@ -683,6 +726,8 @@ void GrblSession::line(const QByteArray &s) {
             if (homingPending) {
                 positionReferenced = true;
                 homingPending = false;
+                if (rejectUnsafeReportedMachinePosition())
+                    return;
                 append("Referenzfahrt abgeschlossen; Maschinenposition vom Controller bestätigt.");
             }
             firing = false;
@@ -924,6 +969,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    knownReportedMachinePosition = false;
     commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     if (!connected())
@@ -1017,6 +1063,7 @@ void GrblSession::zero() {
         zeroPending = true;
         knownPosition = false;
         knownOffset = false;
+        knownReportedMachinePosition = false;
     }
 }
 void GrblSession::frame(const QVariantMap &b) {

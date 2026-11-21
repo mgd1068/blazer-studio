@@ -177,65 +177,259 @@ class GrblTest : public QObject {
         session.commissionedHomingContract = true;
     }
     void requireReference(ControllerSession &session) {
-        if (auto grbl = dynamic_cast<GrblSession *>(&session))
+        auto grbl = dynamic_cast<GrblSession *>(&session);
+        if (!session.status().positionReferenced) {
+            if (grbl)
+                grbl->commissionedHomingContract = true;
+            session.home();
+            QTRY_VERIFY(session.status().ready && session.status().positionReferenced);
+        }
+        if (grbl)
             supplySyntheticContract(*grbl);
-        if (session.status().positionReferenced)
-            return;
-        session.home();
-        QTRY_VERIFY(session.status().ready && session.status().positionReferenced);
     }
     void requireReference(Machine &machine) {
-        supplySyntheticContract(*static_cast<GrblSession *>(machine.session.get()));
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
         if (!machine.positionReferenced()) {
+            grbl->commissionedHomingContract = true;
             machine.home();
             QTRY_VERIFY(machine.ready() && machine.positionReferenced());
         }
+        supplySyntheticContract(*grbl);
         machine.accessory = AccessoryContract(true);
-        QVERIFY(machine.accessory.configure(AccessoryContract::Role::EnclosureExtraction,
-                                             {"synthetic-pty-extraction", "virtual fixture only, no hardware", true}));
-        const auto request = machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
+        QVERIFY(machine.accessory.configure(
+            AccessoryContract::Role::EnclosureExtraction,
+            {"synthetic-pty-extraction", "virtual fixture only, no hardware", true}));
+        const auto request =
+            machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
         QVERIFY(request);
         QVERIFY(machine.accessory.acknowledge(*request, true));
         const auto now = machine.accessoryClock.elapsed();
         QVERIFY(machine.accessory.observe(AccessoryContract::Role::EnclosureExtraction,
-                                         AccessoryContract::PhysicalState::Flowing,
-                                         "virtual airflow fixture", now, now));
+                                          AccessoryContract::PhysicalState::Flowing,
+                                          "virtual airflow fixture", now, now));
     }
   private slots:
+    void rawReportedMachineBoundsAreCheckedBeforeStatusCanContinueStreaming_data() {
+        QTest::addColumn<QRectF>("envelope");
+        QTest::addColumn<QPointF>("offset");
+        QTest::addColumn<QByteArray>("report");
+        QTest::addColumn<QPointF>("expectedWork");
+        QTest::addColumn<bool>("allowed");
+        QTest::addColumn<bool>("streaming");
+        const QRectF positive(0, 0, 200, 150), negative(-200, -150, 200, 150);
+        QTest::newRow("idle-positive-exact-edge")
+            << positive << QPointF() << QByteArray("<Idle|MPos:200,150,0|WCO:0,0,0|FS:0,0>")
+            << QPointF(200, 150) << true << false;
+        QTest::newRow("idle-positive-small-overstep")
+            << positive << QPointF() << QByteArray("<Idle|MPos:200.0001,75,0|WCO:0,0,0|FS:0,0>")
+            << QPointF() << false << false;
+        QTest::newRow("run-positive-small-overstep")
+            << positive << QPointF() << QByteArray("<Run|MPos:200.0001,75,0|WCO:0,0,0|FS:1000,200>")
+            << QPointF() << false << true;
+        QTest::newRow("hold-positive-small-understep")
+            << positive << QPointF() << QByteArray("<Hold|MPos:-0.0001,75,0|WCO:0,0,0|FS:0,0>")
+            << QPointF() << false << true;
+        QTest::newRow("idle-negative-exact-edge")
+            << negative << QPointF(-200, -150)
+            << QByteArray("<Idle|MPos:-200,-150,0|WCO:-200,-150,0|FS:0,0>") << QPointF() << true
+            << false;
+        QTest::newRow("run-negative-small-overstep")
+            << negative << QPointF(-200, -150)
+            << QByteArray("<Run|MPos:0.0001,-75,0|WCO:-200,-150,0|FS:1000,200>") << QPointF()
+            << false << true;
+        QTest::newRow("hold-negative-small-understep")
+            << negative << QPointF(-200, -150)
+            << QByteArray("<Hold|MPos:-200.0001,-75,0|WCO:-200,-150,0|FS:0,0>") << QPointF()
+            << false << true;
+        QTest::newRow("idle-shifted-work-exact-edge")
+            << positive << QPointF(50, 25) << QByteArray("<Idle|WPos:150,125,0|WCO:50,25,0|FS:0,0>")
+            << QPointF(150, 125) << true << false;
+        QTest::newRow("run-shifted-work-small-overstep")
+            << positive << QPointF(50, 25)
+            << QByteArray("<Run|WPos:150.0001,50,0|WCO:50,25,0|FS:1000,200>") << QPointF() << false
+            << true;
+        QTest::newRow("run-machine-counter-beats-rounded-work-counter")
+            << positive << QPointF(50, 25)
+            << QByteArray("<Run|MPos:200.0001,75,0|WPos:150,50,0|WCO:50,25,0|FS:1000,200>")
+            << QPointF() << false << true;
+    }
+    void rawReportedMachineBoundsAreCheckedBeforeStatusCanContinueStreaming() {
+        QFETCH(QRectF, envelope);
+        QFETCH(QPointF, offset);
+        QFETCH(QByteArray, report);
+        QFETCH(QPointF, expectedWork);
+        QFETCH(bool, allowed);
+        QFETCH(bool, streaming);
+        Controller controller;
+        controller.machinePosition = envelope.left() < 0 ? QPointF(-100, -75) : QPointF(100, 75);
+        controller.workOffset = offset;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        // Homing permission is independent; no positive-envelope assumption is
+        // supplied until this fixture's signed physical frame is known.
+        session.commissionedHomingContract = true;
+        session.home();
+        QTRY_VERIFY(session.ready() && session.status().positionReferenced);
+        session.commissionedEnvelope = envelope;
+        session.commissionedModalContract = true;
+        QVERIFY(session.motionSafetyError().isEmpty());
+        controller.respondToStatus = false;
+        const auto first = controller.commands.size();
+        int credits = 0;
+        if (streaming) {
+            controller.autoAck = false;
+            JobPlan plan;
+            QPointF previous(10, 10);
+            for (int i = 0; i < 300; ++i) {
+                const QPointF next = i % 2 ? QPointF(10, 10) : QPointF(20, 20);
+                plan.moves.append({previous, next, 1000, 20, 0, false});
+                previous = next;
+            }
+            session.start(plan);
+            QVERIFY(session.busy());
+            bool poweredTarget = false;
+            for (int attempt = 0; attempt < 100 && !poweredTarget; ++attempt) {
+                QTest::qWait(3);
+                for (int i = first; i < controller.commands.size(); ++i)
+                    poweredTarget |= controller.commands[i].startsWith("G1 ");
+                if (!poweredTarget && controller.commands.size() - first > credits) {
+                    controller.reply("ok\r\n");
+                    ++credits;
+                }
+            }
+            QVERIFY(poweredTarget);
+        }
+        const auto resets = controller.realtime.count(char(0x18));
+        QTest::qWait(10); // Drain already accepted bytes before the bad readback.
+        const auto faultCut = controller.commands.size();
+        QByteArray packet = report + "\r\n";
+        if (!allowed) {
+            for (qsizetype i = 0; i < controller.commands.size() - first - credits; ++i)
+                packet += "ok\r\n";
+            // A false in-range return in the same input packet must not revive
+            // the discarded connection, reference, or remaining job queue.
+            packet += "<Idle|MPos:" + QByteArray::number(controller.machinePosition.x()) + "," +
+                      QByteArray::number(controller.machinePosition.y()) +
+                      ",0|WCO:" + QByteArray::number(offset.x()) + "," +
+                      QByteArray::number(offset.y()) + ",0|FS:0,0>\r\n";
+        }
+        controller.reply(packet);
+        QTest::qWait(40);
+        if (allowed) {
+            QVERIFY(session.connected());
+            QVERIFY(session.status().positionReferenced);
+            QCOMPARE(session.position, expectedWork);
+            QVERIFY(session.motionSafetyError().isEmpty());
+            QCOMPARE(controller.realtime.count(char(0x18)), resets);
+        } else {
+            QVERIFY2(!session.connected(),
+                     "Out-of-envelope status must abort before processing later ACKs/status.");
+            QTRY_COMPARE(controller.realtime.count(char(0x18)), resets + 1);
+            QVERIFY(!session.status().positionReferenced);
+            QVERIFY(!session.commissionedModalContract);
+            QVERIFY(!session.commissionedHomingContract);
+            for (const auto &command : controller.commands.mid(faultCut))
+                QVERIFY(!command.startsWith("G1 ") && !command.startsWith("M4"));
+            bool typedFault = false;
+            for (const auto &item : session.diagnosticSnapshot()["events"].toList()) {
+                const auto event = item.toMap();
+                typedFault |=
+                    event["event"] == "fault" && event["reason"] == "reportedPhysicalBounds";
+            }
+            QVERIFY(typedFault);
+        }
+        QVERIFY(!controller.realtime.contains('~'));
+    }
+    void homingPhaseExemptionDoesNotApproveAnOutOfEnvelopeReturn() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = false;
+        controller.respondToStatus = false;
+        const auto homes = controller.commands.count("$H");
+        session.home();
+        QTest::qWait(10);
+        controller.reply("ok\r\n");
+        QTRY_COMPARE(controller.commands.count("$H"), homes + 1);
+        controller.reply("<Home|MPos:250.0001,20,0|WCO:0,0,0|FS:0,0>\r\n");
+        QTest::qWait(20);
+        QVERIFY(session.connected()); // Authorized homing is not ordinary bounded job motion.
+        QVERIFY(session.homingPending);
+        QVERIFY(!session.status().positionReferenced);
+        controller.reply("ok\r\n<Idle|MPos:250.0001,20,0|WCO:0,0,0|FS:0,0>\r\n"
+                         "<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0>\r\n");
+        QTRY_VERIFY(!session.connected());
+        QVERIFY(!session.status().positionReferenced);
+        QVERIFY(!session.commissionedModalContract);
+        QVERIFY(!controller.realtime.contains('~'));
+    }
+    void unknownPhysicalConventionIsNotGuessedAndLaterGrantCannotHideUnsafeIdlePosition() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        controller.respondToStatus = false;
+        controller.reply("<Idle|MPos:-250.0001,-20,0|WCO:0,0,0|FS:0,0>\r\n");
+        QTRY_COMPARE(session.position, QPointF(-250.0001, -20));
+        QVERIFY(
+            session.connected()); // No private signed envelope means no guessed positive limits.
+        QVERIFY(!session.motionSafetyError().isEmpty());
+        session.commissionedEnvelope = QRectF(0, 0, 200, 150);
+        session.commissionedModalContract = true;
+        session.positionReferenced =
+            true; // Deliberately unsafe synthetic grant, never production API.
+        QVERIFY(session.motionSafetyError().contains("Fahrraum"));
+        const auto before = controller.commands;
+        session.jog(1, 0);
+        QTest::qWait(20);
+        QCOMPARE(controller.commands, before);
+    }
     void focusAcquiresExtractionLeaseUntilReleaseOrFault() {
         Controller controller;
-        Document document; document.setBackgroundPlanning(false);
+        Document document;
+        document.setBackgroundPlanning(false);
         Machine machine(&document);
-        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
         requireReference(machine);
         controller.autoAck = false;
         machine.focus(true);
-        QVERIFY(machine.firing()); QVERIFY(machine.accessoryFocusActive);
+        QVERIFY(machine.firing());
+        QVERIFY(machine.accessoryFocusActive);
         QVERIFY(!machine.accessory.releaseAfterSafeClearance(true));
-        QVERIFY(!machine.accessory.request(AccessoryContract::Role::EnclosureExtraction,false));
+        QVERIFY(!machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, false));
         machine.focus(false);
-        QVERIFY(!machine.firing()); QVERIFY(!machine.accessoryFocusActive);
+        QVERIFY(!machine.firing());
+        QVERIFY(!machine.accessoryFocusActive);
         QVERIFY(!machine.extractionSafetyError().isEmpty());
         QVERIFY(!controller.commands.contains("M9"));
     }
     void idleDisconnectAndUnsolicitedResetInvalidateAccessoryEvidence() {
         for (const bool reset : {false, true}) {
             Controller controller;
-            Document document; document.setBackgroundPlanning(false);
+            Document document;
+            document.setBackgroundPlanning(false);
             Machine machine(&document);
-            QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+            QVERIFY(machine.connectHardware(controller.port));
+            QTRY_VERIFY(machine.ready());
             requireReference(machine);
             QVERIFY(machine.extractionSafetyError().isEmpty());
             QVERIFY(!machine.accessoryJobActive);
             if (reset) {
                 controller.reply("Grbl 1.3a ['$' for help]\r\n");
-                QTRY_VERIFY(!machine.accessory.verified(AccessoryContract::Role::EnclosureExtraction) ||
-                            machine.accessory.state(AccessoryContract::Role::EnclosureExtraction).physical == AccessoryContract::PhysicalState::Unknown);
+                QTRY_VERIFY(
+                    !machine.accessory.verified(AccessoryContract::Role::EnclosureExtraction) ||
+                    machine.accessory.state(AccessoryContract::Role::EnclosureExtraction)
+                            .physical == AccessoryContract::PhysicalState::Unknown);
             } else {
                 machine.toggleConnection();
                 QVERIFY(!machine.connected());
-                QCOMPARE(machine.accessory.state(AccessoryContract::Role::EnclosureExtraction).physical,
-                         AccessoryContract::PhysicalState::Unknown);
+                QCOMPARE(
+                    machine.accessory.state(AccessoryContract::Role::EnclosureExtraction).physical,
+                    AccessoryContract::PhysicalState::Unknown);
             }
             QVERIFY(!machine.extractionSafetyError().isEmpty());
             QVERIFY(!controller.commands.contains("M9"));
@@ -243,41 +437,54 @@ class GrblTest : public QObject {
     }
     void idleAirflowExpiryNotifiesConsumersWithoutIncomingControllerReports() {
         Controller controller;
-        Document document; document.setBackgroundPlanning(false);
+        Document document;
+        document.setBackgroundPlanning(false);
         Machine machine(&document);
-        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
         requireReference(machine);
         QTRY_VERIFY(machine.lastProcessingSafetyErrors.isEmpty());
-        QSignalSpy changes(&machine,&Simulator::changed);
+        QSignalSpy changes(&machine, &Simulator::changed);
         controller.respondToStatus = false;
-        QTRY_VERIFY_WITH_TIMEOUT(!machine.extractionSafetyError().isEmpty(),4000);
-        QTRY_VERIFY_WITH_TIMEOUT(machine.lastProcessingSafetyErrors.contains(machine.extractionSafetyError()),500);
+        QTRY_VERIFY_WITH_TIMEOUT(!machine.extractionSafetyError().isEmpty(), 4000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            machine.lastProcessingSafetyErrors.contains(machine.extractionSafetyError()), 500);
         QVERIFY(!changes.isEmpty());
         QVERIFY(!machine.accessoryJobActive);
     }
     void facadeRejectsUnknownExtractionDespiteSyntheticMotionContract() {
         Controller controller;
-        Document document; document.setBackgroundPlanning(false); document.newProject(); document.addShape("rect");
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
         Machine machine(&document);
-        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
         requireReference(machine);
         machine.accessory = AccessoryContract(true); // No real mapping exists in production.
         QVERIFY(machine.motionSafetyError().isEmpty());
         QVERIFY(machine.extractionSafetyError().contains("Ausgangszuordnung"));
         const auto before = controller.commands;
-        machine.start(); machine.focus(true);
+        machine.start();
+        machine.focus(true);
         QTest::qWait(60);
         QCOMPARE(controller.commands, before);
         QVERIFY(!machine.firing());
     }
     void lostAirflowStopsAnActiveSyntheticJobWithoutResumeOrAccessoryOff() {
         Controller controller;
-        Document document; document.setBackgroundPlanning(false); document.newProject(); document.addShape("rect");
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
         Machine machine(&document);
-        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
         requireReference(machine);
         controller.status = "Run";
-        machine.start(); QTRY_VERIFY(controller.commands.contains("M4 S800"));
+        machine.start();
+        QTRY_VERIFY(controller.commands.contains("M4 S800"));
         const auto resetCount = controller.realtime.count(char(0x18));
         QTRY_VERIFY_WITH_TIMEOUT(controller.realtime.count(char(0x18)) > resetCount, 4500);
         QVERIFY(!controller.realtime.contains('~'));
@@ -304,6 +511,7 @@ class GrblTest : public QObject {
         controller.report();
         QTRY_VERIFY(session.paused && controller.realtime.contains('!'));
         controller.respondToStatus = false;
+        const auto resets = controller.realtime.count(char(0x18));
         if (loss == "stale")
             QTest::qWait(1700);
         else if (loss == "noGrants") {
@@ -320,7 +528,6 @@ class GrblTest : public QObject {
             QTRY_VERIFY(!session.laserMode);
         } else
             session.knownOffset = false;
-        const auto resets = controller.realtime.count(char(0x18));
         session.pause(); // This would otherwise send cycle-start '~'.
         QTRY_VERIFY_WITH_TIMEOUT(controller.realtime.count(char(0x18)) > resets ||
                                      controller.realtime.contains('~'),
