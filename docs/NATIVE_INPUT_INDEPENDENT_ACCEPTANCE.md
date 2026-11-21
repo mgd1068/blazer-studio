@@ -88,3 +88,26 @@ registration, final complete tests, source freeze and packaging.
 These results accept the specified synthetic focus paths only. They do not cover
 generic Start/Jog/Home/Frame/Zero native action provenance, real OS event delivery,
 external usability, physical controller timing, mechanical position or airflow.
+
+## Generic API and caller lifetime followup
+
+The original20 adapter results and all6 Machine focus scenarios remain. The new
+per-control birth cutoff correctly rejected4 original window fixtures because
+their synthetic conservative event time (`now-12ms`) predated immediate control
+registration. The fixture now waits until the synthetic event is newer than
+registration; expected age/deadline values and every assertion remain intact.
+This models a fresh synthetic event rather than weakening the production cutoff.
+Machine focus arming is now asserted explicitly before each negative scenario,
+so cancellation/expiry checks cannot pass merely because capture failed.
+
+Two additional actual Machine cases cover direct owner deletion during native
+consumption (focus and generic Jog). A private clock-baseline discontinuity
+emits invalidation; a synchronous changed receiver deletes Machine. Both calls
+must return safely and emit no powered command. The generic candidate is an
+explicit private synthetic post-acceptance activation; the actual Machine
+binding/consume/seal path is retained. No real OS input or hardware is involved.
+
+Exact owner product `000970c` normal verification: nativeinputintent_adversarial
+and nativefocusruntime CTest2/2 passed4.18s (20 and10 Qt results). Full-core
+ASan/UBSan for this new owner-deletion followup is still running; earlier8-case
+sanitizer evidence above is not represented as a pass of these additional cases.

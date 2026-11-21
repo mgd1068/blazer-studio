@@ -18,17 +18,34 @@
 using RuntimeTestSupport::RuntimePeer;
 class NativeInputIntentTestAccess {
 public:
-    static void capture(NativeInputIntentAdapter &a,QQuickWindow &w) {
+    static bool capture(NativeInputIntentAdapter &a,QQuickWindow &w) {
         const auto n=NativeInputIntentAdapter::nowMs();
         a.m_domain=NativeInputIntentAdapter::Domain::X11Server32;
         a.m_contextStarted=n-1000;a.m_sample={1000,n-5,n-4};
         a.capture(&w,1000,{10,10},false,true,false,false);
+        return a.m_pending.contains("focus");
+    }
+    static void discontinuity(NativeInputIntentAdapter &a){a.m_suspendGap+=1000;}
+    static void acceptedClick(NativeInputIntentAdapter &a,QQuickWindow &window,QQuickItem &control,
+            const QByteArray &binding,NativeInputIntentAdapter::BindingProvider provider) {
+        const QString key="jog#synthetic-callout";const auto now=NativeInputIntentAdapter::nowMs();
+        control.setProperty("pressed",false);control.setProperty("nativeActionEnabled",true);
+        a.m_controls[key]=&control;a.m_clickBindings[key]=std::move(provider);
+        auto token=std::make_shared<NativeInputContextToken>();a.m_tokens[key]=token;
+        NativeInputIntentAdapter::Intent intent{++a.m_interaction,now,now+250,binding,token};
+        a.m_pending[key]={intent,&control,&window,a.m_context,false,true};
     }
 };
 class ControllerRuntimeTestAccess {
 public:
     static ControllerRuntimeSession &runtime(Machine &m) {return *static_cast<ControllerRuntimeSession *>(m.session.get());}
     static NativeInputIntentAdapter &input(Machine &m) {return *m.nativeInput;}
+    static void acceptedJog(Machine &m,QQuickWindow &window,QQuickItem &control) {
+        const QVariantMap args{{"dx",.5},{"dy",0.}};
+        const auto binding=m.nativeBinding("jog",args,m.session->status());
+        NativeInputIntentTestAccess::acceptedClick(*m.nativeInput,window,control,binding,
+            [self=QPointer<Machine>(&m),args]{return self?self->nativeBinding("jog",args,self->session->status()):QByteArray();});
+    }
     template<class Function> static bool run(Machine &m,Function fn) {
         auto worker=runtime(m).m_worker;
         struct State {QSemaphore done;std::atomic_bool cancelled{false};bool ok=false;};
@@ -87,7 +104,7 @@ class NativeFocusRuntimeTest:public QObject {
             machine->registerFocusControl(control.get());
             return machine->requestConnectHardware(peer.port(),QByteArray(64,'a')).enqueued;
         }
-        void arm(){NativeInputIntentTestAccess::capture(ControllerRuntimeTestAccess::input(*machine),window);}
+        bool arm(){return NativeInputIntentTestAccess::capture(ControllerRuntimeTestAccess::input(*machine),window);}
         ~Fixture(){
             machine.reset();
             QElapsedTimer clock;clock.start();
@@ -104,7 +121,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(f.machine->ready(),5000);QTRY_VERIFY(f.window.isActive());
         QVERIFY(ControllerRuntimeTestAccess::commission(*f.machine));
         QTest::qWait(30); // Let actual ready/verified cache notifications settle before capture.
-        f.arm();
+        QVERIFY(f.arm());
         if(scenario=="fake-qml")ControllerRuntimeTestAccess::input(*f.machine).revoke();
         if(scenario=="expired-before-qml")QTest::qSleep(270);
         if(scenario=="cancel-before-qml")f.machine->endFocus();
@@ -133,6 +150,17 @@ private slots:
         }else{
             QTest::qWait(100);QCOMPARE(powered(events(f.peer)),0);
         }
+    }
+    void consumeCalloutCanDestroyMachine_data(){QTest::addColumn<bool>("jog");QTest::newRow("focus")<<false;QTest::newRow("generic-jog")<<true;}
+    void consumeCalloutCanDestroyMachine(){
+        QFETCH(bool,jog);Fixture f;QVERIFY(f.setup());QTRY_VERIFY_WITH_TIMEOUT(f.machine->ready(),5000);QTRY_VERIFY(f.window.isActive());
+        QVERIFY(ControllerRuntimeTestAccess::commission(*f.machine));QTest::qWait(30);QVERIFY(f.arm());
+        if(jog)ControllerRuntimeTestAccess::acceptedJog(*f.machine,f.window,*f.control);
+        NativeInputIntentTestAccess::discontinuity(ControllerRuntimeTestAccess::input(*f.machine));
+        QPointer<Machine> alive=f.machine.get();
+        connect(f.machine.get(),&Simulator::changed,this,[&f]{f.machine.reset();});
+        if(jog)f.machine->jog(.5,0);else f.machine->beginFocus();
+        QVERIFY(!alive);QVERIFY(!f.machine);QCOMPARE(powered(events(f.peer)),0);
     }
 };
 QTEST_MAIN(NativeFocusRuntimeTest)

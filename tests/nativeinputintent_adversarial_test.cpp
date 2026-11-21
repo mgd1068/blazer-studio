@@ -10,6 +10,11 @@ public:
     static qint64 now() { return NativeInputIntentAdapter::nowMs(); }
     static void calibrate(NativeInputIntentAdapter &a, quint32 server=1000) {
         a.m_domain=NativeInputIntentAdapter::Domain::X11Server32;
+        qint64 birth=-1;for(const auto cutoff:a.m_actionCutoff)birth=std::max(birth,cutoff);
+        const auto elapsed=now()-birth;
+        if(elapsed<21)QTest::qWait(int(21-elapsed));
+        // The fixture's conservative event time is n-12. Keep it newer than
+        // actual control registration instead of backdating a new control's press.
         const auto n=now(); a.m_contextStarted=n-1000; a.m_sample={server,n-5,n-4};
     }
     static auto map(NativeInputIntentAdapter &a,quint64 t,qint64 now) {return a.mapTimestamp(t,now);}
