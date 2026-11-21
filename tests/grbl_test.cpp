@@ -2,6 +2,17 @@
 #include "grbl.h"
 #include "preparedcontrollerjob.h"
 #include "machine.h"
+#include "controllerruntime.h"
+#include "controllerruntimeworker.h"
+#include "controllerruntimemailbox.h"
+#include <QSemaphore>
+#include <QScopeGuard>
+#include <QCoreApplication>
+#include <QEventLoop>
+#include <atomic>
+#include <chrono>
+#include <functional>
+#include <type_traits>
 #include <QJsonDocument>
 #include <QClipboard>
 #include <QFile>
@@ -14,14 +25,27 @@
 #include <pty.h>
 #include <termios.h>
 #include <unistd.h>
+struct RuntimeLifetimeFence {
+    std::atomic_bool facadeGone{false}, workerGone{false};
+};
 class Controller : public QObject {
   public:
     int master = -1;
     QString port;
+    inline static QList<Controller *> activeControllers;
+    QList<std::shared_ptr<RuntimeLifetimeFence>> runtimeLifetimes;
+    static void trackRuntime(const QString &portName, std::shared_ptr<RuntimeLifetimeFence> fence) {
+        for (auto controller : activeControllers)
+            if (controller->port == portName || controller->port.endsWith("/" + portName)) {
+                controller->runtimeLifetimes.append(std::move(fence));
+                return;
+            }
+    }
     QByteArray buffer;
     QStringList commands;
     QString status = "Idle";
     bool banner = false, wrongPower = false, autoAck = true, withOverrides = false;
+    bool runOnPoweredCommand = false; // Synthetic timing state; not physical motion evidence.
     bool respondToStatus = true, respondToModal = true, interleaveSettingsOnce = false;
     bool interleaveSettingsAlways = false;
     QByteArray minimumPower = "0";
@@ -38,6 +62,7 @@ class Controller : public QObject {
         if (openpty(&master, &slave, name, nullptr, nullptr))
             qFatal("openpty failed");
         port = name;
+        activeControllers.append(this);
         termios attributes{};
         if (tcgetattr(slave, &attributes))
             qFatal("tcgetattr failed");
@@ -129,6 +154,13 @@ class Controller : public QObject {
                         auto line = QString::fromLatin1(buffer);
                         buffer.clear();
                         commands << line;
+                        if (runOnPoweredCommand) {
+                            const QRegularExpression mode("(?:^| )(?:M[34]|G1)(?: |$)");
+                            const QRegularExpression powerWord("(?:^| )S([0-9]+(?:\\.[0-9]+)?)(?: |$)");
+                            const auto power = powerWord.match(line);
+                            if (mode.match(line).hasMatch() && power.hasMatch() && power.captured(1).toDouble() > 0)
+                                status = "Run";
+                        }
                         if (holdBlocksCommands && status == "Hold")
                             continue;
                         if (line == "G10 L20 P1 X0 Y0")
@@ -156,6 +188,22 @@ class Controller : public QObject {
         });
     }
     ~Controller() {
+        // If its facade was destroyed, keep this GUI-owned synthetic peer alive
+        // until asynchronous worker teardown closes serial. If the facade is
+        // still alive, peer destruction intentionally remains a transport loss.
+        auto waiting = [this] {
+            for (const auto &fence : runtimeLifetimes)
+                if (fence->facadeGone.load() && !fence->workerGone.load()) return true;
+            return false;
+        };
+        QElapsedTimer deadline;
+        deadline.start();
+        while (waiting() && deadline.elapsed() < 2500) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            QThread::msleep(1);
+        }
+        if (waiting()) QTest::qFail("Controller worker outlived bounded peer teardown", __FILE__, __LINE__);
+        activeControllers.removeAll(this);
         if (master >= 0)
             close(master);
     }
@@ -178,8 +226,205 @@ class Controller : public QObject {
                   .toLatin1());
     }
 };
+// Test-only friend: every core/lease read and mutation is queued to its owner.
+// Sequential bounded test queries are not a production synchronous-mode option.
+class ControllerRuntimeTestAccess {
+  public:
+    struct Context {
+        QObject &owner;
+        GrblSession &core;
+        AccessoryContract &accessory;
+        QElapsedTimer &clock;
+        QTimer &watchdog;
+        bool &jobActive, &focusActive, &wasVerified, &wasReferenced;
+    };
+    template <typename Function>
+    static auto call(ControllerRuntimeSession &runtime, Function function, bool publish = false) {
+        using Result = std::decay_t<std::invoke_result_t<Function, Context &>>;
+        static_assert(!std::is_pointer_v<Result> && !std::is_reference_v<Result>);
+        struct Shared { QSemaphore done; std::optional<Result> value; std::atomic_bool cancelled{false}; };
+        auto shared = std::make_shared<Shared>();
+        auto worker = runtime.m_worker;
+        const bool queued = worker && QMetaObject::invokeMethod(worker, [worker, shared, function, publish] {
+            if (!shared->cancelled.load() && worker->m_core && worker->m_watchdog) {
+                Context context{*worker, *worker->m_core, worker->m_accessory, worker->m_accessoryClock,
+                    *worker->m_watchdog, worker->m_jobActive, worker->m_focusActive,
+                    worker->m_wasVerified, worker->m_wasReferenced};
+                shared->value = function(context);
+                if (publish) worker->publish();
+            }
+            shared->done.release();
+        }, Qt::QueuedConnection);
+        if (!queued || !shared->done.tryAcquire(1, 3000) || !shared->value) {
+            shared->cancelled.store(true);
+            QTest::qFail("Actual controller worker query did not finish", __FILE__, __LINE__);
+            return Result{};
+        }
+        return *shared->value;
+    }
+    static void bindPeerLifetime(ControllerRuntimeSession &runtime) {
+        auto fence = std::make_shared<RuntimeLifetimeFence>();
+        QObject::connect(&runtime, &QObject::destroyed, [fence] { fence->facadeGone.store(true); });
+        const auto port = call(runtime, [fence](Context &c) {
+            QObject::connect(&c.owner, &QObject::destroyed, [fence] { fence->workerGone.store(true); });
+            return c.core.serial.portName();
+        });
+        if (!port.isEmpty()) Controller::trackRuntime(port, std::move(fence));
+    }
+    static void nativeFocus(ControllerRuntimeSession &runtime) {
+        static quint64 interaction = 0;
+        const auto observed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        const auto stamp = runtime.sealNativePress(++interaction,
+            runtime.m_mailbox->focusWindowEpoch.load(), observed);
+        runtime.beginFocus(stamp);
+        call(runtime, [](Context &) { return true; }); // FIFO fence, not execution authority.
+    }
+};
+
 class GrblTest : public QObject {
     Q_OBJECT
+    using Context = ControllerRuntimeTestAccess::Context;
+    template <typename T> struct Field {
+        std::function<T()> get;
+        std::function<void(T)> set;
+        T value() const { return get(); }
+        operator T() const { return value(); }
+        Field &operator=(T value) { set(std::move(value)); return *this; }
+        Field &operator=(const Field &other) { return *this = other.value(); }
+        friend bool operator==(const Field &a, const T &b) { return a.value() == b; }
+        friend bool operator==(const T &a, const Field &b) { return a == b.value(); }
+    };
+    struct TimerView {
+        std::function<void()> stopCallback;
+        std::function<void(int)> startCallback;
+        void stop() { stopCallback(); }
+        void start(int interval) { startCallback(interval); }
+    };
+    struct AccessoryView {
+        ControllerRuntimeSession *runtime;
+        template <typename Fn> auto query(Fn fn, bool publish = false) const {
+            return ControllerRuntimeTestAccess::call(*runtime, [fn](Context &c) { return fn(c.accessory); }, publish);
+        }
+        AccessoryView &operator=(AccessoryContract contract) {
+            query([contract](AccessoryContract &a) { a = contract; return true; }, true);
+            return *this;
+        }
+        bool configure(AccessoryContract::Role role, AccessoryContract::Mapping mapping) {
+            return query([=](AccessoryContract &a) { return a.configure(role, mapping); }, true);
+        }
+        auto request(AccessoryContract::Role role, bool on) {
+            return query([=](AccessoryContract &a) { return a.request(role, on); }, true);
+        }
+        bool acknowledge(AccessoryContract::Request request, bool accepted) {
+            return query([=](AccessoryContract &a) { return a.acknowledge(request, accepted); }, true);
+        }
+        bool observe(AccessoryContract::Role role, AccessoryContract::PhysicalState state,
+                     const QString &evidence, qint64 observed, qint64 now) {
+            return query([=](AccessoryContract &a) { return a.observe(role, state, evidence, observed, now); }, true);
+        }
+        bool begin(qint64 now) { return query([=](AccessoryContract &a) { return a.begin(now); }, true); }
+        bool activeLease() const { return query([](AccessoryContract &a) { return a.activeLease(); }); }
+        bool releaseAfterSafeClearance(bool confirmed) {
+            return query([=](AccessoryContract &a) { return a.releaseAfterSafeClearance(confirmed); }, true);
+        }
+        bool verified(AccessoryContract::Role role) const {
+            return query([=](AccessoryContract &a) { return a.verified(role); });
+        }
+        auto state(AccessoryContract::Role role) const {
+            return query([=](AccessoryContract &a) { return a.state(role); });
+        }
+    };
+    struct ClockView {
+        ControllerRuntimeSession *runtime;
+        qint64 elapsed() const { return ControllerRuntimeTestAccess::call(*runtime, [](Context &c) { return c.clock.elapsed(); }); }
+    };
+    struct RuntimeView {
+        AccessoryView accessory;
+        ClockView clock;
+        TimerView watchdog;
+        Field<bool> jobActive, focusActive, wasVerified;
+    };
+    ControllerRuntimeSession &runtime(ControllerSession &session) {
+        auto value = dynamic_cast<ControllerRuntimeSession *>(&session);
+        if (!value) throw std::runtime_error("Machine/Factory test requires actual production ControllerRuntimeSession");
+        return *value;
+    }
+    ControllerRuntimeSession &runtime(Machine &machine) { return runtime(*machine.session); }
+    RuntimeView runtimeView(Machine &machine) {
+        auto pointer = &runtime(machine);
+        auto flag = [pointer](auto get, auto set) {
+            return Field<bool>{[=] { return ControllerRuntimeTestAccess::call(*pointer, get); },
+                [=](bool value) { ControllerRuntimeTestAccess::call(*pointer, [=](Context &c) { set(c, value); return true; }, true); }};
+        };
+        return {{pointer}, {pointer},
+            {[=] { ControllerRuntimeTestAccess::call(*pointer, [](Context &c) { c.watchdog.stop(); return true; }); },
+             [=](int ms) { ControllerRuntimeTestAccess::call(*pointer, [=](Context &c) { c.watchdog.start(ms); return true; }); }},
+            flag([](Context &c) { return c.jobActive; }, [](Context &c, bool v) { c.jobActive=v; }),
+            flag([](Context &c) { return c.focusActive; }, [](Context &c, bool v) { c.focusActive=v; }),
+            flag([](Context &c) { return c.wasVerified; }, [](Context &c, bool v) { c.wasVerified=v; })};
+    }
+    struct CoreView {
+        ControllerRuntimeSession *runtime;
+        Field<bool> handshaking, waitingAck, waitingIdle, paused, commissionedHomingContract, knownOffset;
+        Field<std::optional<QRectF>> commissionedEnvelope;
+        Field<QPointF> reportedMachinePosition, offset;
+        struct ZeroView {
+            ControllerRuntimeSession *runtime;
+            mutable std::optional<GrblSession::WorkZeroTransaction> captured;
+            mutable GrblSession::WorkZeroTransaction empty;
+            auto read() const { return ControllerRuntimeTestAccess::call(*runtime, [](Context &c) { return c.core.workZero; }); }
+            operator bool() const { captured = read(); return captured.has_value(); }
+            const auto *operator->() const {
+                if (!captured) captured = read();
+                return captured ? &*captured : &empty;
+            }
+            ZeroView &operator=(const GrblSession::WorkZeroTransaction &value) {
+                ControllerRuntimeTestAccess::call(*runtime, [=](Context &c) { c.core.workZero = value; return true; }, true);
+                captured = value;
+                return *this;
+            }
+        } workZero;
+        TimerView workZeroDeadline;
+        auto status() { return ControllerRuntimeTestAccess::call(*runtime, [](Context &c) { return c.core.status(); }); }
+        void pause() { ControllerRuntimeTestAccess::call(*runtime, [](Context &c) { c.core.pause(); return true; }, true); }
+        void zero() { ControllerRuntimeTestAccess::call(*runtime, [](Context &c) { c.core.zero(); return true; }, true); }
+    };
+    std::shared_ptr<CoreView> coreView(Machine &machine) {
+        auto pointer = &runtime(machine);
+        ControllerRuntimeTestAccess::bindPeerLifetime(*pointer);
+        auto bind = [pointer](auto getter, auto setter) {
+            using T = decltype(getter(std::declval<Context &>()));
+            return Field<T>{[=] { return ControllerRuntimeTestAccess::call(*pointer, getter); },
+                [=](T value) { ControllerRuntimeTestAccess::call(*pointer, [=](Context &c) { setter(c, value); return true; }, true); }};
+        };
+#define CORE_FIELD(name) bind([](Context &c) { return c.core.name; }, [](Context &c, auto value) { c.core.name = value; })
+        return std::make_shared<CoreView>(CoreView{pointer,
+            CORE_FIELD(handshaking), CORE_FIELD(waitingAck), CORE_FIELD(waitingIdle), CORE_FIELD(paused),
+            CORE_FIELD(commissionedHomingContract), CORE_FIELD(knownOffset), CORE_FIELD(commissionedEnvelope),
+            CORE_FIELD(reportedMachinePosition), CORE_FIELD(offset), {pointer, {}, {}},
+            {[] {}, [pointer](int ms) { ControllerRuntimeTestAccess::call(*pointer, [=](Context &c) { c.core.workZeroDeadline.start(ms); return true; }); }}});
+#undef CORE_FIELD
+    }
+    void focusMachine(Machine &machine, bool on) {
+        if (!on || machine.simulation()) { machine.focus(on); return; }
+        ControllerRuntimeTestAccess::nativeFocus(runtime(machine));
+    }
+    void startPreparedMachine(Machine &machine) {
+        if (!machine.simulation() && machine.document->job().valid()) {
+            runtime(machine).prepare(machine.document->job());
+            QTRY_VERIFY_WITH_TIMEOUT(runtime(machine).jobPrepared(), 5000);
+        }
+        machine.start();
+        if (!machine.simulation()) ControllerRuntimeTestAccess::call(runtime(machine), [](Context &) { return true; });
+    }
+    void startPreparedSession(ControllerSession &session, const JobPlan &plan) {
+        auto &value = runtime(session);
+        value.prepare(plan);
+        QTRY_VERIFY_WITH_TIMEOUT(value.jobPrepared(), 5000);
+        value.start(plan);
+        ControllerRuntimeTestAccess::call(value, [](Context &) { return true; });
+    }
     void supplySyntheticContract(GrblSession &session) {
         // This is an independent fixture assumption, never a real-machine claim.
         session.commissionedEnvelope = QRectF(0, 0, 200, 150);
@@ -188,34 +433,51 @@ class GrblTest : public QObject {
         session.commissionedOverrideContract = true;
     }
     void requireReference(ControllerSession &session) {
-        auto grbl = dynamic_cast<GrblSession *>(&session);
-        if (!session.status().positionReferenced) {
-            if (grbl)
+        if (auto grbl = dynamic_cast<GrblSession *>(&session)) {
+            if (!session.status().positionReferenced) {
                 grbl->commissionedHomingContract = true;
+                session.home();
+                QTRY_VERIFY(session.status().ready && session.status().positionReferenced);
+            }
+            supplySyntheticContract(*grbl);
+            return;
+        }
+        auto &value = runtime(session);
+        ControllerRuntimeTestAccess::bindPeerLifetime(value);
+        if (!session.status().positionReferenced) {
+            ControllerRuntimeTestAccess::call(value, [](Context &c) { c.core.commissionedHomingContract=true; return true; });
             session.home();
             QTRY_VERIFY(session.status().ready && session.status().positionReferenced);
         }
-        if (grbl)
-            supplySyntheticContract(*grbl);
+        QVERIFY(ControllerRuntimeTestAccess::call(value, [this](Context &c) {
+            supplySyntheticContract(c.core);
+            c.accessory = AccessoryContract(true);
+            const auto role = AccessoryContract::Role::EnclosureExtraction;
+            if (!c.accessory.configure(role, {"synthetic-factory-extraction", "offline factory test only", true})) return false;
+            const auto request = c.accessory.request(role, true);
+            if (!request || !c.accessory.acknowledge(*request, true)) return false;
+            const auto now = c.clock.elapsed();
+            return c.accessory.observe(role, AccessoryContract::PhysicalState::Flowing, "private synthetic flow", now, now);
+        }, true));
     }
     void requireReference(Machine &machine) {
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        auto grbl = coreView(machine);
         if (!machine.positionReferenced()) {
             grbl->commissionedHomingContract = true;
             machine.home();
             QTRY_VERIFY(machine.ready() && machine.positionReferenced());
         }
-        supplySyntheticContract(*grbl);
-        machine.accessory = AccessoryContract(true);
-        QVERIFY(machine.accessory.configure(
+        ControllerRuntimeTestAccess::call(runtime(machine), [this](Context &c) { supplySyntheticContract(c.core); return true; }, true);
+        runtimeView(machine).accessory = AccessoryContract(true);
+        QVERIFY(runtimeView(machine).accessory.configure(
             AccessoryContract::Role::EnclosureExtraction,
             {"synthetic-pty-extraction", "virtual fixture only, no hardware", true}));
         const auto request =
-            machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
+            runtimeView(machine).accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
         QVERIFY(request);
-        QVERIFY(machine.accessory.acknowledge(*request, true));
-        const auto now = machine.accessoryClock.elapsed();
-        QVERIFY(machine.accessory.observe(AccessoryContract::Role::EnclosureExtraction,
+        QVERIFY(runtimeView(machine).accessory.acknowledge(*request, true));
+        const auto now = runtimeView(machine).clock.elapsed();
+        QVERIFY(runtimeView(machine).accessory.observe(AccessoryContract::Role::EnclosureExtraction,
                                           AccessoryContract::PhysicalState::Flowing,
                                           "virtual airflow fixture", now, now));
     }
@@ -232,6 +494,16 @@ class GrblTest : public QObject {
             QTRY_VERIFY(session.workZero && session.workZero->queryArmed);
         else
             QTRY_VERIFY(session.workZero && session.workZero->modalReadback);
+    }
+    void acknowledgeWorkZero(Controller &controller, CoreView &session, int first,
+                             bool acknowledgeLast = true) {
+        for (int i = 0; i < workZeroCommands.size(); ++i) {
+            QTRY_COMPARE(controller.commands.value(first + i), workZeroCommands[i]);
+            if (i + 1 == workZeroCommands.size() && !acknowledgeLast) break;
+            controller.reply("ok\r\n");
+        }
+        if (acknowledgeLast) QTRY_VERIFY(session.workZero && session.workZero->queryArmed);
+        else QTRY_VERIFY(session.workZero && session.workZero->modalReadback);
     }
   private slots:
     void preparedCompactGateMatchesActualHalfMillimetreWireTargets_data() {
@@ -336,6 +608,43 @@ class GrblTest : public QObject {
                                   .arg(direction > 0 ? "0.999" : "-0.999");
         QTRY_VERIFY(controller.commands.contains(expected));
     }
+    void inFlightRuntimeDispatchKeepsHeavyWorkGuardReserved() {
+        Controller controller;
+        Document document;
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        struct Barrier { QSemaphore entered, release; std::atomic_bool first{true}; };
+        auto barrier = std::make_shared<Barrier>();
+        auto cleanup = qScopeGuard([&] { runtime(machine).stop(); barrier->release.release(); });
+        QVERIFY(ControllerRuntimeTestAccess::call(runtime(machine), [barrier](Context &c) {
+            const auto original = c.core.dispatchPreflight;
+            c.core.dispatchPreflight = [barrier, original] {
+                if (barrier->first.exchange(false)) {
+                    barrier->entered.release();
+                    barrier->release.tryAcquire(1, 3000);
+                }
+                return original ? original() : false;
+            };
+            return true;
+        }));
+        runtime(machine).jog(.5, 0);
+        QVERIFY(barrier->entered.tryAcquire(1, 3000));
+        // The normal queue was popped; actual core is inside its pre-write path.
+        // GUI reads must still show reservation, without needing worker progress.
+        const bool occupied = machine.occupied();
+        const bool pendingOrBusy = machine.requestPending() || machine.busy();
+        const bool guarded = !document.synchronousWorkBlockReason().isEmpty();
+        qInfo() << "In-flight dispatch reservation" << occupied << pendingOrBusy << guarded;
+        runtime(machine).stop();
+        barrier->release.release();
+        QVERIFY(occupied);
+        QVERIFY(pendingOrBusy);
+        QVERIFY(guarded);
+    }
     void actualMachineRegistrationBlocksHeavyDocumentSideEffects_data() {
         QTest::addColumn<QString>("activity");
         for (const auto &activity : {"job", "paused-job", "jog", "focus", "frame", "home", "zero",
@@ -378,13 +687,13 @@ class GrblTest : public QObject {
         controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
         const auto cut = controller.commands.size();
         const auto initialResets = controller.realtime.count(char(0x18));
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        auto grbl = coreView(machine);
         if (activity == "job" || activity == "paused-job" || activity == "lease-with-lost-flags")
-            machine.start();
+            startPreparedMachine(machine);
         else if (activity == "jog")
             machine.jog(1, 0);
         else if (activity == "focus")
-            machine.focus(true);
+            focusMachine(machine, true);
         else if (activity == "frame")
             machine.frame(document.framingBounds("job"));
         else if (activity == "home")
@@ -402,8 +711,8 @@ class GrblTest : public QObject {
         if (activity == "paused-job")
             machine.pause();
         if (activity == "lease-with-lost-flags") {
-            QVERIFY(machine.accessory.activeLease());
-            machine.accessoryJobActive = machine.accessoryFocusActive = false;
+            QVERIFY(runtimeView(machine).accessory.activeLease());
+            runtimeView(machine).jobActive = runtimeView(machine).focusActive = false;
             for (int i = 0; i < 80 && machine.busy(); ++i) {
                 if (grbl->waitingAck)
                     controller.reply("ok\r\n");
@@ -412,8 +721,8 @@ class GrblTest : public QObject {
                 QTest::qWait(2);
             }
             QTRY_VERIFY(machine.ready());
-            QVERIFY(machine.accessory.activeLease());
-            QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+            QVERIFY(runtimeView(machine).accessory.activeLease());
+            QVERIFY(!runtimeView(machine).jobActive && !runtimeView(machine).focusActive);
         }
         QVERIFY(!document.save(target));
         // Observe the actual Machine signal registration; no fake guard was supplied.
@@ -478,7 +787,7 @@ class GrblTest : public QObject {
         controller.autoAck = controller.respondToStatus = false;
         const auto cut = controller.commands.size();
         QSignalSpy guardChanges(&document, &Document::synchronousWorkGuardChanged);
-        machine.start();
+        startPreparedMachine(machine);
         QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
         document.setProperty("x", 42.);
         document.setProperty("width", 25.);
@@ -487,9 +796,9 @@ class GrblTest : public QObject {
         QCOMPARE(document.items().front().bounds.width(), 25.);
         QCOMPARE(document.items().front().name, QString("next design"));
         QVERIFY(document.job().gcode() != expected);
-        QVERIFY(machine.busy() && machine.accessory.activeLease());
+        QVERIFY(machine.busy() && runtimeView(machine).accessory.activeLease());
         QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        auto grbl = coreView(machine);
         for (int i = 0; i < 80 && machine.busy(); ++i) {
             if (grbl->waitingAck)
                 controller.reply("ok\r\n");
@@ -499,7 +808,7 @@ class GrblTest : public QObject {
         }
         QTRY_VERIFY(machine.ready());
         QCOMPARE(controller.commands.mid(cut), expected);
-        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!runtimeView(machine).accessory.activeLease());
         QVERIFY(document.synchronousWorkBlockReason().isEmpty());
         QVERIFY(!document.projectBytes().isEmpty());
         QVERIFY(guardChanges.size() > 1);
@@ -520,9 +829,9 @@ class GrblTest : public QObject {
         Machine machine(&document);
         QVERIFY(machine.simulation() && machine.ready());
         if (activity == "job")
-            machine.start();
+            startPreparedMachine(machine);
         else if (activity == "focus")
-            machine.focus(true);
+            focusMachine(machine, true);
         else
             machine.frame(document.framingBounds("job"));
         QVERIFY(machine.busy() || machine.firing());
@@ -545,7 +854,7 @@ class GrblTest : public QObject {
         QTRY_VERIFY(machine->ready());
         requireReference(*machine);
         controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
-        machine->start();
+        startPreparedMachine(*machine);
         QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
         QSignalSpy guardChanges(&document, &Document::synchronousWorkGuardChanged);
         machine.reset();
@@ -582,9 +891,9 @@ class GrblTest : public QObject {
         QVERIFY(machine.connectHardware(controller.port));
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        auto grbl = coreView(machine);
         grbl->commissionedEnvelope = envelope;
-        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!runtimeView(machine).accessory.activeLease());
         QVERIFY(machine.extractionSafetyError().isEmpty());
         controller.autoAck = controller.respondToStatus = false;
         const auto resets = controller.realtime.count(char(0x18));
@@ -597,7 +906,7 @@ class GrblTest : public QObject {
         QVERIFY(machine.connected() && machine.positionReferenced());
         QVERIFY(!machine.running() && !machine.paused());
         QVERIFY(machine.extractionSafetyError().isEmpty());
-        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!runtimeView(machine).accessory.activeLease());
         acknowledgeWorkZero(controller, *grbl, cut, false);
         QTest::qWait(80); // Last command is ACK-pending, still inside the bounded phase.
         QVERIFY(grbl->status().coordinateUpdatePending);
@@ -610,7 +919,7 @@ class GrblTest : public QObject {
         QVERIFY(!grbl->status().coordinateUpdatePending);
         QVERIFY(machine.connectionVerified() && machine.positionReferenced());
         QVERIFY(machine.extractionSafetyError().isEmpty());
-        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!runtimeView(machine).accessory.activeLease());
         QCOMPARE(machine.x(), 0.);
         QCOMPARE(machine.y(), 0.);
         QCOMPARE(grbl->reportedMachinePosition, machinePoint);
@@ -637,19 +946,19 @@ class GrblTest : public QObject {
         requireReference(machine);
         controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
         if (operation == "actual-lease-only")
-            QVERIFY(machine.accessory.begin(machine.accessoryClock.elapsed()));
+            QVERIFY(runtimeView(machine).accessory.begin(runtimeView(machine).clock.elapsed()));
         else if (operation == "job-flag")
-            machine.accessoryJobActive = true;
+            runtimeView(machine).jobActive = true;
         else if (operation == "focus-flag")
-            machine.accessoryFocusActive = true;
+            runtimeView(machine).focusActive = true;
         else if (operation == "streaming-job")
-            machine.start();
+            startPreparedMachine(machine);
         else if (operation == "focus-pulse")
-            machine.focus(true);
+            focusMachine(machine, true);
         QTest::qWait(20); // Drain already accepted bytes of the existing operation.
-        const auto lease = machine.accessory.activeLease();
-        const auto jobFlag = machine.accessoryJobActive;
-        const auto focusFlag = machine.accessoryFocusActive;
+        const auto lease = runtimeView(machine).accessory.activeLease();
+        const bool jobFlag = runtimeView(machine).jobActive.value();
+        const bool focusFlag = runtimeView(machine).focusActive.value();
         const auto active = machine.busy();
         const auto pulse = machine.firing();
         const auto commands = controller.commands;
@@ -658,9 +967,9 @@ class GrblTest : public QObject {
         QTest::qWait(30);
         QCOMPARE(controller.commands, commands);
         QCOMPARE(controller.realtime.count(char(0x18)), resets);
-        QCOMPARE(machine.accessory.activeLease(), lease);
-        QCOMPARE(machine.accessoryJobActive, jobFlag);
-        QCOMPARE(machine.accessoryFocusActive, focusFlag);
+        QCOMPARE(runtimeView(machine).accessory.activeLease(), lease);
+        QCOMPARE(runtimeView(machine).jobActive, jobFlag);
+        QCOMPARE(runtimeView(machine).focusActive, focusFlag);
         QCOMPARE(machine.busy(), active);
         QCOMPARE(machine.firing(), pulse);
         QVERIFY(machine.positionReferenced());
@@ -679,31 +988,31 @@ class GrblTest : public QObject {
         QVERIFY(machine.connectHardware(controller.port));
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        auto grbl = coreView(machine);
         controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
         const auto resets = controller.realtime.count(char(0x18));
         const auto cut = controller.commands.size();
         if (output == "lease-only")
-            QVERIFY(machine.accessory.begin(machine.accessoryClock.elapsed()));
+            QVERIFY(runtimeView(machine).accessory.begin(runtimeView(machine).clock.elapsed()));
         if (output == "job-flag")
-            machine.accessoryJobActive = true;
+            runtimeView(machine).jobActive = true;
         if (output == "focus-flag")
-            machine.accessoryFocusActive = true;
+            runtimeView(machine).focusActive = true;
         if (output == "lease-only") {
-            QVERIFY(machine.accessory.activeLease());
-            QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+            QVERIFY(runtimeView(machine).accessory.activeLease());
+            QVERIFY(!runtimeView(machine).jobActive && !runtimeView(machine).focusActive);
         }
         grbl->zero(); // Deliberately bypass facade entry denial to exercise its runtime guard.
         if (output == "lease-during-zero") {
             QVERIFY(grbl->status().coordinateUpdatePending);
-            QVERIFY(machine.accessory.begin(machine.accessoryClock.elapsed()));
-            QVERIFY(machine.accessory.activeLease());
-            QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+            QVERIFY(runtimeView(machine).accessory.begin(runtimeView(machine).clock.elapsed()));
+            QVERIFY(runtimeView(machine).accessory.activeLease());
+            QVERIFY(!runtimeView(machine).jobActive && !runtimeView(machine).focusActive);
         }
         QTest::qWait(160);
         QVERIFY(!grbl->status().coordinateUpdatePending);
         QVERIFY(!machine.positionReferenced());
-        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!runtimeView(machine).accessory.activeLease());
         QVERIFY(!machine.extractionSafetyError().isEmpty());
         QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
         QVERIFY(!controller.commands.mid(cut).contains("G10 L20 P1 X0 Y0"));
@@ -726,14 +1035,14 @@ class GrblTest : public QObject {
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
         controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
-        machine.start();
-        QVERIFY(machine.accessory.activeLease());
+        startPreparedMachine(machine);
+        QVERIFY(runtimeView(machine).accessory.activeLease());
         QTest::qWait(20); // Drain the accepted initial RX window before injecting evidence loss.
         const auto cut = controller.commands.size();
         const auto resets = controller.realtime.count(char(0x18));
-        machine.accessoryJobActive = machine.accessoryFocusActive =
+        runtimeView(machine).jobActive = runtimeView(machine).focusActive =
             false; // Deliberate facade flag loss.
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        auto grbl = coreView(machine);
         if (falseCoordinatePhase)
             grbl->workZero =
                 GrblSession::WorkZeroTransaction{grbl->reportedMachinePosition, grbl->offset};
@@ -741,7 +1050,7 @@ class GrblTest : public QObject {
         QTest::qWait(80);
         controller.reply("ok\r\nok\r\nok\r\n"); // Further credits must not continue the old job.
         QTest::qWait(80);
-        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!runtimeView(machine).accessory.activeLease());
         QVERIFY(!machine.positionReferenced());
         QVERIFY(!grbl->status().coordinateUpdatePending);
         QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
@@ -765,7 +1074,7 @@ class GrblTest : public QObject {
         QVERIFY(machine.connectHardware(controller.port));
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        auto grbl = coreView(machine);
         controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
         const auto resets = controller.realtime.count(char(0x18));
         const auto cut = controller.commands.size();
@@ -782,9 +1091,9 @@ class GrblTest : public QObject {
         QTest::qWait(180);
         QVERIFY(!grbl->status().coordinateUpdatePending);
         QVERIFY(!machine.positionReferenced());
-        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!runtimeView(machine).accessory.activeLease());
         QVERIFY(!machine.extractionSafetyError().isEmpty());
-        QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+        QVERIFY(!runtimeView(machine).jobActive && !runtimeView(machine).focusActive);
         QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
         QVERIFY(!controller.commands.mid(cut).contains("G10 L20 P1 X0 Y0"));
         QVERIFY(!controller.realtime.contains('~'));
@@ -1444,14 +1753,14 @@ class GrblTest : public QObject {
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
         controller.autoAck = false;
-        machine.start();
-        QVERIFY(machine.accessoryJobActive);
-        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        startPreparedMachine(machine);
+        QVERIFY(runtimeView(machine).jobActive);
+        auto grbl = coreView(machine);
         grbl->pause();
         controller.status = "Hold";
         controller.report();
         QTRY_VERIFY(grbl->paused && controller.realtime.contains('!'));
-        QVERIFY(!machine.accessory.releaseAfterSafeClearance(true));
+        QVERIFY(!runtimeView(machine).accessory.releaseAfterSafeClearance(true));
         controller.respondToStatus = false;
         controller.respondToReset = false;
         const auto resets = controller.realtime.count(char(0x18));
@@ -1461,7 +1770,7 @@ class GrblTest : public QObject {
         grbl->pause();
         QTest::qWait(180);
         QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
-        QVERIFY(!machine.accessoryJobActive);
+        QVERIFY(!runtimeView(machine).jobActive);
         QVERIFY(!machine.positionReferenced());
         QVERIFY(!machine.extractionSafetyError().isEmpty());
         QVERIFY(!controller.realtime.contains('~'));
@@ -1479,21 +1788,21 @@ class GrblTest : public QObject {
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
         controller.autoAck = false;
-        machine.start();
-        QVERIFY(machine.accessoryJobActive);
+        startPreparedMachine(machine);
+        QVERIFY(runtimeView(machine).jobActive);
         QTest::qWait(20); // Drain the accepted initial RX window.
         controller.respondToStatus = false;
         controller.respondToReset = false;
         const auto resets = controller.realtime.count(char(0x18));
-        machine.accessoryWatchdog.stop(); // Order session feedback before watchdog evaluation.
+        runtimeView(machine).watchdog.stop(); // Order session feedback before watchdog evaluation.
         controller.reply("Grbl 1.3a ['$' for help]\r\n");
         QTest::qWait(10);
         controller.reply("ok\r\n"); // Fresh handshake M5 ACK triggers changed, not a host reset.
         QTest::qWait(20);
-        machine.accessoryWatchdog.start(50);
+        runtimeView(machine).watchdog.start(50);
         QTest::qWait(100);
         QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
-        QVERIFY(!machine.accessoryJobActive);
+        QVERIFY(!runtimeView(machine).jobActive);
         QVERIFY(!machine.positionReferenced());
         QVERIFY(!machine.extractionSafetyError().isEmpty());
         QVERIFY(!controller.realtime.contains('~'));
@@ -1685,14 +1994,14 @@ class GrblTest : public QObject {
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
         controller.autoAck = false;
-        machine.focus(true);
+        focusMachine(machine, true);
         QVERIFY(machine.firing());
-        QVERIFY(machine.accessoryFocusActive);
-        QVERIFY(!machine.accessory.releaseAfterSafeClearance(true));
-        QVERIFY(!machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, false));
+        QVERIFY(runtimeView(machine).focusActive);
+        QVERIFY(!runtimeView(machine).accessory.releaseAfterSafeClearance(true));
+        QVERIFY(!runtimeView(machine).accessory.request(AccessoryContract::Role::EnclosureExtraction, false));
         machine.focus(false);
-        QVERIFY(!machine.firing());
-        QVERIFY(!machine.accessoryFocusActive);
+        QTRY_VERIFY(!machine.firing());
+        QVERIFY(!runtimeView(machine).focusActive);
         QVERIFY(!machine.extractionSafetyError().isEmpty());
         QVERIFY(!controller.commands.contains("M9"));
     }
@@ -1706,18 +2015,18 @@ class GrblTest : public QObject {
             QTRY_VERIFY(machine.ready());
             requireReference(machine);
             QVERIFY(machine.extractionSafetyError().isEmpty());
-            QVERIFY(!machine.accessoryJobActive);
+            QVERIFY(!runtimeView(machine).jobActive);
             if (reset) {
                 controller.reply("Grbl 1.3a ['$' for help]\r\n");
                 QTRY_VERIFY(
-                    !machine.accessory.verified(AccessoryContract::Role::EnclosureExtraction) ||
-                    machine.accessory.state(AccessoryContract::Role::EnclosureExtraction)
+                    !runtimeView(machine).accessory.verified(AccessoryContract::Role::EnclosureExtraction) ||
+                    runtimeView(machine).accessory.state(AccessoryContract::Role::EnclosureExtraction)
                             .physical == AccessoryContract::PhysicalState::Unknown);
             } else {
                 machine.toggleConnection();
-                QVERIFY(!machine.connected());
+                QTRY_VERIFY(!machine.connected());
                 QCOMPARE(
-                    machine.accessory.state(AccessoryContract::Role::EnclosureExtraction).physical,
+                    runtimeView(machine).accessory.state(AccessoryContract::Role::EnclosureExtraction).physical,
                     AccessoryContract::PhysicalState::Unknown);
             }
             QVERIFY(!machine.extractionSafetyError().isEmpty());
@@ -1732,14 +2041,17 @@ class GrblTest : public QObject {
         QVERIFY(machine.connectHardware(controller.port));
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
-        QTRY_VERIFY(machine.lastProcessingSafetyErrors.isEmpty());
+        QStringList observedErrors = machine.processingSafetyErrors();
+        QObject consumerContext;
+        connect(&machine, &Simulator::changed, &consumerContext, [&] { observedErrors = machine.processingSafetyErrors(); });
+        QTRY_VERIFY(observedErrors.isEmpty());
         QSignalSpy changes(&machine, &Simulator::changed);
         controller.respondToStatus = false;
         QTRY_VERIFY_WITH_TIMEOUT(!machine.extractionSafetyError().isEmpty(), 4000);
         QTRY_VERIFY_WITH_TIMEOUT(
-            machine.lastProcessingSafetyErrors.contains(machine.extractionSafetyError()), 500);
+            observedErrors.contains(machine.extractionSafetyError()), 500);
         QVERIFY(!changes.isEmpty());
-        QVERIFY(!machine.accessoryJobActive);
+        QVERIFY(!runtimeView(machine).jobActive);
     }
     void facadeRejectsUnknownExtractionDespiteSyntheticMotionContract() {
         Controller controller;
@@ -1751,12 +2063,12 @@ class GrblTest : public QObject {
         QVERIFY(machine.connectHardware(controller.port));
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
-        machine.accessory = AccessoryContract(true); // No real mapping exists in production.
+        runtimeView(machine).accessory = AccessoryContract(true); // No real mapping exists in production.
         QVERIFY(machine.motionSafetyError().isEmpty());
         QVERIFY(machine.extractionSafetyError().contains("Ausgangszuordnung"));
         const auto before = controller.commands;
-        machine.start();
-        machine.focus(true);
+        startPreparedMachine(machine);
+        focusMachine(machine, true);
         QTest::qWait(60);
         QCOMPARE(controller.commands, before);
         QVERIFY(!machine.firing());
@@ -1771,14 +2083,14 @@ class GrblTest : public QObject {
         QVERIFY(machine.connectHardware(controller.port));
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
-        controller.status = "Run";
-        machine.start();
+        controller.runOnPoweredCommand = true;
+        startPreparedMachine(machine);
         QTRY_VERIFY(controller.commands.contains("M4 S800"));
         const auto resetCount = controller.realtime.count(char(0x18));
         QTRY_VERIFY_WITH_TIMEOUT(controller.realtime.count(char(0x18)) > resetCount, 4500);
         QVERIFY(!controller.realtime.contains('~'));
         QVERIFY(!controller.commands.contains("M9"));
-        QVERIFY(!machine.accessoryJobActive);
+        QVERIFY(!runtimeView(machine).jobActive);
     }
     void sessionResumeRejectsLostMotionEvidenceBeforeCycleStart_data() {
         QTest::addColumn<QString>("loss");
@@ -1955,16 +2267,16 @@ class GrblTest : public QObject {
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
         // Independent synthetic airflow evidence. Never a real-device grant.
-        machine.accessory = AccessoryContract(true);
-        QVERIFY(machine.accessory.configure(
+        runtimeView(machine).accessory = AccessoryContract(true);
+        QVERIFY(runtimeView(machine).accessory.configure(
             AccessoryContract::Role::EnclosureExtraction,
             {"synthetic-stream-extraction", "PTY regression only", true}));
         const auto request =
-            machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
+            runtimeView(machine).accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
         QVERIFY(request);
-        QVERIFY(machine.accessory.acknowledge(*request, true));
-        const auto now = machine.accessoryClock.elapsed();
-        QVERIFY(machine.accessory.observe(AccessoryContract::Role::EnclosureExtraction,
+        QVERIFY(runtimeView(machine).accessory.acknowledge(*request, true));
+        const auto now = runtimeView(machine).clock.elapsed();
+        QVERIFY(runtimeView(machine).accessory.observe(AccessoryContract::Role::EnclosureExtraction,
                                           AccessoryContract::PhysicalState::Flowing,
                                           "synthetic flow", now, now));
         QVERIFY(machine.processingSafetyErrors().isEmpty());
@@ -1972,9 +2284,9 @@ class GrblTest : public QObject {
         controller.status = "Run";
         const auto first = controller.commands.size();
         const auto resets = controller.realtime.count(char(0x18));
-        machine.start();
+        startPreparedMachine(machine);
         QVERIFY(machine.running());
-        QVERIFY(machine.accessoryJobActive);
+        QVERIFY(runtimeView(machine).jobActive);
         int credits = 0;
         bool poweredTargetQueued = false;
         for (int attempt = 0; attempt < 100 && !poweredTargetQueued; ++attempt) {
@@ -1993,10 +2305,10 @@ class GrblTest : public QObject {
             // Deliberately order ControllerSession.changed before watchdog
             // evaluation. Safety must not depend on which overdue Qt timer or
             // incoming status callback runs first after a delayed event loop.
-            machine.accessoryWatchdog.stop();
+            runtimeView(machine).watchdog.stop();
             QElapsedTimer wait;
             wait.start();
-            while (wait.elapsed() < 1900 && machine.sessionWasVerified &&
+            while (wait.elapsed() < 1900 && runtimeView(machine).wasVerified &&
                    controller.realtime.count(char(0x18)) == resets) {
                 if (controller.commands.size() - first > credits) {
                     controller.reply("ok\r\n");
@@ -2006,7 +2318,7 @@ class GrblTest : public QObject {
             }
             QVERIFY(!machine.connectionVerified() ||
                     controller.realtime.count(char(0x18)) > resets);
-            machine.accessoryWatchdog.start(50);
+            runtimeView(machine).watchdog.start(50);
         } else {
             controller.reply("<Run|MPos:nan,0,0|WCO:0,0,0|FS:5000,800>\r\n");
             QTest::qWait(20);
@@ -2358,11 +2670,12 @@ class GrblTest : public QObject {
         machine.home();
         QTest::qWait(30);
         QVERIFY(!c.commands.contains("$H"));
-        static_cast<GrblSession *>(machine.session.get())->commissionedHomingContract = true;
+        coreView(machine)->commissionedHomingContract = true;
         machine.home();
         QTRY_VERIFY(machine.positionReferenced());
         QVERIFY(!machine.motionSafetyError().isEmpty());
         machine.useSimulator();
+        QTRY_VERIFY(machine.simulation());
         QVERIFY(machine.motionSafetyError().isEmpty());
         QVERIFY(machine.homingSafetyError().isEmpty());
         QVERIFY(machine.ready());
@@ -2547,19 +2860,20 @@ class GrblTest : public QObject {
         QVERIFY(!controller.realtime.contains('~'));
         QCOMPARE(controller.commands, QStringList({"M5 S0", "$I", "$$", "$G"}));
         requireReference(machine);
-        controller.status = "Run";
-        machine.start();
+        controller.runOnPoweredCommand = true;
+        startPreparedMachine(machine);
         QTRY_VERIFY(controller.commands.contains("M4 S800"));
         QVERIFY(machine.connectionVerified()); // Busy is distinct from verified connectivity.
         machine.pause();
         QVERIFY(machine.connectionVerified());
         machine.stop();
-        QVERIFY(!machine.connectionVerified());
+        QTRY_VERIFY(!machine.connectionVerified());
         controller.resetState = "Idle";
         QTRY_VERIFY(machine.ready());
         QVERIFY(machine.connectionVerified());
         const auto resets = controller.realtime.count(char(0x18));
         machine.useSimulator();
+        QTRY_VERIFY(machine.simulation());
         QVERIFY(!machine.connectionVerified());
         QVERIFY(machine.connectHardware(controller.port));
         QVERIFY(!machine.connectionVerified());
@@ -2625,17 +2939,17 @@ class GrblTest : public QObject {
             Document document;
             document.newProject();
             document.addShape("rect");
-            controller.status = "Run";
-            session->start(document.job());
+            controller.runOnPoweredCommand = true;
+            startPreparedSession(*session, document.job());
             QTRY_VERIFY(controller.commands.contains("M4 S800"));
             QVERIFY(session->status().executing);
             if (mode == "paused") {
                 session->pause();
-                QVERIFY(session->status().paused);
+                QTRY_VERIFY(session->status().paused);
             }
         } else if (mode == "focus") {
-            session->focus(true);
-            QVERIFY(session->status().firing);
+            ControllerRuntimeTestAccess::nativeFocus(runtime(*session));
+            QTRY_VERIFY(session->status().firing);
         } else if (mode == "unplugged") {
             controller.disconnectPort();
             QTRY_VERIFY(!session->status().connected);
@@ -2669,8 +2983,8 @@ class GrblTest : public QObject {
         QVERIFY(machine->connectHardware(controller.port));
         QTRY_VERIFY(machine->ready());
         requireReference(*machine);
-        controller.status = "Run";
-        machine->start();
+        controller.runOnPoweredCommand = true;
+        startPreparedMachine(*machine);
         QTRY_VERIFY(controller.commands.contains("M4 S800"));
         QVERIFY(machine->running());
         QSignalSpy changes(machine.get(), &Simulator::changed);
@@ -2686,7 +3000,7 @@ class GrblTest : public QObject {
         QVERIFY2(session, qPrintable(error));
         QVERIFY(error.isEmpty());
         QCOMPARE(session->deviceProfile().outputFingerprint(), reference.outputFingerprint());
-        QVERIFY(!session->status().connected);
+        QTRY_VERIFY(!session->status().connected);
         QVERIFY(!session->status().ready);
         for (int variant = 0; variant < 3; ++variant) {
             auto json = reference.toJson();
@@ -2729,21 +3043,21 @@ class GrblTest : public QObject {
         Document document;
         document.newProject();
         document.addShape("rect");
-        controller.status = "Run";
-        session->start(document.job());
+        controller.runOnPoweredCommand = true;
+        startPreparedSession(*session, document.job());
         QTRY_VERIFY(session->status().executing);
         QTRY_VERIFY(controller.commands.contains("M4 S800"));
         session->pause();
-        QVERIFY(session->status().paused);
+        QTRY_VERIFY(session->status().paused);
         QVERIFY(!session->status().ready);
         session->pause();
-        QVERIFY(!session->status().paused);
+        QTRY_VERIFY(!session->status().paused);
         session->stop();
         controller.status = "Idle";
         QTRY_VERIFY(session->status().ready);
         const auto afterStop = controller.commands.count("M4 S800");
         session->close();
-        QVERIFY(!session->status().connected);
+        QTRY_VERIFY(!session->status().connected);
         QVERIFY(!session->status().ready);
         QVERIFY(snapshot.connected);
         QVERIFY(session->open(controller.port));
@@ -3266,12 +3580,14 @@ class GrblTest : public QObject {
         QTRY_VERIFY(machine.ready());
         requireReference(machine);
         QVERIFY(!machine.simulation());
+        QTRY_VERIFY_WITH_TIMEOUT(machine.jobPrepared(), 5000); // Same admission condition as the real UI.
         const int first = c.commands.size();
         const auto expected = d.job().gcode();
         QVERIFY(QMetaObject::invokeMethod(&machine, "start"));
         QTRY_VERIFY_WITH_TIMEOUT(!machine.busy(), 4000);
         QCOMPARE(c.commands.mid(first), expected);
         machine.useSimulator();
+        QTRY_VERIFY(machine.simulation());
         QVERIFY(machine.simulation());
         QVERIFY(machine.ready());
     }
