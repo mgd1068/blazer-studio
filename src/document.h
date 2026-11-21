@@ -206,6 +206,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void addShape(const QString &kind);
     Q_INVOKABLE bool copySelectionToClipboard(bool cut = false);
     Q_INVOKABLE bool pasteFromClipboard(bool inPlace = false);
+    bool insertArtGeometry(const QByteArray &geometry, double xMm, double yMm);
     Q_INVOKABLE void removeSelected();
     Q_INVOKABLE void duplicateSelected();
     Q_INVOKABLE void toggleVisible(int row);
