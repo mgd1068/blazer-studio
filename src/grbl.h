@@ -10,6 +10,8 @@
 #include <QStringList>
 #include <QTimer>
 #include <optional>
+#include <functional>
+class PreparedControllerJob;
 class GrblSession : public ControllerSession {
     Q_OBJECT
   public:
@@ -80,6 +82,11 @@ class GrblSession : public ControllerSession {
 
   private:
     friend class GrblTest; // Offline PTY fixtures may supply a synthetic machine contract.
+    friend class ControllerRuntimeWorker;
+    friend class ControllerRuntimeTestAccess;
+    std::function<bool()> dispatchCancelled;
+    int queueHead = 0;
+    bool startPrepared(const PreparedControllerJob &job);
     bool commands(const QStringList &lines, bool buffered = false);
     bool statusFresh() const;
     ControllerDiagnostics::LiveState diagnosticState() const;

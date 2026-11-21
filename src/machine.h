@@ -3,6 +3,7 @@
 #include "simulator.h"
 #include "accessorycontract.h"
 #include <QElapsedTimer>
+#include <QPointer>
 #include <memory>
 class Document;
 class Machine : public Simulator {
@@ -22,6 +23,9 @@ class Machine : public Simulator {
     Q_PROPERTY(bool statusFresh READ statusFresh NOTIFY changed)
     Q_PROPERTY(qint64 statusAgeMs READ statusAgeMs NOTIFY changed)
     Q_PROPERTY(QString connectionPhase READ connectionPhase NOTIFY changed)
+    Q_PROPERTY(bool jobPreparing READ jobPreparing NOTIFY changed)
+    Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
+    Q_PROPERTY(QString prepareReason READ prepareReason NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
     explicit Machine(Document *document, QObject *parent = nullptr,
@@ -40,7 +44,7 @@ class Machine : public Simulator {
         return live && session ? session->status().homingSafetyError : QString();
     }
     QString extractionSafetyError() const {
-        return live ? accessory.preflightError(accessoryClock.elapsed()) : QString();
+        return live && session ? session->status().extractionSafetyError : QString();
     }
     QStringList processingSafetyErrors() const {
         if (!live) return {};
@@ -76,6 +80,9 @@ class Machine : public Simulator {
     bool statusFresh() const;
     qint64 statusAgeMs() const;
     QString connectionPhase() const;
+    bool jobPreparing() const;
+    bool jobPrepared() const;
+    QString prepareReason() const;
     Q_INVOKABLE void registerFocusControl(QObject *control);
     Q_INVOKABLE void beginFocus();
     Q_INVOKABLE void endFocus();
@@ -128,13 +135,9 @@ class Machine : public Simulator {
     void syncDeviceProfile();
     bool live = false;
     const HardwareAccess hardwareAccess;
-    AccessoryContract accessory{true};
-    QElapsedTimer accessoryClock;
-    bool accessoryJobActive = false;
-    bool accessoryFocusActive = false;
-    QTimer accessoryWatchdog;
+    bool pendingSimulator = false;
+    QPointer<QObject> focusControl;
     QStringList lastProcessingSafetyErrors;
-    bool sessionWasVerified = false, sessionWasReferenced = false;
     QByteArray previewDeviceBinding, simulatorFrameNonce, previewFrame;
     QPointF previewPoint;
     quint64 previewPositionRevision = 0;

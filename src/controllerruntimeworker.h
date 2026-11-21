@@ -22,11 +22,19 @@ class ControllerRuntimeWorker final : public QObject {
     QElapsedTimer m_accessoryClock;
     QTimer *m_watchdog = nullptr; // Created in initialize(), after worker affinity is established.
     bool m_jobActive = false, m_focusActive = false;
+    bool m_wasVerified = false, m_wasReferenced = false;
+    quint64 m_lastFocusInteraction = 0;
+    PreparedControllerJob::Ptr m_activePrepared;
     quint64 m_connectionEpoch = 0, m_sequence = 0;
     void initialize();
+  private slots:
     void drain();
+  private:
     void watchdog();
     void publish();
+    void coreChanged();
+    bool cancelDispatch();
+    void retirePrepared();
     void shutdown();
   signals:
     void latestAvailable();

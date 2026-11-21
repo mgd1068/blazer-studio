@@ -1,6 +1,7 @@
 #include "controllersession.h"
 #include "controlleradapter.h"
 #include "grbl.h"
+#include "controllerruntime.h"
 #include <QSerialPortInfo>
 namespace {
 bool supported(const DeviceProfile &profile, QString &error) {
@@ -16,7 +17,7 @@ std::unique_ptr<ControllerSession> ControllerSessions::create(const DeviceProfil
     error.clear();
     if (!supported(profile, error))
         return {};
-    return std::make_unique<GrblSession>(nullptr, profile);
+    return std::make_unique<ControllerRuntimeSession>(profile);
 }
 QStringList ControllerSessions::availableEndpoints(const DeviceProfile &profile) {
     QString error;

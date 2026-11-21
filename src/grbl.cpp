@@ -1,6 +1,7 @@
 #include "grbl.h"
 #include "geometry.h"
 #include "grblwirenumbers.h"
+#include "preparedcontrollerjob.h"
 #include <QMap>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
@@ -413,6 +414,7 @@ void GrblSession::handshake() {
     sent = rxBytes = 0;
     buffering = false;
     overrideFeedback = overrideReadbackPending = false;
+    queueHead = 0;
     queue = {"M5 S0", "$I", "$$", "$G"};
     total = queue.size();
     acked = 0;
@@ -431,6 +433,7 @@ void GrblSession::close() {
     timeout.stop();
     focusTimer.stop();
     queue.clear();
+    queueHead = 0;
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
@@ -472,6 +475,7 @@ void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause
     timeout.stop();
     focusTimer.stop();
     queue.clear();
+    queueHead = 0;
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
@@ -498,8 +502,14 @@ void GrblSession::receive() {
         fail("Ungültig lange GRBL-Antwort.", ControllerDiagnostics::FaultCause::InvalidReply);
         return;
     }
-    int end;
+    int end, processed = 0;
     while ((end = input.indexOf('\n')) >= 0) {
+        if (dispatchCancelled && dispatchCancelled())
+            return;
+        if (++processed > 32) {
+            QMetaObject::invokeMethod(this, &GrblSession::receive, Qt::QueuedConnection);
+            return;
+        }
         auto s = input.left(end).trimmed();
         input.remove(0, end + 1);
         if (!s.isEmpty())
@@ -640,7 +650,7 @@ void GrblSession::line(const QByteArray &s) {
         laserMode = s.mid(4).trimmed() == "1";
     if (s.startsWith("$22="))
         homing = s.mid(4).trimmed() == "1";
-    if (s == "error:9" && handshaking && !queue.isEmpty() && queue.first().startsWith("M5")) {
+    if (s == "error:9" && handshaking && !queue.isEmpty() && queue[queueHead].startsWith("M5")) {
         diagnostic.protocolFault(false, 9);
         diagnostic.rejected(9);
         QScopedValueRollback<bool> auditNormalization(diagnosticNormalizedAck, true);
@@ -804,6 +814,7 @@ void GrblSession::line(const QByteArray &s) {
                 return;
             }
             queue.clear();
+    queueHead = 0;
             inFlight.clear();
             sent = rxBytes = 0;
             buffering = false;
@@ -900,8 +911,10 @@ void GrblSession::line(const QByteArray &s) {
             return;
         waitingAck = buffering && !inFlight.isEmpty();
         timeout.stop();
-        if (!queue.isEmpty())
-            queue.removeFirst();
+        if (!queue.isEmpty() && ++queueHead >= queue.size()) {
+            queue.clear();
+            queueHead = 0;
+        }
         ++acked;
         progress = total ? std::min(.99, double(acked) / total) : 0;
         if (queue.isEmpty()) {
@@ -964,7 +977,7 @@ void GrblSession::pump() {
     if (!connected() || paused || queue.isEmpty() || (!buffering && waitingAck))
         return;
     do {
-        int index = buffering ? sent : 0;
+        int index = queueHead + (buffering ? sent : 0);
         if (index >= queue.size())
             break;
         auto bytes = queue[index].toLatin1() + "\n";
@@ -981,6 +994,8 @@ void GrblSession::pump() {
             if (queue[index] == "$G")
                 workZero->modalRequested = true;
         }
+        if (dispatchCancelled && dispatchCancelled())
+            return;
         if (serial.write(bytes) != bytes.size()) {
             fail("Serieller Schreibfehler.", ControllerDiagnostics::FaultCause::WriteFailure);
             return;
@@ -1007,6 +1022,7 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = buffered;
+    queueHead = 0;
     queue = lines;
     total = queue.size();
     acked = 0;
@@ -1015,6 +1031,26 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     pump();
     emit changed();
     return connected() && busy();
+}
+bool GrblSession::startPrepared(const PreparedControllerJob &job) {
+    diagnostic.request(ControllerDiagnostics::Action::Start);
+    if (!job.valid() || !ready() || !verified() || !positionReferenced ||
+        !motionSafetyError().isEmpty() || !insideReportedMachineBed() ||
+        job.profileFingerprint() != m_deviceProfile.outputFingerprint() ||
+        job.driverId() != m_deviceProfile.driverId() || job.transport() != m_deviceProfile.transport() ||
+        job.mediaType() != "text/x-gcode") {
+        append("Vorbereiteter Auftrag nicht für den aktuellen Controllerzustand freigegeben.");
+        return false;
+    }
+    const auto bounds = job.workBounds();
+    for (auto point : {bounds.topLeft(), bounds.topRight(), bounds.bottomLeft(), bounds.bottomRight(),
+                       job.firstApproach()}) {
+        if (!std::isfinite(point.x()) || !std::isfinite(point.y()) || !insideMachineBed(point)) {
+            append("Vorbereiteter Auftrag liegt mit aktuellem WCO außerhalb des bestätigten Fahrraums.");
+            return false;
+        }
+    }
+    return commands(job.lines(), true);
 }
 void GrblSession::start(const JobPlan &job) {
     diagnostic.request(ControllerDiagnostics::Action::Start);
@@ -1078,6 +1114,8 @@ void GrblSession::pause() {
     if (!connected() || !busy() || firing || handshaking)
         return;
     if (paused) {
+        if (dispatchCancelled && dispatchCancelled())
+            return;
         const auto error = motionSafetyError();
         const bool verifiedState = verified();
         const bool inside = insideMachineBed(position);
@@ -1120,6 +1158,7 @@ void GrblSession::stop() {
     pauseRequested = false;
     knownOutput = false;
     queue.clear();
+    queueHead = 0;
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
@@ -1174,6 +1213,7 @@ void GrblSession::home() {
     if (connected() && controllerState == "Alarm" && !busy() && version && laserMode &&
         powerScale && reportMm && bedWidth && bedHeight) {
         diagnostic.beginStream(false, diagnosticState());
+        queueHead = 0;
         queue = {"$H"};
         total = 1;
         acked = 0;
@@ -1212,6 +1252,7 @@ void GrblSession::zero() {
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = false;
+    queueHead = 0;
     queue = {"M5 S0", "G21", "G90", "G10 L20 P1 X0 Y0", "G54", "$G"};
     total = queue.size();
     acked = 0;
@@ -1334,6 +1375,8 @@ bool GrblSession::overrides(int feed, int power) {
     int powerDelta = power - 10;
     bytes.append(QByteArray(powerDelta / 10, char(0x9a)));
     bytes.append(QByteArray(powerDelta % 10, char(0x9c)));
+    if (dispatchCancelled && dispatchCancelled())
+        return false;
     const bool accepted = serial.write(bytes) == bytes.size();
     if (accepted) {
         overrideReadbackPending = true;

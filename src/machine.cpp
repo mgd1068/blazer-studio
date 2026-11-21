@@ -1,4 +1,5 @@
 #include "machine.h"
+#include "controllerruntime.h"
 #include "document.h"
 #include <QPointer>
 #include <QCryptographicHash>
@@ -6,37 +7,15 @@
 #include <QUuid>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
-    accessoryClock.start();
     simulatorFrameNonce = QUuid::createUuid().toRfc4122();
-    accessoryWatchdog.setInterval(50);
-    connect(&accessoryWatchdog, &QTimer::timeout, this, [this] {
-        const auto errors = processingSafetyErrors();
-        if (errors != lastProcessingSafetyErrors) {
-            lastProcessingSafetyErrors = errors;
-            emit changed(); // Also refresh stale airflow/status evidence while idle.
-        }
-        const auto status = session ? session->status() : ControllerStatus{};
-        const bool coordinateUpdate = status.coordinateUpdatePending && !accessory.activeLease() &&
-            !accessoryJobActive && !accessoryFocusActive && !status.firing;
-        const bool unsafeMotion = live && status.executing && !status.referencing && !status.resetting &&
-            !coordinateUpdate &&
-            (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty());
-        const bool unsafeOutput = live && (accessory.activeLease() || accessoryJobActive || accessoryFocusActive || firing()) &&
-            !errors.isEmpty();
-        if (unsafeMotion || unsafeOutput) {
-            document->notify("Auftrag abgebrochen: " + errors.join("\n"));
-            stop();
-        }
-    });
-    accessoryWatchdog.start();
     document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
         return !self || (!self->busy() && !self->firing() &&
                          (!self->session || !self->session->status().connected));
     });
     document->addSynchronousWorkGuard([self = QPointer<Machine>(this)]() -> QString {
         if (!self || self->simulation()) return {};
-        if (self->busy() || self->firing() || self->accessory.activeLease() ||
-            self->accessoryJobActive || self->accessoryFocusActive)
+        if (self->busy() || self->firing() || self->session->status().accessoryLeaseActive ||
+            self->session->status().accessoryJobActive || self->session->status().accessoryFocusActive)
             return "Schwere Datei- und Geometrieaktionen warten, bis die aktive Geräteaktion beendet ist. STOPP bleibt verfügbar; die automatische Sicherung wird danach nachgeholt.";
         return {};
     });
@@ -47,6 +26,10 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     connect(d, &Document::deviceProfileChanged, this, &Machine::syncDeviceProfile);
     connect(this, &Simulator::changed, this, &Machine::refreshPreviewPosition);
     connect(d, &Document::changed, this, &Machine::refreshPreviewPosition);
+    connect(d, &Document::changed, this, [this] {
+        if (live && !document->planningBusy())
+            if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get())) runtime->prepare(document->job());
+    });
     refreshPreviewPosition();
 }
 void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
@@ -85,58 +68,24 @@ void Machine::syncDeviceProfile() {
                        document->deviceProfile().outputFingerprint())
         return;
     live = false;
-    accessory = AccessoryContract(true);
-    accessoryJobActive = false;
-    accessoryFocusActive = false;
-    sessionWasVerified = sessionWasReferenced = false;
     QString error;
     session = ControllerSessions::create(document->deviceProfile(), error);
     if (session)
         connect(session.get(), &ControllerSession::changed, this, [this] {
-            const auto status = session->status();
-            if (live && !status.connected) {
-                accessory.transition(AccessoryContract::Event::Disconnect);
-                accessoryJobActive = false;
-                accessoryFocusActive = false;
-            } else if (live && ((sessionWasVerified && !status.verified) ||
-                                (sessionWasReferenced && !status.positionReferenced))) {
-                // Preserve the loss boundary before a protective STOPP emits
-                // nested session notifications. Never erase the active-output
-                // evidence and then rely on a watchdog to rediscover it.
-                const bool mustStop = (status.executing && !status.referencing && !status.resetting) || status.firing ||
-                    accessory.activeLease() || accessoryJobActive || accessoryFocusActive;
-                sessionWasVerified = status.verified;
-                sessionWasReferenced = status.positionReferenced;
-                if (status.coordinateUpdatePending && !accessory.activeLease() &&
-                    !accessoryJobActive && !accessoryFocusActive && !status.firing) {
-                    // Only the adapter's bounded, non-emitting WorkZero
-                    // transaction may await its fresh coordinate readback.
-                    emit changed();
-                    return;
-                }
-                accessory.transition(AccessoryContract::Event::Fault);
-                if (status.resetting && !status.firing) {
-                    // The adapter has already requested a host reset. Fault the
-                    // lease without sending a second reset from its callback.
-                    // A mere handshake is not this host-reset boundary.
-                    accessoryJobActive = false;
-                    accessoryFocusActive = false;
-                } else if (mustStop) {
-                    document->notify("Auftrag abgebrochen: Positions- oder Verbindungsnachweis verloren.");
-                    stop();
-                    return;
-                }
-            } else if (live && (accessoryJobActive || accessoryFocusActive) && !status.executing && !status.firing) {
-                accessoryJobActive = false;
-                accessoryFocusActive = false;
-                accessory.transition(AccessoryContract::Event::Complete);
+            if (pendingSimulator && !session->status().connected && !session->status().occupied) {
+                pendingSimulator = false;
+                live = false;
+                simulatorFrameNonce = QUuid::createUuid().toRfc4122();
+                Simulator::stop();
+                refreshPreviewPosition();
             }
-            sessionWasVerified = status.verified;
-            sessionWasReferenced = status.positionReferenced;
             emit changed();
         });
     else
         document->notify(error);
+    if (session)
+        connect(session.get(), &ControllerSession::connectionRequestFinished,
+                this, &Machine::connectionRequestFinished);
     Simulator::setDeviceProfile(document->deviceProfile());
     emit changed();
 }
@@ -146,42 +95,44 @@ QStringList Machine::ports() const {
     return ControllerSessions::availableEndpoints(document->deviceProfile());
 }
 bool Machine::connectHardware(const QString &port) {
-    if (hardwareAccess == HardwareAccess::Disabled) {
-        document->notify("Hardwareanschluss in diesem Offline-Lauf deaktiviert.");
-        return false;
-    }
-    const auto profileError = DeviceBackends::runtimeSupportError(document->deviceProfile());
-    if (!profileError.isEmpty()) {
-        document->notify(profileError);
-        return false;
-    }
-    if (!session) {
-        document->notify("Kein Verbindungsadapter für dieses Geräteprofil verfügbar.");
-        return false;
-    }
-    if (busy() || firing())
-        return false;
-    if (session->status().connected)
-        session->close();
-    Simulator::stop();
-    accessory = AccessoryContract(true);
-    accessoryJobActive = false;
-    accessoryFocusActive = false;
-    live = true;
-    document->clearPreviewPosition();
-    bool result = session->open(port);
-    emit changed();
-    return result;
+    return requestConnectHardware(port, {}).enqueued;
 }
+ControllerSubmission Machine::requestConnectHardware(const QString &port, const QByteArray &binding) {
+    if (hardwareAccess == HardwareAccess::Disabled)
+        return {0,false,"Hardwareanschluss in diesem Offline-Lauf deaktiviert."};
+    const auto error = DeviceBackends::runtimeSupportError(document->deviceProfile());
+    if (!error.isEmpty()) return {0,false,error};
+    if (!session || occupied() || session->status().connected)
+        return {0,false,"Verbindung oder Geräteaktion noch belegt."};
+    Simulator::stop(); live = true; pendingSimulator = false;
+    document->clearPreviewPosition();
+    const auto result=session->requestOpen(port,binding);
+    if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); runtime && !document->planningBusy()) runtime->prepare(document->job());
+    if (!result.enqueued) document->notify(result.reason);
+    emit changed(); return result;
+}
+bool Machine::occupied() const { return busy() || firing() || (live && session && session->status().occupied); }
+bool Machine::requestPending() const { return pendingSimulator || (live && session && session->status().requestPending); }
+bool Machine::statusFresh() const { return live && session && session->status().statusFresh; }
+qint64 Machine::statusAgeMs() const { return live && session ? session->status().statusAgeMs : -1; }
+QString Machine::connectionPhase() const { return live && session ? session->status().connectionPhase : "closed"; }
+bool Machine::jobPreparing() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return live && runtime && runtime->jobPreparing(); }
+bool Machine::jobPrepared() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return !live || (runtime&&runtime->jobPrepared()); }
+QString Machine::prepareReason() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return live&&runtime?runtime->prepareReason():QString(); }
+
+void Machine::registerFocusControl(QObject *control) { focusControl = control; }
+void Machine::beginFocus() {
+    if (!live) { Simulator::focus(true); return; }
+    document->notify("Fokus gesperrt: gültiger nativer Press-Zeitnachweis fehlt.");
+}
+void Machine::endFocus() { focus(false); }
 void Machine::useSimulator() {
-    accessory.transition(AccessoryContract::Event::Disconnect);
-    accessoryJobActive = false;
-    accessoryFocusActive = false;
-    if (session)
-        session->close();
-    live = false;
+    if (live && session && (session->status().connected || session->status().occupied)) {
+        pendingSimulator = true; session->close(); emit changed(); return;
+    }
+    pendingSimulator = false; live = false;
     simulatorFrameNonce = QUuid::createUuid().toRfc4122();
-    emit changed();
+    Simulator::stop(); refreshPreviewPosition(); emit changed();
 }
 void Machine::toggleConnection() {
     if (live)
@@ -197,7 +148,7 @@ void Machine::jog(double x, double y) {
 }
 void Machine::setWorkZero() {
     if (!live || !session) return;
-    if (busy() || firing() || accessory.activeLease() || accessoryJobActive || accessoryFocusActive) {
+    if (busy() || firing() || session->status().accessoryLeaseActive || session->status().accessoryJobActive || session->status().accessoryFocusActive) {
         document->notify("Arbeitsnullpunkt gesperrt: erst den aktiven Auftrag, Fokus oder die laufende Geräteaktion beenden.");
         return;
     }
@@ -210,21 +161,9 @@ void Machine::home() {
         Simulator::home();
 }
 void Machine::focus(bool on) {
-    if (on && live && (busy() || firing())) return;
-    if (on && live && !processingSafetyErrors().isEmpty()) {
-        document->notify(processingSafetyErrors().join("\n"));
-        return;
-    }
-    if (live) {
-        if (on && !accessory.begin(accessoryClock.elapsed())) {
-            document->notify(extractionSafetyError()); return;
-        }
-        if (on) accessoryFocusActive = true;
-        session->focus(on);
-        accessoryFocusActive = session->status().firing;
-        if (!accessoryFocusActive && !accessoryJobActive) accessory.transition(AccessoryContract::Event::Complete);
-    } else
-        Simulator::focus(on);
+    if (!live) { Simulator::focus(on); return; }
+    if (!on) session->focus(false);
+    else beginFocus(); // Legacy true has no input authority and cannot bypass the native gate.
 }
 void Machine::frame(const QVariantMap &b) {
     if (b.value("outputFingerprint").toString() !=
@@ -271,12 +210,7 @@ void Machine::start() {
         return;
     }
     if (live) {
-        if (!accessory.begin(accessoryClock.elapsed())) {
-            document->notify(extractionSafetyError()); return;
-        }
         session->start(job);
-        accessoryJobActive = session->status().executing;
-        if (!accessoryJobActive) accessory.transition(AccessoryContract::Event::Complete);
     } else {
         Simulator::setJob(job);
         Simulator::start();
@@ -288,25 +222,17 @@ void Machine::pause() {
             document->notify(processingSafetyErrors().join("\n"));
             stop(); return;
         }
-        accessory.transition(AccessoryContract::Event::Pause);
         session->pause();
     } else
         Simulator::pause();
 }
 void Machine::stop() {
-    accessory.transition(AccessoryContract::Event::Stop);
-    if (live) accessory.transition(AccessoryContract::Event::Fault); // GRBL stop uses reset: physical output becomes unknown.
-    accessoryJobActive = false;
-    accessoryFocusActive = false;
     if (live)
         session->stop();
     else
         Simulator::stop();
 }
 void Machine::disconnectFault() {
-    accessory.transition(AccessoryContract::Event::Disconnect);
-    accessoryJobActive = false;
-    accessoryFocusActive = false;
     if (live)
         session->close();
     else
