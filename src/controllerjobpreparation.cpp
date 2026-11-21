@@ -1,6 +1,7 @@
 #include "controllerjobpreparation_p.h"
 #include <QCoreApplication>
 #include <QMutexLocker>
+#include <QPointer>
 #include <QSignalBlocker>
 #include <QThread>
 
@@ -171,7 +172,9 @@ void ControllerJobPreparation::deliver() {
         m_state->notificationPending = false;
         if (m_state->closed || m_state->owner != this) return;
     }
+    const QPointer<ControllerJobPreparation> alive(this);
     emit changed();
+    if (!alive) return; // Direct receivers may legally destroy the sender.
     quint64 finishedGeneration = 0;
     {
         QMutexLocker lock(&m_state->mutex);
