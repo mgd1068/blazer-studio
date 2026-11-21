@@ -14,6 +14,14 @@ ApplicationWindow {
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
     readonly property bool grblVerified: !simulationMode && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
     readonly property bool positioningReady: machine.ready && machine.positionReferenced && (win.simulationMode || (typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
+    readonly property string synchronousWorkBlockReason: typeof project.synchronousWorkBlockReason !== "undefined" ? project.synchronousWorkBlockReason : ""
+    readonly property bool synchronousWorkReady: synchronousWorkBlockReason.length === 0
+    function allowSynchronousUiWork() {
+        if (synchronousWorkReady) return true
+        pendingAction = ""; pendingProjectFile = ""
+        project.notify(synchronousWorkBlockReason)
+        return false
+    }
     readonly property bool processingReady: machine.ready && (win.simulationMode || (typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))
     readonly property var deviceService: typeof deviceManager !== "undefined" ? deviceManager : null
     readonly property var artStore: typeof artLibrary !== "undefined" ? artLibrary : null
@@ -125,6 +133,7 @@ ApplicationWindow {
         return true
     }
     function showSaveDialog() {
+        if (!allowSynchronousUiWork()) return
         if(saveDialog && saveDialog.visible)return
         if(saveDialog && saveDialog.used) {
             let old = saveDialog
@@ -215,6 +224,7 @@ ApplicationWindow {
         objectList.positionViewAtIndex(project.selected, ListView.Contain)
     }
     function importMotif(file) {
+        if (!allowSynchronousUiWork()) return
         if (/\.(?:lbrn2?|mage)(?:[?#].*)?$/i.test(file.toString())) { nativeImportReview.inspectFile(file); return }
         let useProfile = basic && !project.beginnerSummary.requiresAdvanced && !project.beginnerSummary.modified
         if(project.importFile(file) && useProfile)project.applyBasicMaterial(project.material)
@@ -225,10 +235,12 @@ ApplicationWindow {
             project.setLayer(project.layers[0].enabled ? 0 : 1)
     }
     function requestAction(action) {
+        if (["open","template","recent"].indexOf(action) >= 0 && !allowSynchronousUiWork()) return
         if (project.dirty) { pendingAction = action; discardDialog.open() }
         else performAction(action)
     }
     function performAction(action) {
+        if (["open","template","recent"].indexOf(action) >= 0 && !allowSynchronousUiWork()) return
         if (action === "recent") {
             let file = win.pendingProjectFile
             win.pendingProjectFile = ""
@@ -324,15 +336,15 @@ ApplicationWindow {
             }
         }
     }
-    Shortcut { sequences: [StandardKey.Copy]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.copySelectionToClipboard() }
-    Shortcut { sequences: [StandardKey.Cut]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.copySelectionToClipboard(true) }
-    Shortcut { sequences: [StandardKey.Paste]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.pasteFromClipboard() }
-    Shortcut { sequence: "Ctrl+Shift+V"; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.pasteFromClipboard(true) }
-    Shortcut { sequences: [StandardKey.Save]; enabled: !projectDialogActive; onActivated: win.showSaveDialog() }
-    Shortcut { sequences: [StandardKey.Open]; enabled: !projectDialogActive; onActivated: win.requestAction("open") }
+    Shortcut { sequences: [StandardKey.Copy]; enabled: win.synchronousWorkReady && !clipboardDialogActive && !win.textInputFocused; onActivated: project.copySelectionToClipboard() }
+    Shortcut { sequences: [StandardKey.Cut]; enabled: win.synchronousWorkReady && !clipboardDialogActive && !win.textInputFocused; onActivated: project.copySelectionToClipboard(true) }
+    Shortcut { sequences: [StandardKey.Paste]; enabled: win.synchronousWorkReady && !clipboardDialogActive && !win.textInputFocused; onActivated: project.pasteFromClipboard() }
+    Shortcut { sequence: "Ctrl+Shift+V"; enabled: win.synchronousWorkReady && !clipboardDialogActive && !win.textInputFocused; onActivated: project.pasteFromClipboard(true) }
+    Shortcut { sequences: [StandardKey.Save]; enabled: win.synchronousWorkReady && !projectDialogActive; onActivated: win.showSaveDialog() }
+    Shortcut { sequences: [StandardKey.Open]; enabled: win.synchronousWorkReady && !projectDialogActive; onActivated: win.requestAction("open") }
     Shortcut { sequences: [StandardKey.Undo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.undo() }
     Shortcut { sequences: [StandardKey.Redo]; enabled: !clipboardDialogActive && !win.textInputFocused; onActivated: project.redo() }
-    Shortcut { sequence: "Ctrl+I"; enabled: !projectDialogActive; onActivated: importDialog.open() }
+    Shortcut { sequence: "Ctrl+I"; enabled: win.synchronousWorkReady && !projectDialogActive; onActivated: importDialog.open() }
     Shortcut { objectName: "applicationStopShortcut"; sequence: "Ctrl+."; context: Qt.ApplicationShortcut; onActivated: machine.stop() }
     Shortcut { sequence: "Escape"; enabled: !recoveryDialog.visible && !projectDialogActive; onActivated: { canvas.cancelGuideDrag(); canvas.selectedGuideId=""; machine.stop(); project.select(-1) } }
     FileDialog { id: importDialog; objectName: "importMotifDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik, GCode oder Modell importieren"; nameFilters: ["Geometrie, Bilder und Modelle (*.svg *.dxf *.hpgl *.plt *.gc *.gcode *.nc *.rd *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.lbrn *.lbrn2 *.mage)"]; onAccepted: win.importMotif(selectedFile) }
@@ -566,8 +578,8 @@ ApplicationWindow {
                         MenuItem { objectName: "artLibraryMenuItem"; text: "Grafikbibliothek …"; enabled: !!win.artService; onTriggered: artLibraryDialog.open() }
                         MenuItem { objectName: "vectorInspectionMenuItem"; text: "Vektorgeometrie prüfen …"; enabled: !!win.vectorInspector; onTriggered: vectorInspectionDialog.open() }
                         MenuSeparator {}
-                        MenuItem { objectName: "newTemplateMenuItem"; text: "Neu aus Vorlage …"; onTriggered: win.requestAction("template") }
-                        MenuItem { objectName: "saveTemplateMenuItem"; text: "Als Vorlage speichern …"; onTriggered: saveTemplateDialog.open() }
+                        MenuItem { objectName: "newTemplateMenuItem"; enabled: win.synchronousWorkReady; text: "Neu aus Vorlage …"; onTriggered: win.requestAction("template") }
+                        MenuItem { objectName: "saveTemplateMenuItem"; enabled: win.synchronousWorkReady; text: "Als Vorlage speichern …"; onTriggered: saveTemplateDialog.open() }
                     }
                 }
                 Text { text: project.dirty ? "●" : ""; color: "#d79b54"; font.pixelSize: 12 }
@@ -591,13 +603,13 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 ActionButton { text: "Neu"; dark: win.night; compact: true; onClicked: win.requestAction("new") }
                 ActionButton { text: "Beispiel"; dark: win.night; compact: true; onClicked: win.requestAction("demo") }
-                ActionButton { objectName: "openProjectButton"; text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
-                ActionButton { objectName: "recentProjectsButton"; text: "Zuletzt"; dark: win.night; compact: true; visible: typeof appServices !== "undefined"; onClicked: recentProjects.open() }
-                ActionButton { objectName: "importMotifButton"; text: win.basic ? "Motiv laden" : "↓  Importieren"; hint: "Lädt ein Bild oder eine Vektorzeichnung als Motiv. Das allein startet noch keinen Laser."; dark: win.night; compact: true; onClicked: importDialog.open() }
-                ActionButton { objectName: "importImageButton"; visible: !win.basic; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
-                ActionButton { objectName: "exportGcodeButton"; text: "GCode"; visible: !win.basic; dark: win.night; compact: true; enabled: project.jobSummary.valid && project.jobSummary.outputSupported; onClicked: gcodeDialog.open() }
+                ActionButton { objectName: "openProjectButton"; enabled: win.synchronousWorkReady; text: "Öffnen"; dark: win.night; compact: true; onClicked: win.requestAction("open") }
+                ActionButton { objectName: "recentProjectsButton"; enabled: win.synchronousWorkReady; text: "Zuletzt"; dark: win.night; compact: true; visible: typeof appServices !== "undefined"; onClicked: recentProjects.open() }
+                ActionButton { objectName: "importMotifButton"; enabled: win.synchronousWorkReady; text: win.basic ? "Motiv laden" : "↓  Importieren"; hint: "Lädt ein Bild oder eine Vektorzeichnung als Motiv. Das allein startet noch keinen Laser."; dark: win.night; compact: true; onClicked: importDialog.open() }
+                ActionButton { objectName: "importImageButton"; enabled: win.synchronousWorkReady; visible: !win.basic; text: "Bild"; dark: win.night; compact: true; onClicked: imageDialog.open() }
+                ActionButton { objectName: "exportGcodeButton"; text: "GCode"; visible: !win.basic; dark: win.night; compact: true; enabled: win.synchronousWorkReady && project.jobSummary.valid && project.jobSummary.outputSupported; onClicked: gcodeDialog.open() }
                 ActionButton { objectName: "betaHelpButton"; text: "Hilfe / Beta"; compact: true; dark: win.night; hint: "Öffnet Einführung, bekannte Einschränkungen, Versionsdaten und den freiwilligen Diagnoseexport."; onClicked: betaHelp.open() }
-                ActionButton { objectName: "saveProjectButton"; text: "Speichern"; dark: win.night; compact: true; onClicked: win.showSaveDialog() }
+                ActionButton { objectName: "saveProjectButton"; enabled: win.synchronousWorkReady; text: "Speichern"; dark: win.night; compact: true; onClicked: win.showSaveDialog() }
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
                     objectName: "startJobButton"; text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
@@ -605,6 +617,12 @@ ApplicationWindow {
                     onClicked: { if (win.page === 0) win.page = 1; else { win.page = 2; machine.start() } }
                 }
             }
+        }
+        Label {
+            objectName: "synchronousWorkStatus"
+            visible: !win.synchronousWorkReady
+            Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 8; bottomPadding: 8
+            wrapMode: Text.WordWrap; textFormat: Text.PlainText; text: win.synchronousWorkBlockReason; color: win.ink
         }
         RowLayout {
             Layout.fillWidth: true; Layout.fillHeight: true; spacing: 0
@@ -840,8 +858,8 @@ ApplicationWindow {
                     }
                     RowLayout {
                         Layout.fillWidth: true; spacing: 5
-                        ActionButton { objectName: "clipboardCopyButton"; text: "Kopieren"; hint: "Auswahl in die Systemzwischenablage kopieren · Strg+C"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: project.selected>=0; onClicked: project.copySelectionToClipboard() }
-                        ActionButton { objectName: "clipboardPasteButton"; text: "Einfügen"; hint: "Blazer-Objekte, SVG, Bild oder Text einfügen · Strg+V; Strg+Umschalt+V erhält die ursprüngliche Lage von Blazer-Objekten."; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: project.pasteFromClipboard() }
+                        ActionButton { objectName: "clipboardCopyButton"; text: "Kopieren"; hint: "Auswahl in die Systemzwischenablage kopieren · Strg+C"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: win.synchronousWorkReady && project.selected>=0; onClicked: project.copySelectionToClipboard() }
+                        ActionButton { objectName: "clipboardPasteButton"; enabled: win.synchronousWorkReady; text: "Einfügen"; hint: "Blazer-Objekte, SVG, Bild oder Text einfügen · Strg+V; Strg+Umschalt+V erhält die ursprüngliche Lage von Blazer-Objekten."; dark: win.night; compact: true; Layout.fillWidth: true; onClicked: project.pasteFromClipboard() }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
                     SectionLabel { text: "BEARBEITUNGEN"; dark: win.night }
@@ -1200,6 +1218,7 @@ ApplicationWindow {
             RowLayout {
                 anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
                 Text { text: project.message; textFormat: Text.PlainText; color: "#a6bac8"; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
+                Text { objectName: "deferredRecoveryStatus"; visible: typeof recovery !== "undefined" && typeof recovery.deferred !== "undefined" && recovery.deferred; text: "Sicherung vorgemerkt"; color: "#e7cc8a"; font.pixelSize: 10 }
                 Text { text: win.simulationMode ? "SIMULATION · KEINE LASEREMISSION" : "HARDWARE · " + machine.state; color: "#81c9b3"; font.pixelSize: 8; font.letterSpacing: .8 }
             }
         }
