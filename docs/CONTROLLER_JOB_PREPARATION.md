@@ -49,3 +49,10 @@ internal work-function seam do not introduce a synchronous production mode.
 This component's acceptance does not establish the complete runtime integration,
 native input age, hardware coordinates, airflow, optical shutdown or LightBurn
 parity. Those remain separate requirements.
+
+Independent review found that a direct `changed` receiver could delete the owner
+during completion delivery. A dedicated regression reproduced a heap-use-after-free
+under AddressSanitizer before the fix. Delivery now checks a QPointer lifetime
+guard after the signal before accessing any owner state. The expanded 17 QtTest
+results pass normally and with ASan/UBSan (leak detection disabled). Local evidence:
+`/home/mathias/benslab/analysis/blazer-controller-preparation-20261121/VERIFICATION.json`.
