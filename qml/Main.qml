@@ -1052,13 +1052,13 @@ ApplicationWindow {
                                     }
                                     Text {
                                         objectName: "frameRegionSummary"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: win.muted; font.pixelSize: 11
-                                        text: {let r=win.frameRegion;if(!r.valid)return r.reason;let f=win.lengthUnit==="in" ? 25.4 : 1;let digits=win.lengthUnit==="in" ? 4 : 2;return "X "+(r.x/f).toFixed(digits)+" · Y "+(r.y/f).toFixed(digits)+" · "+(r.width/f).toFixed(digits)+" × "+(r.height/f).toFixed(digits)+" "+win.lengthUnit}
+                                        text: {if(!win.simulationMode && project.startMode !== 0)return "Relative Rahmenfahrt ist für dieses reale Gerät noch nicht eingerichtet.";let r=win.frameRegion;if(!r.valid)return r.reason;let f=win.lengthUnit==="in" ? 25.4 : 1;let digits=win.lengthUnit==="in" ? 4 : 2;return "X "+(r.x/f).toFixed(digits)+" · Y "+(r.y/f).toFixed(digits)+" · "+(r.width/f).toFixed(digits)+" × "+(r.height/f).toFixed(digits)+" "+win.lengthUnit}
                                     }
                                     Text { text: win.frameScope==="job" ? "Geplante Bearbeitungswege einschließlich Überlauf. Hilfsformen bleiben außerhalb des Laserauftrags." : "Sichtbare Objektgrenzen des aktiven Blatts. Die Rahmenwahl aktiviert keine Laserausgabe."; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 8
-                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: win.positioningReady && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
+                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: win.positioningReady && (win.simulationMode || project.startMode === 0) && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
                                     ActionButton { objectName: "pauseJobButton"; text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
                                     ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }

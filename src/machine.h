@@ -72,10 +72,15 @@ class Machine : public Simulator {
     }
     bool firing() const override { return live ? session->status().firing : Simulator::firing(); }
     bool busy() const override { return live ? session->status().busy : Simulator::busy(); }
-    bool paused() const override { return live ? session->status().paused : Simulator::paused(); }
+    bool paused() const override {
+        if (!live) return Simulator::paused();
+        const auto status = session->status();
+        return status.paused && !status.referencing && !status.resetting;
+    }
     bool running() const override {
-        return live ? session->status().executing && !session->status().paused
-                    : Simulator::running();
+        if (!live) return Simulator::running();
+        const auto status = session->status();
+        return status.executing && !status.paused && !status.referencing && !status.resetting;
     }
     QStringList log() const override { return live ? session->logEntries() : Simulator::log(); }
     void toggleConnection() override;

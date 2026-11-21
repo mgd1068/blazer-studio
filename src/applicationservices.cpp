@@ -349,7 +349,7 @@ bool ApplicationServices::exportTechnicalDiagnostics(const QUrl &url,
 void ApplicationServices::clearTechnicalDiagnosticsPreview() {
     m_technicalDiagnosticsJson.clear();
     m_technicalDiagnosticsDigest.clear();
-    m_message = "Technische Diagnosevorschau verworfen.";
+    m_message = "Technische Diagnosevorschau geschlossen.";
     emit changed();
 }
 
