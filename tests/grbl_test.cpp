@@ -229,6 +229,234 @@ class GrblTest : public QObject {
             QTRY_VERIFY(session.workZero && session.workZero->modalReadback);
     }
   private slots:
+    void machineWorkZeroSurvivesDelayedAcknowledgementsWithoutFaultingFlow_data() {
+        QTest::addColumn<QPointF>("machinePoint");
+        QTest::addColumn<QPointF>("oldOffset");
+        QTest::addColumn<QRectF>("envelope");
+        QTest::newRow("shifted-positive")
+            << QPointF(100, 75) << QPointF(10, -5) << QRectF(0, 0, 200, 150);
+        QTest::newRow("signed-negative")
+            << QPointF(-120, -40) << QPointF(-10, 5) << QRectF(-200, -150, 200, 150);
+    }
+    void machineWorkZeroSurvivesDelayedAcknowledgementsWithoutFaultingFlow() {
+        QFETCH(QPointF, machinePoint);
+        QFETCH(QPointF, oldOffset);
+        QFETCH(QRectF, envelope);
+        Controller controller;
+        controller.machinePosition = machinePoint;
+        controller.workOffset = oldOffset;
+        Document document;
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        grbl->commissionedEnvelope = envelope;
+        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(machine.extractionSafetyError().isEmpty());
+        controller.autoAck = controller.respondToStatus = false;
+        const auto resets = controller.realtime.count(char(0x18));
+        const auto cut = controller.commands.size();
+        machine.setWorkZero();
+        QVERIFY(grbl->status().coordinateUpdatePending);
+        QTest::qWait(
+            100); // The actual Machine watchdog runs twice while the first ACK is withheld.
+        QVERIFY(grbl->status().coordinateUpdatePending);
+        QVERIFY(machine.connected() && machine.positionReferenced());
+        QVERIFY(!machine.running() && !machine.paused());
+        QVERIFY(machine.extractionSafetyError().isEmpty());
+        QVERIFY(!machine.accessory.activeLease());
+        acknowledgeWorkZero(controller, *grbl, cut, false);
+        QTest::qWait(80); // Last command is ACK-pending, still inside the bounded phase.
+        QVERIFY(grbl->status().coordinateUpdatePending);
+        controller.reply("ok\r\n");
+        QTRY_VERIFY(grbl->workZero && grbl->workZero->queryArmed);
+        QTest::qWait(80); // Readback waits across another watchdog interval.
+        QVERIFY(grbl->status().coordinateUpdatePending);
+        controller.report();
+        QTRY_VERIFY(machine.ready());
+        QVERIFY(!grbl->status().coordinateUpdatePending);
+        QVERIFY(machine.connectionVerified() && machine.positionReferenced());
+        QVERIFY(machine.extractionSafetyError().isEmpty());
+        QVERIFY(!machine.accessory.activeLease());
+        QCOMPARE(machine.x(), 0.);
+        QCOMPARE(machine.y(), 0.);
+        QCOMPARE(grbl->reportedMachinePosition, machinePoint);
+        QCOMPARE(controller.machinePosition, machinePoint);
+        QCOMPARE(controller.commands.mid(cut), workZeroCommands);
+        QCOMPARE(controller.realtime.count(char(0x18)), resets);
+    }
+    void machineWorkZeroEntryDenialPreservesTheExistingOperation_data() {
+        QTest::addColumn<QString>("operation");
+        for (const auto &operation :
+             {"actual-lease-only", "job-flag", "focus-flag", "streaming-job", "focus-pulse"})
+            QTest::newRow(operation) << QString(operation);
+    }
+    void machineWorkZeroEntryDenialPreservesTheExistingOperation() {
+        QFETCH(QString, operation);
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        if (operation == "actual-lease-only")
+            QVERIFY(machine.accessory.begin(machine.accessoryClock.elapsed()));
+        else if (operation == "job-flag")
+            machine.accessoryJobActive = true;
+        else if (operation == "focus-flag")
+            machine.accessoryFocusActive = true;
+        else if (operation == "streaming-job")
+            machine.start();
+        else if (operation == "focus-pulse")
+            machine.focus(true);
+        QTest::qWait(20); // Drain already accepted bytes of the existing operation.
+        const auto lease = machine.accessory.activeLease();
+        const auto jobFlag = machine.accessoryJobActive;
+        const auto focusFlag = machine.accessoryFocusActive;
+        const auto active = machine.busy();
+        const auto pulse = machine.firing();
+        const auto commands = controller.commands;
+        const auto resets = controller.realtime.count(char(0x18));
+        machine.setWorkZero();
+        QTest::qWait(30);
+        QCOMPARE(controller.commands, commands);
+        QCOMPARE(controller.realtime.count(char(0x18)), resets);
+        QCOMPARE(machine.accessory.activeLease(), lease);
+        QCOMPARE(machine.accessoryJobActive, jobFlag);
+        QCOMPARE(machine.accessoryFocusActive, focusFlag);
+        QCOMPARE(machine.busy(), active);
+        QCOMPARE(machine.firing(), pulse);
+        QVERIFY(machine.positionReferenced());
+        QVERIFY(!machine.session->status().coordinateUpdatePending);
+    }
+    void machineWorkZeroNeverExemptsAnOutputLeaseOrItsLostFlags_data() {
+        QTest::addColumn<QString>("output");
+        for (const auto &output : {"lease-only", "lease-during-zero", "job-flag", "focus-flag"})
+            QTest::newRow(output) << QString(output);
+    }
+    void machineWorkZeroNeverExemptsAnOutputLeaseOrItsLostFlags() {
+        QFETCH(QString, output);
+        Controller controller;
+        Document document;
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        const auto resets = controller.realtime.count(char(0x18));
+        const auto cut = controller.commands.size();
+        if (output == "lease-only")
+            QVERIFY(machine.accessory.begin(machine.accessoryClock.elapsed()));
+        if (output == "job-flag")
+            machine.accessoryJobActive = true;
+        if (output == "focus-flag")
+            machine.accessoryFocusActive = true;
+        if (output == "lease-only") {
+            QVERIFY(machine.accessory.activeLease());
+            QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+        }
+        grbl->zero(); // Deliberately bypass facade entry denial to exercise its runtime guard.
+        if (output == "lease-during-zero") {
+            QVERIFY(grbl->status().coordinateUpdatePending);
+            QVERIFY(machine.accessory.begin(machine.accessoryClock.elapsed()));
+            QVERIFY(machine.accessory.activeLease());
+            QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+        }
+        QTest::qWait(160);
+        QVERIFY(!grbl->status().coordinateUpdatePending);
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!machine.extractionSafetyError().isEmpty());
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+        QVERIFY(!controller.commands.mid(cut).contains("G10 L20 P1 X0 Y0"));
+        QVERIFY(!controller.realtime.contains('~'));
+    }
+    void machineNormalRunCannotHideLostEvidenceBehindMissingOutputFlags_data() {
+        QTest::addColumn<bool>("falseCoordinatePhase");
+        QTest::newRow("ordinary-run") << false;
+        QTest::newRow("mislabelled-coordinate-phase") << true;
+    }
+    void machineNormalRunCannotHideLostEvidenceBehindMissingOutputFlags() {
+        QFETCH(bool, falseCoordinatePhase);
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        machine.start();
+        QVERIFY(machine.accessory.activeLease());
+        QTest::qWait(20); // Drain the accepted initial RX window before injecting evidence loss.
+        const auto cut = controller.commands.size();
+        const auto resets = controller.realtime.count(char(0x18));
+        machine.accessoryJobActive = machine.accessoryFocusActive =
+            false; // Deliberate facade flag loss.
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        if (falseCoordinatePhase)
+            grbl->workZero =
+                GrblSession::WorkZeroTransaction{grbl->reportedMachinePosition, grbl->offset};
+        controller.reply("<Run|MPos:bad,0,0|WCO:0,0,0|FS:0,0>\r\n");
+        QTest::qWait(80);
+        controller.reply("ok\r\nok\r\nok\r\n"); // Further credits must not continue the old job.
+        QTest::qWait(80);
+        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!grbl->status().coordinateUpdatePending);
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+        for (const auto &line : controller.commands.mid(cut))
+            QVERIFY(!line.startsWith("G1 ") && !line.startsWith("M4"));
+        QVERIFY(!controller.realtime.contains('~'));
+    }
+    void machineWorkZeroFailuresLoseTheExceptionAndNeverResume_data() {
+        QTest::addColumn<QString>("failure");
+        for (const auto &failure :
+             {"controller-error", "deadline", "user-stop", "unexpected-startup"})
+            QTest::newRow(failure) << QString(failure);
+    }
+    void machineWorkZeroFailuresLoseTheExceptionAndNeverResume() {
+        QFETCH(QString, failure);
+        Controller controller;
+        controller.machinePosition = {100, 75};
+        controller.workOffset = {10, -5};
+        Document document;
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        const auto resets = controller.realtime.count(char(0x18));
+        const auto cut = controller.commands.size();
+        machine.setWorkZero();
+        QVERIFY(grbl->status().coordinateUpdatePending);
+        if (failure == "controller-error")
+            controller.reply("error:20\r\n");
+        else if (failure == "unexpected-startup")
+            controller.reply("Grbl 1.3a ['$' for help]\r\n");
+        else if (failure == "deadline")
+            grbl->workZeroDeadline.start(80);
+        else if (failure == "user-stop")
+            machine.stop();
+        QTest::qWait(180);
+        QVERIFY(!grbl->status().coordinateUpdatePending);
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(!machine.extractionSafetyError().isEmpty());
+        QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+        QVERIFY(!controller.commands.mid(cut).contains("G10 L20 P1 X0 Y0"));
+        QVERIFY(!controller.realtime.contains('~'));
+    }
     void zeroCannotTrustAChangedMachinePointEvenWhenWorkReportsZero() {
         Controller controller;
         controller.machinePosition = {100, 75};
