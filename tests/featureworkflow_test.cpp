@@ -220,6 +220,23 @@ class FeatureWorkflowTest : public QObject {
         QCOMPARE(window->property("night").toBool(),compactDark);
         QVERIFY(QMetaObject::invokeMethod(object("settingsBundleDialog"),"close"));
 
+        QVERIFY(press("betaHelpButton")); QVERIFY(press("exportDiagnosticsButton"));
+        QTRY_VERIFY(object("technicalDiagnosticsPreviewDialog")->property("visible").toBool());
+        auto *previewText = item("technicalDiagnosticsPreviewText"); QVERIFY(previewText);
+        QVERIFY(!previewText->property("text").toString().contains("controllerContext"));
+        QVERIFY(press("includeControllerDiagnostics"));
+        QTRY_VERIFY(previewText->property("text").toString().contains("controllerContext"));
+        QVERIFY(previewText->property("text").toString().contains("simulator"));
+        QVERIFY(!previewText->property("text").toString().contains("/dev/never-open"));
+        const auto frozenDiagnosticBytes=previewText->property("text").toString().toUtf8();
+        QVERIFY(picture("technical-diagnostics")); QVERIFY(press("saveTechnicalDiagnostics"));
+        const auto diagnosisPath=storage.filePath("reviewed-diagnostic.json");
+        QVERIFY(fileResult("technicalDiagnosticsFileDialog",diagnosisPath));
+        QFile diagnosisFile(diagnosisPath); QVERIFY(diagnosisFile.open(QIODevice::ReadOnly));
+        QCOMPARE(diagnosisFile.readAll(),frozenDiagnosticBytes);
+        QTRY_VERIFY(!object("technicalDiagnosticsPreviewDialog")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("betaHelpDialog"),"close"));
+
         window->setProperty("page",2);
         QTRY_VERIFY(item("frameJobButton")->isEnabled());
         QVERIFY(press("frameJobButton")); QTRY_VERIFY(machine.busy()); QVERIFY(!machine.firing());

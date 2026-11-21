@@ -60,8 +60,8 @@ ApplicationWindow {
     property var saveDialog: null
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
-    readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible
+    readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || technicalDiagnosticsPreview.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
+    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
@@ -177,11 +177,18 @@ ApplicationWindow {
     BetaHelpDialog {
         id: betaHelp; onAboutToShow: machine.focus(false); dark: win.night; service: typeof appServices!=="undefined" ? appServices : null
         onIntroductionRequested: onboarding.open()
-        onDiagnosticsRequested: diagnosticsDialog.open()
+        onDiagnosticsRequested: technicalDiagnosticsPreview.open()
+    }
+    property string diagnosticPreviewToken: ""
+    TechnicalDiagnosticsDialog {
+        id: technicalDiagnosticsPreview; dark: win.night
+        service: typeof appServices !== "undefined" ? appServices : null
+        onSaveRequested: digest => { win.diagnosticPreviewToken = digest; diagnosticsDialog.open() }
     }
     FileDialog {
-        id: diagnosticsDialog; title: "Technischen Diagnosebericht speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "json"; nameFilters: ["JSON-Diagnosebericht (*.json)"]
-        onAccepted: if(typeof appServices!=="undefined")appServices.exportDiagnostics(selectedFile)
+        id: diagnosticsDialog; objectName: "technicalDiagnosticsFileDialog"
+        title: "Geprüften Diagnosebericht speichern"; fileMode: FileDialog.SaveFile; defaultSuffix: "json"; nameFilters: ["JSON-Diagnosebericht (*.json)"]
+        onAccepted: if (typeof appServices !== "undefined" && appServices.exportTechnicalDiagnostics(selectedFile,win.diagnosticPreviewToken)) technicalDiagnosticsPreview.close()
     }
     function revealObjectSelection() {
         if (project.selected < 0) return

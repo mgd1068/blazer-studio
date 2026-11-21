@@ -54,7 +54,7 @@ if(BLAZER_COVERAGE)
 endif()
 
 set(blazer_qml
-    qml/NativeImportDialog.qml qml/VectorInspectionDialog.qml qml/JobPlacementDialog.qml qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
+    qml/NativeImportDialog.qml qml/VectorInspectionDialog.qml qml/TechnicalDiagnosticsDialog.qml qml/JobPlacementDialog.qml qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
     qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml qml/ProjectDialog.qml qml/RecentProjectsDialog.qml qml/HistoryDialog.qml)
 qt_add_executable(blazer-studio src/main.cpp)
@@ -103,6 +103,9 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-jobplacement-tests tests/jobplacement_test.cpp)
     target_link_libraries(blazer-jobplacement-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME jobplacement COMMAND blazer-jobplacement-tests -platform offscreen)
+    qt_add_executable(blazer-technicaldiagnostics-tests tests/technicaldiagnostics_test.cpp)
+    target_link_libraries(blazer-technicaldiagnostics-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME technicaldiagnostics COMMAND blazer-technicaldiagnostics-tests -platform offscreen)
     qt_add_executable(blazer-settingsbundle-tests tests/settingsbundle_test.cpp)
     target_link_libraries(blazer-settingsbundle-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME settingsbundle COMMAND blazer-settingsbundle-tests -platform offscreen)
@@ -189,7 +192,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-workflow-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-workflow-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME workflow COMMAND blazer-workflow-tests -platform offscreen)
-    set_tests_properties(release stability core ui workflow featureworkflow machineplacement job grbl relief expansion nativeimport imageexport clipboard raster toolshape deviceprofile deviceworkspace controlleradapter devicelibrary devicemanager devicemanager_adversarial barcode settingsbundle reviewednativeimport nativecompatibility vectorinspection PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    set_tests_properties(release stability core ui workflow featureworkflow machineplacement job grbl relief expansion nativeimport imageexport clipboard raster toolshape deviceprofile deviceworkspace controlleradapter devicelibrary devicemanager devicemanager_adversarial barcode settingsbundle technicaldiagnostics reviewednativeimport nativecompatibility vectorinspection PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)

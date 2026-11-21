@@ -64,5 +64,7 @@ nonlocal requests, directory/symlink/locked targets, atomic preservation, and
 QML-invokable methods. Machine fixtures use `HardwareAccess::Disabled`; changes
 to connection state affect only the simulator. No physical endpoint is opened.
 
-This slice does not modify CMake, Machine, or Main. The root integration provides
-`Machine::controllerDiagnosticSnapshot() const` and wires the opt-in preview UI.
+The integrated application provides `Machine::controllerDiagnosticSnapshot() const`,
+the unchecked-by-default preview dialog and local-file picker. `featureworkflow`
+exercises the actual preview, opt-in toggle and byte-identical saved content in
+normal/light and compact/dark windows; the service test remains separate.
