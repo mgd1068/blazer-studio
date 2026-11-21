@@ -19,6 +19,8 @@ struct ControllerStatus {
     QString motionSafetyError;
     QString homingSafetyError;
     bool referencing = false, resetting = false;
+    bool overridesReady = false;
+    QString overridesSafetyError = "Echtzeit-Overrides sind für diese Sitzung nicht freigegeben.";
 };
 class ControllerSession : public QObject {
     Q_OBJECT

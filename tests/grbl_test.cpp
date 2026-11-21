@@ -83,6 +83,8 @@ class Controller : public QObject {
                             --power;
                             break;
                         }
+                        feed = qBound(10, feed, 200);
+                        power = qBound(10, power, 200);
                         continue;
                     }
                     if (c == '?') {
@@ -175,6 +177,7 @@ class GrblTest : public QObject {
         session.commissionedEnvelope = QRectF(0, 0, 200, 150);
         session.commissionedModalContract = true;
         session.commissionedHomingContract = true;
+        session.commissionedOverrideContract = true;
     }
     void requireReference(ControllerSession &session) {
         auto grbl = dynamic_cast<GrblSession *>(&session);
@@ -209,6 +212,293 @@ class GrblTest : public QObject {
                                           "virtual airflow fixture", now, now));
     }
   private slots:
+    void repeatedOverridesRemainBoundedWithDelayedOrOldFeedback_data() {
+        QTest::addColumn<int>("initialFeed");
+        QTest::addColumn<int>("initialPower");
+        QTest::addColumn<int>("targetFeed");
+        QTest::addColumn<int>("targetPower");
+        QTest::newRow("repeated-increase") << 70 << 70 << 190 << 95;
+        QTest::newRow("repeated-reduction") << 100 << 100 << 10 << 10;
+        QTest::newRow("reset-target") << 200 << 10 << 100 << 100;
+        QTest::newRow("low-feed-low-power") << 10 << 10 << 10 << 10;
+    }
+    void repeatedOverridesRemainBoundedWithDelayedOrOldFeedback() {
+        QFETCH(int, initialFeed);
+        QFETCH(int, initialPower);
+        QFETCH(int, targetFeed);
+        QFETCH(int, targetPower);
+        Controller controller;
+        controller.withOverrides = true;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.feed = initialFeed;
+        controller.power = initialPower;
+        controller.report();
+        QTRY_COMPARE(session.feedOverride, initialFeed);
+        QTRY_COMPARE(session.powerOverride, initialPower);
+        controller.respondToStatus = false;
+        QTest::qWait(10);
+        const auto cut = controller.realtime.size();
+        for (int request = 0; request < 4; ++request) {
+            QVERIFY(session.overrides(targetFeed, targetPower));
+            // A delayed old report is indistinguishable from new Ov evidence.
+            controller.reply(QByteArray("<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0|Ov:") +
+                             QByteArray::number(initialFeed) + ",100," +
+                             QByteArray::number(initialPower) + ">\r\n");
+            QTest::qWait(10);
+        }
+        QCOMPARE(controller.power, targetPower);
+        QCOMPARE(controller.feed, targetFeed);
+        // Independent byte interpreter: inspect EVERY intermediate requested
+        // percentage, rather than echoing the final encoder target.
+        int interpretedFeed = initialFeed, interpretedPower = initialPower;
+        const double energyRatioBound =
+            qMax(1., qMax(double(initialPower) / initialFeed, double(targetPower) / targetFeed));
+        for (unsigned char byte : controller.realtime.mid(cut)) {
+            if (byte >= 0x90 && byte <= 0x94)
+                QCOMPARE(interpretedPower, 10); // Lower power BEFORE changing feed.
+            if (byte == 0x9a || byte == 0x9c)
+                QCOMPARE(interpretedFeed, targetFeed); // Restore power AFTER feed settles.
+            switch (byte) {
+            case 0x90:
+                interpretedFeed = 100;
+                break;
+            case 0x91:
+                interpretedFeed += 10;
+                break;
+            case 0x92:
+                interpretedFeed -= 10;
+                break;
+            case 0x93:
+                ++interpretedFeed;
+                break;
+            case 0x94:
+                --interpretedFeed;
+                break;
+            case 0x99:
+                interpretedPower = 100;
+                break;
+            case 0x9a:
+                interpretedPower += 10;
+                break;
+            case 0x9b:
+                interpretedPower -= 10;
+                break;
+            case 0x9c:
+                ++interpretedPower;
+                break;
+            case 0x9d:
+                --interpretedPower;
+                break;
+            default:
+                QFAIL("Unexpected realtime byte in override dispatch");
+            }
+            interpretedFeed = qBound(10, interpretedFeed, 200);
+            interpretedPower = qBound(10, interpretedPower, 200);
+            QVERIFY(interpretedFeed >= 10 && interpretedFeed <= 200);
+            QVERIFY(interpretedPower >= 10 && interpretedPower <= qMax(initialPower, targetPower));
+            QVERIFY(double(interpretedPower) / interpretedFeed <= energyRatioBound + 1e-9);
+        }
+        QCOMPARE(interpretedFeed, targetFeed);
+        QCOMPARE(interpretedPower, targetPower);
+    }
+    void coalescedRealtimeModelMustNotInheritSequentialOverrideContract() {
+        Controller controller;
+        controller.withOverrides = true;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.power = 70;
+        controller.report();
+        QTRY_COMPARE(session.powerOverride, 70);
+        controller.respondToStatus = false;
+        QTest::qWait(10);
+        const auto cut = controller.realtime.size();
+        QVERIFY(session.overrides(100, 95)); // Explicit sequential virtual fixture only.
+        QTRY_COMPARE(controller.power, 95);
+        // Alternate bounded scheduler: contiguous minus flags coalesce before
+        // servicing, while subsequent increase flags are individually serviced.
+        // This is a counterexample, NOT the connected fixture's declared law.
+        int coalescedPower = 70;
+        bool previousMinus = false;
+        for (unsigned char byte : controller.realtime.mid(cut)) {
+            if (byte == 0x9b && !previousMinus)
+                coalescedPower = qMax(10, coalescedPower - 10);
+            if (byte == 0x9a)
+                coalescedPower = qMin(200, coalescedPower + 10);
+            if (byte == 0x9c)
+                coalescedPower = qMin(200, coalescedPower + 1);
+            previousMinus = byte == 0x9b;
+        }
+        QVERIFY(coalescedPower > 100); // Clamps alone cannot prove this protocol safe.
+        session.commissionedOverrideContract = false;
+        controller.report(); // Even fresh Ov is no commissioning evidence.
+        QTest::qWait(10);
+        const auto refusedCut = controller.realtime.size();
+        QVERIFY(!session.overrides(100, 95));
+        QTest::qWait(20);
+        QCOMPARE(controller.realtime.mid(refusedCut), QByteArray());
+        QVERIFY(!session.status().overridesReady);
+    }
+    void overrideContractCannotSurviveControllerEvidenceEpochChange_data() {
+        QTest::addColumn<QString>("boundary");
+        for (const auto &boundary : {"stop", "fault", "disconnect", "startup", "alarm", "modal"})
+            QTest::newRow(boundary) << QString(boundary);
+    }
+    void overrideContractCannotSurviveControllerEvidenceEpochChange() {
+        QFETCH(QString, boundary);
+        Controller controller;
+        controller.withOverrides = true;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        QVERIFY(session.status().overridesReady);
+        controller.respondToReset = false;
+        if (boundary == "stop")
+            session.stop();
+        else if (boundary == "disconnect")
+            session.close();
+        else if (boundary == "startup")
+            controller.reply("Grbl 1.3a ['$' for help]\r\n");
+        else if (boundary == "fault")
+            controller.reply("<Idle|MPos:0,0,0|WPos:1,0,0|WCO:0,0,0|FS:0,0>\r\n");
+        else if (boundary == "alarm") {
+            controller.status = "Alarm";
+            controller.report();
+        } else if (boundary == "modal")
+            controller.reply("[GC:G0 G55 G17 G21 G90 G94 M5 M9 T0 F0 S0]\r\n");
+        QTRY_VERIFY(!session.commissionedOverrideContract);
+        QVERIFY(!session.status().overridesReady);
+        QVERIFY(!session.status().overridesSafetyError.isEmpty());
+        session.close();
+        Controller replacement;
+        QVERIFY(session.open(replacement.port));
+        QTRY_VERIFY(session.ready());
+        QVERIFY(!session.commissionedOverrideContract);
+        QVERIFY(!session.status().overridesReady);
+    }
+    void overrideDispatchRejectsMissingOrAmbiguousMotionEvidence_data() {
+        QTest::addColumn<QString>("loss");
+        for (const auto &loss : {"envelope",       "modal",          "override-contract",
+                                 "firing",         "reference",      "stale",
+                                 "stale-feedback", "offset",         "position",
+                                 "output",         "configuration",  "verification",
+                                 "feedback",       "feedback-arity", "feedback-rapid",
+                                 "reset",          "homing",         "handshake",
+                                 "state",          "bounds",         "inputs"})
+            QTest::newRow(loss) << QString(loss);
+    }
+    void overrideDispatchRejectsMissingOrAmbiguousMotionEvidence() {
+        QFETCH(QString, loss);
+        Controller controller;
+        controller.withOverrides = true;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        QTRY_VERIFY(session.overrideFeedback);
+        controller.respondToStatus = false;
+        if (loss == "envelope")
+            session.commissionedEnvelope.reset();
+        else if (loss == "modal")
+            session.commissionedModalContract = false;
+        else if (loss == "override-contract")
+            session.commissionedOverrideContract = false;
+        else if (loss == "firing")
+            session.firing = true;
+        else if (loss == "reference")
+            session.positionReferenced = false;
+        else if (loss == "stale")
+            QTest::qWait(1550); // A prior valid Ov must not authorize stale live state.
+        else if (loss == "stale-feedback") {
+            controller.withOverrides = false;
+            controller.respondToStatus = true;
+            QTest::qWait(1550);
+            QVERIFY(session.statusFresh());
+            QVERIFY(session.overrideFeedback); // Historical value alone is insufficient.
+        } else if (loss == "offset")
+            session.knownOffset = false;
+        else if (loss == "position")
+            session.knownPosition = false;
+        else if (loss == "output")
+            session.knownOutput = false;
+        else if (loss == "configuration")
+            session.coordinateSystem = false;
+        else if (loss == "verification")
+            session.connectionVerified = false;
+        else if (loss == "feedback") {
+            controller.reply("<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0|Ov:bad,100,100>\r\n");
+            QTRY_VERIFY(!session.overrideFeedback);
+        } else if (loss == "feedback-arity" || loss == "feedback-rapid") {
+            controller.reply(loss == "feedback-arity"
+                                 ? "<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0|Ov:100,100>\r\n"
+                                 : "<Idle|MPos:0,0,0|WCO:0,0,0|FS:0,0|Ov:100,bad,100>\r\n");
+            QTRY_VERIFY(!session.overrideFeedback);
+        } else if (loss == "reset")
+            session.awaitingReset = true;
+        else if (loss == "homing")
+            session.homingPending = true;
+        else if (loss == "handshake")
+            session.handshaking = true;
+        else if (loss == "state") {
+            controller.status = "Check";
+            controller.report();
+            QTRY_COMPARE(session.controllerState, QString("Check"));
+        } else if (loss == "bounds")
+            session.reportedMachinePosition = QPointF(200.0001, 0);
+        else if (loss == "inputs")
+            session.activeInputs = true;
+        QTest::qWait(10);
+        const auto before = controller.realtime.size();
+        QVERIFY(!session.status().overridesReady);
+        QVERIFY(!session.status().overridesSafetyError.isEmpty());
+        const bool accepted = session.overrides(125, 70);
+        QTest::qWait(20);
+        QCOMPARE(controller.realtime.mid(before), QByteArray());
+        QVERIFY(!accepted);
+        QCOMPARE(controller.feed, 100);
+        QCOMPARE(controller.power, 100);
+    }
+    void commissionedOverrideDispatchSupportsIdleRunAndHold_data() {
+        QTest::addColumn<QString>("controllerState");
+        QTest::addColumn<int>("feed");
+        QTest::addColumn<int>("power");
+        QTest::newRow("idle-low") << QString("Idle") << 10 << 10;
+        QTest::newRow("run-high") << QString("Run") << 200 << 100;
+        QTest::newRow("hold-adjust") << QString("Hold:0") << 125 << 70;
+    }
+    void commissionedOverrideDispatchSupportsIdleRunAndHold() {
+        QFETCH(QString, controllerState);
+        QFETCH(int, feed);
+        QFETCH(int, power);
+        Controller controller;
+        controller.withOverrides = true;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.status = controllerState;
+        controller.report();
+        QTRY_COMPARE(session.controllerState, controllerState.section(':', 0, 0));
+        QVERIFY(session.status().overridesReady);
+        QVERIFY(session.status().overridesSafetyError.isEmpty());
+        QVERIFY(session.overrides(feed, power));
+        QTRY_COMPARE(controller.feed, feed);
+        QTRY_COMPARE(controller.power, power);
+        QTRY_COMPARE(session.feedOverride, feed);
+        QTRY_COMPARE(session.powerOverride, power);
+        const auto before = controller.realtime.size();
+        QVERIFY(!session.overrides(9, power));
+        QVERIFY(!session.overrides(201, power));
+        QVERIFY(!session.overrides(feed, 9));
+        QVERIFY(!session.overrides(feed, 101));
+        QTest::qWait(20);
+        QCOMPARE(controller.realtime.mid(before), QByteArray());
+    }
     void adapterInitiatedResumeAbortWithOutputLeaseRequestsExactlyOneReset() {
         Controller controller;
         Document document;

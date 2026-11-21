@@ -318,7 +318,7 @@ bool GrblSession::open(const QString &port) {
 void GrblSession::handshake() {
     lastStatus.invalidate();
     knownReportedMachinePosition = false;
-    commissionedModalContract = commissionedHomingContract = false;
+    commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     awaitingReset = false;
     connectionVerified = false;
@@ -348,7 +348,7 @@ void GrblSession::handshake() {
 }
 void GrblSession::close() {
     knownReportedMachinePosition = false;
-    commissionedModalContract = commissionedHomingContract = false;
+    commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     const bool active = busy() || firing;
     poll.stop();
@@ -383,7 +383,7 @@ void GrblSession::close() {
 }
 void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause cause) {
     knownReportedMachinePosition = false;
-    commissionedModalContract = commissionedHomingContract = false;
+    commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     // A write/flush on a lost USB port can synchronously emit another serial
     // error. Do not recurse while attempting the best-effort shutdown.
@@ -528,7 +528,7 @@ void GrblSession::line(const QByteArray &s) {
         if (!coordinateSystem) {
             // Returning to G54 later cannot resurrect evidence established
             // before an unexpected coordinate-system change.
-            commissionedModalContract = false;
+            commissionedOverrideContract = commissionedModalContract = false;
             if (executing() || firing) {
                 fail("Aktives Arbeitskoordinatensystem verändert; Auftrag verworfen.",
                      ControllerDiagnostics::FaultCause::CoordinateMismatch);
@@ -603,12 +603,18 @@ void GrblSession::line(const QByteArray &s) {
             if (field.startsWith("Pn:"))
                 activeInputs = field.size() > 3;
             if (field.startsWith("Ov:")) {
+                overrideFeedback = false;
                 auto values = field.mid(3).split(',');
                 if (values.size() == 3) {
-                    feedOverride = values[0].toInt();
-                    powerOverride = values[2].toInt();
-                    overrideFeedback = feedOverride >= 10 && feedOverride <= 200 &&
+                    bool validFeed, validRapid, validPower;
+                    feedOverride = values[0].toInt(&validFeed);
+                    values[1].toInt(&validRapid);
+                    powerOverride = values[2].toInt(&validPower);
+                    overrideFeedback = validFeed && validRapid && validPower &&
+                                       feedOverride >= 10 && feedOverride <= 200 &&
                                        powerOverride >= 10 && powerOverride <= 200;
+                    if (overrideFeedback)
+                        lastOverrideFeedback.restart();
                 }
             }
             if (field.startsWith("WCO:")) {
@@ -687,7 +693,7 @@ void GrblSession::line(const QByteArray &s) {
         if (rejectUnsafeReportedMachinePosition())
             return;
         if (controllerState == "Alarm" || controllerState == "Door") {
-            commissionedModalContract = commissionedHomingContract = false;
+            commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
             positionReferenced = homingPending = false;
             connectionVerified = false;
             if (executing() || firing) {
@@ -970,7 +976,7 @@ void GrblSession::pause() {
 }
 void GrblSession::stop() {
     knownReportedMachinePosition = false;
-    commissionedModalContract = commissionedHomingContract = false;
+    commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     if (!connected())
         return;
@@ -1130,18 +1136,37 @@ void GrblSession::focus(bool on) {
     emit changed();
 }
 
+bool GrblSession::overridesReady() const {
+    return overridesSafetyError().isEmpty();
+}
+QString GrblSession::overridesSafetyError() const {
+    if (!commissionedOverrideContract)
+        return "Echtzeit-Overrides gesperrt: geordnete Einzelverarbeitung und 10–200-%-Begrenzung "
+               "dieses Controllers sind nicht gesondert verifiziert.";
+    if (!connected() || homingPending || awaitingReset || handshaking)
+        return "Echtzeit-Overrides gesperrt: Verbindung, Referenzfahrt oder Reset noch nicht "
+               "abgeschlossen.";
+    if (firing)
+        return "Echtzeit-Overrides gesperrt: Fokusimpuls aktiv.";
+    if (const auto error = motionSafetyError(); !error.isEmpty())
+        return error;
+    if (!verified() || !insideReportedMachineBed())
+        return "Echtzeit-Overrides gesperrt: frische geprüfte Positions-, WCO- und "
+               "Ausgangsrückmeldung innerhalb der Fahrgrenzen fehlt.";
+    if (!overrideFeedback || !lastOverrideFeedback.isValid() ||
+        lastOverrideFeedback.elapsed() > 1500)
+        return "Echtzeit-Overrides gesperrt: gültige frische Ov-Rückmeldung fehlt.";
+    if (controllerState != "Idle" && controllerState != "Run" && controllerState != "Hold")
+        return "Echtzeit-Overrides gesperrt: bestätigter Idle-, Run- oder Hold-Zustand fehlt.";
+    return {};
+}
 bool GrblSession::overrides(int feed, int power) {
-    if (!connected() || !configurationValid() || !overrideFeedback || feed < 10 || feed > 200 ||
-        power < 10 || power > 100)
+    if (!overridesReady() || feed < 10 || feed > 200 || power < 10 || power > 100)
         return false;
     QByteArray bytes;
-    auto change = [&](int current, int target, int reset, int plus10, int minus10, int plus1,
-                      int minus1) {
-        if (target == 100) {
-            bytes.append(char(reset));
-            return;
-        }
-        int delta = target - current;
+    auto change = [&](int target, int reset, int plus10, int minus10, int plus1, int minus1) {
+        bytes.append(char(reset));
+        int delta = target - 100;
         while (std::abs(delta) >= 10) {
             bytes.append(char(delta > 0 ? plus10 : minus10));
             delta += delta > 0 ? -10 : 10;
@@ -1151,8 +1176,15 @@ bool GrblSession::overrides(int feed, int power) {
             delta += delta > 0 ? -1 : 1;
         }
     };
-    change(feedOverride, feed, 0x90, 0x91, 0x92, 0x93, 0x94);
-    change(powerOverride, power, 0x99, 0x9a, 0x9b, 0x9c, 0x9d);
+    // Delayed Ov cannot establish a safe delta origin. With separately evidenced
+    // 10..200% clamping, 19 decrements first establish power 10%. Only then may
+    // feed change, followed by a monotonic power increase to the <=100% target.
+    // Never reset power to 100% while a reduced feed could amplify line energy.
+    bytes.append(QByteArray(19, char(0x9b)));
+    change(feed, 0x90, 0x91, 0x92, 0x93, 0x94);
+    int powerDelta = power - 10;
+    bytes.append(QByteArray(powerDelta / 10, char(0x9a)));
+    bytes.append(QByteArray(powerDelta % 10, char(0x9c)));
     diagnostic.realtime(ControllerDiagnostics::Command::Override,
                         serial.write(bytes) == bytes.size());
     diagnostic.statusQuery(serial.write("?") == 1);

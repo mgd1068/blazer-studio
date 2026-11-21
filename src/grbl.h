@@ -32,7 +32,9 @@ class GrblSession : public ControllerSession {
                 motionSafetyError(),
                 homingSafetyError(),
                 homingPending,
-                awaitingReset};
+                awaitingReset,
+                overridesReady(),
+                overridesSafetyError()};
     }
     QStringList logEntries() const override { return log; }
     QVariantMap diagnosticSnapshot() const override;
@@ -58,6 +60,8 @@ class GrblSession : public ControllerSession {
     QStringList log;
     void start(const JobPlan &job) override;
     bool overrides(int feed, int power) override;
+    bool overridesReady() const;
+    QString overridesSafetyError() const;
     int feedOverride = 100, powerOverride = 100;
     bool overrideFeedback = false;
     QString motionSafetyError() const;
@@ -86,10 +90,15 @@ class GrblSession : public ControllerSession {
     // commissioning workflow must bind these to a verified controller identity.
     std::optional<QRectF> commissionedEnvelope;
     bool commissionedModalContract = false;
+    // Independent evidence of ordered, exactly-once realtime byte processing
+    // and 10..200% clamping; standard GRBL flag coalescing does not prove this.
+    // No production grant exists; a banner or Ov readback cannot prove this.
+    bool commissionedOverrideContract = false;
     // Separate evidence for switches, directions and homing parameters. Homing
     // itself is physical motion and cannot be authorized by $22 or Idle alone.
     bool commissionedHomingContract = false;
     QElapsedTimer lastStatus;
+    QElapsedTimer lastOverrideFeedback;
     void receive();
     void line(const QByteArray &line);
     void pump();
