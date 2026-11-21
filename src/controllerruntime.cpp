@@ -115,15 +115,14 @@ ControllerSubmission ControllerRuntimeSession::requestOpen(const QString &endpoi
     return {id, true, {}};
 }
 bool ControllerRuntimeSession::open(const QString &endpoint) { return requestOpen(endpoint, {}).enqueued; }
-void ControllerRuntimeSession::close() {
+void ControllerRuntimeSession::cancelPendingOpen() {
     const auto cancelled=m_pendingOpen; m_pendingOpen=0;
-    m_mailbox->revoke(true);
     if (cancelled) QMetaObject::invokeMethod(this,[this,cancelled] {
         emit connectionRequestFinished(cancelled,false,"Verbindungsanforderung abgebrochen.");
     },Qt::QueuedConnection);
-    emit changed();
 }
-void ControllerRuntimeSession::stop() { m_mailbox->revoke(false); emit changed(); }
+void ControllerRuntimeSession::close() { cancelPendingOpen(); m_mailbox->revoke(true); emit changed(); }
+void ControllerRuntimeSession::stop() { cancelPendingOpen(); m_mailbox->revoke(false); emit changed(); }
 namespace {
 void send(const std::shared_ptr<ControllerRuntimeMailbox> &box, Request request) {
     request.issuedAt = nowMs(); request.expiresAt = request.issuedAt + 250;
@@ -215,7 +214,10 @@ void ControllerRuntimeWorker::initialize() {
     m_core->serial.setWriteBufferSize(256);
     m_watchdog = new QTimer(this); m_watchdog->setInterval(50);
     connect(m_watchdog,&QTimer::timeout,this,&ControllerRuntimeWorker::watchdog);
-    m_core->dispatchCancelled=[this] { return cancelDispatch(); };
+    m_core->dispatchCancelled=[this] {
+        return m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load();
+    };
+    m_core->dispatchPreflight=[this] { return cancelDispatch(); };
     connect(m_core.get(),&ControllerSession::changed,this,&ControllerRuntimeWorker::coreChanged);
     m_watchdog->start(); publish();
 }

@@ -65,6 +65,8 @@ class ControllerRuntimeSession final : public ControllerSession {
   private:
     friend class ControllerRuntimeTestAccess;
     friend class Machine;
+    friend class ControllerRuntimeWorker;
+    void cancelPendingOpen();
     const DeviceProfile m_profile;
     std::shared_ptr<ControllerRuntimeHost> m_host;
     ControllerRuntimeWorker *m_worker = nullptr;

@@ -85,6 +85,7 @@ class GrblSession : public ControllerSession {
     friend class ControllerRuntimeWorker;
     friend class ControllerRuntimeTestAccess;
     std::function<bool()> dispatchCancelled;
+    std::function<bool()> dispatchPreflight;
     int queueHead = 0;
     bool startPrepared(const PreparedControllerJob &job);
     bool commands(const QStringList &lines, bool buffered = false);

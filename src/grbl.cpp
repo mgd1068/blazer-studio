@@ -994,7 +994,7 @@ void GrblSession::pump() {
             if (queue[index] == "$G")
                 workZero->modalRequested = true;
         }
-        if (dispatchCancelled && dispatchCancelled())
+        if ((dispatchCancelled && dispatchCancelled()) || (dispatchPreflight && dispatchPreflight()))
             return;
         if (serial.write(bytes) != bytes.size()) {
             fail("Serieller Schreibfehler.", ControllerDiagnostics::FaultCause::WriteFailure);
@@ -1114,7 +1114,7 @@ void GrblSession::pause() {
     if (!connected() || !busy() || firing || handshaking)
         return;
     if (paused) {
-        if (dispatchCancelled && dispatchCancelled())
+        if ((dispatchCancelled && dispatchCancelled()) || (dispatchPreflight && dispatchPreflight()))
             return;
         const auto error = motionSafetyError();
         const bool verifiedState = verified();
@@ -1375,7 +1375,7 @@ bool GrblSession::overrides(int feed, int power) {
     int powerDelta = power - 10;
     bytes.append(QByteArray(powerDelta / 10, char(0x9a)));
     bytes.append(QByteArray(powerDelta % 10, char(0x9c)));
-    if (dispatchCancelled && dispatchCancelled())
+    if ((dispatchCancelled && dispatchCancelled()) || (dispatchPreflight && dispatchPreflight()))
         return false;
     const bool accepted = serial.write(bytes) == bytes.size();
     if (accepted) {
