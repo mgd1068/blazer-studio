@@ -284,6 +284,106 @@ class GrblTest : public QObject {
         QVERIFY(!controller.commands.contains("M9"));
         QVERIFY(!machine.accessoryJobActive);
     }
+    void sessionResumeRejectsLostMotionEvidenceBeforeCycleStart_data() {
+        QTest::addColumn<QString>("loss");
+        for (const auto &loss :
+             {"stale", "noGrants", "reference", "outsideEnvelope", "configuration", "offset"})
+            QTest::newRow(loss) << QString(loss);
+    }
+    void sessionResumeRejectsLostMotionEvidenceBeforeCycleStart() {
+        QFETCH(QString, loss);
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        requireReference(session);
+        controller.autoAck = false;
+        QVERIFY(session.commands({"G4 P1", "M5 S0"}));
+        session.pause(); // Safe hold is allowed before any resume decision.
+        controller.status = "Hold";
+        controller.report();
+        QTRY_VERIFY(session.paused && controller.realtime.contains('!'));
+        controller.respondToStatus = false;
+        if (loss == "stale")
+            QTest::qWait(1700);
+        else if (loss == "noGrants") {
+            session.commissionedEnvelope.reset();
+            session.commissionedModalContract = false;
+            session.positionReferenced = false;
+        } else if (loss == "reference")
+            session.positionReferenced = false;
+        else if (loss == "outsideEnvelope") {
+            controller.reply("<Hold|MPos:250,20,0|WCO:0,0,0|FS:0,0>\r\n");
+            QTRY_COMPARE(session.position, QPointF(250, 20));
+        } else if (loss == "configuration") {
+            controller.reply("$32=0\r\n");
+            QTRY_VERIFY(!session.laserMode);
+        } else
+            session.knownOffset = false;
+        const auto resets = controller.realtime.count(char(0x18));
+        session.pause(); // This would otherwise send cycle-start '~'.
+        QTRY_VERIFY_WITH_TIMEOUT(controller.realtime.count(char(0x18)) > resets ||
+                                     controller.realtime.contains('~'),
+                                 1000);
+        QVERIFY2(!controller.realtime.contains('~'),
+                 qPrintable("Unsafe cycle-start after loss: " + loss));
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+        QVERIFY(!session.status().positionReferenced);
+    }
+    void sessionJobPauseCannotInterfereWithResetOrExplicitHoming_data() {
+        QTest::addColumn<bool>("homingPhase");
+        QTest::newRow("reset-boundary") << false;
+        QTest::newRow("explicit-homing") << true;
+    }
+    void sessionJobPauseCannotInterfereWithResetOrExplicitHoming() {
+        QFETCH(bool, homingPhase);
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        if (homingPhase) {
+            session.commissionedHomingContract = true; // Separate synthetic homing evidence only.
+            controller.autoAck = false;
+            session.home();
+            QTRY_VERIFY(controller.commands.contains("M5"));
+            controller.reply("ok\r\n");
+            QTRY_VERIFY(controller.commands.contains("$H"));
+            QVERIFY(session.homingPending);
+        } else {
+            controller.respondToReset = false;
+            session.stop();
+            QTRY_VERIFY(controller.realtime.count(char(0x18)) == 2);
+            QVERIFY(session.awaitingReset);
+        }
+        const auto before = controller.realtime;
+        session.pause();
+        session.pause();
+        QTest::qWait(40);
+        QCOMPARE(controller.realtime, before); // No feed-hold, cycle-start, or extra reset.
+        QVERIFY(!controller.realtime.contains('~'));
+        QVERIFY(!session.paused);
+    }
+    void safeHoldStillWorksWithoutMotionGrantsButCannotResume() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        QVERIFY(!session.motionSafetyError().isEmpty());
+        controller.autoAck = false;
+        QVERIFY(session.commands({"G4 P1", "M5 S0"})); // Private, non-motion synthetic setup.
+        const auto holds = controller.realtime.count('!');
+        const auto resets = controller.realtime.count(char(0x18));
+        session.pause();
+        QTRY_COMPARE(controller.realtime.count('!'), holds + 1);
+        QCOMPARE(controller.realtime.count(char(0x18)), resets);
+        QVERIFY(session.paused);
+        session.pause();
+        QTRY_VERIFY_WITH_TIMEOUT(controller.realtime.count(char(0x18)) > resets ||
+                                     controller.realtime.contains('~'),
+                                 1000);
+        QVERIFY(!controller.realtime.contains('~'));
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+    }
     void protectiveStopDoesNotResendResetWhileAwaitingStartup() {
         Controller controller;
         Document document;

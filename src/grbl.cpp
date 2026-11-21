@@ -887,8 +887,27 @@ void GrblSession::start(const JobPlan &job) {
     commands(program.gcodeLines(), true);
 }
 void GrblSession::pause() {
+    if (awaitingReset || homingPending) {
+        diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
+                        ControllerDiagnostics::Denial::ControllerNotReady);
+        return;
+    }
     if (!connected() || !busy() || firing || handshaking)
         return;
+    if (paused) {
+        const auto error = motionSafetyError();
+        const bool verifiedState = verified();
+        const bool inside = insideMachineBed(position);
+        if (!error.isEmpty() || !verifiedState || !positionReferenced || !inside) {
+            diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
+                            !error.isEmpty() ? diagnosticMotionDenial()
+                            : !inside        ? ControllerDiagnostics::Denial::PhysicalBounds
+                                             : ControllerDiagnostics::Denial::ControllerNotReady);
+            stop(); // Reject resumption; never send cycle-start on lost evidence.
+            append("Fortsetzung verworfen: Controller-, Referenz- oder Positionsnachweis fehlt.");
+            return;
+        }
+    }
     paused = !paused;
     pauseRequested = paused;
     if (paused) {
