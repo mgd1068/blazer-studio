@@ -35,6 +35,12 @@ GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
             fail("Arbeitsnullpunkt nicht rechtzeitig eindeutig bestätigt; Referenz verworfen.",
                  ControllerDiagnostics::FaultCause::Timeout);
     });
+    ackClock.start();
+    ackTimeout.setSingleShot(true);
+    connect(&ackTimeout, &QTimer::timeout, this, [this] {
+        fail("GRBL-Quittierung überschreitet die begrenzte Host-Wartezeit; Auftrag verworfen.",
+             ControllerDiagnostics::FaultCause::Timeout);
+    });
     focusTimer.setSingleShot(true);
     focusTimer.setInterval(3000);
     connect(&serial, &QSerialPort::readyRead, this, &GrblSession::receive);
@@ -190,6 +196,37 @@ void GrblSession::auditDispatch(const QByteArray &bytes) {
 }
 bool GrblSession::statusFresh() const {
     return lastStatus.isValid() && lastStatus.elapsed() <= 1500;
+}
+void GrblSession::clearAckDeadline() {
+    ackTimeout.stop();
+    ackDue.clear();
+    ackPausedAt = -1;
+}
+void GrblSession::armAckDeadline() {
+    if (ackDue.isEmpty() || ackPausedAt >= 0) {
+        ackTimeout.stop();
+        return;
+    }
+    ackTimeout.start(int(std::max<qint64>(1, ackDue.first() - ackClock.elapsed())));
+}
+void GrblSession::acknowledgeDeadline() {
+    if (!ackDue.isEmpty())
+        ackDue.removeFirst(); // Bounded by the transport RX window.
+    armAckDeadline();
+}
+void GrblSession::pauseAckDeadline() {
+    if (ackPausedAt < 0)
+        ackPausedAt = ackClock.elapsed();
+    ackTimeout.stop();
+}
+void GrblSession::resumeAckDeadline() {
+    if (ackPausedAt >= 0) {
+        const auto delay = ackClock.elapsed() - ackPausedAt;
+        for (auto &due : ackDue)
+            due += delay;
+        ackPausedAt = -1;
+    }
+    armAckDeadline();
 }
 void GrblSession::clearWorkZero() {
     workZeroDeadline.stop();
@@ -356,6 +393,7 @@ bool GrblSession::open(const QString &port) {
         append(serial.errorString());
         return false;
     }
+    clearAckDeadline();
     clearWorkZero();
     input.clear();
     knownReportedMachinePosition = false;
@@ -391,6 +429,7 @@ bool GrblSession::open(const QString &port) {
     return true;
 }
 void GrblSession::handshake() {
+    clearAckDeadline();
     clearWorkZero();
     lastStatus.invalidate();
     knownReportedMachinePosition = false;
@@ -424,6 +463,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    clearAckDeadline();
     clearWorkZero();
     knownReportedMachinePosition = false;
     commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
@@ -461,6 +501,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause cause) {
+    clearAckDeadline();
     clearWorkZero();
     knownReportedMachinePosition = false;
     commissionedOverrideContract = commissionedModalContract = commissionedHomingContract = false;
@@ -907,8 +948,14 @@ void GrblSession::line(const QByteArray &s) {
             }
             rxBytes -= inFlight.takeFirst();
             --sent;
-        } else if (--pendingAcks > 0)
-            return;
+        } else {
+            --pendingAcks;
+            acknowledgeDeadline();
+            if (pendingAcks > 0)
+                return;
+        }
+        if (buffering)
+            acknowledgeDeadline();
         waitingAck = buffering && !inFlight.isEmpty();
         timeout.stop();
         if (!queue.isEmpty() && ++queueHead >= queue.size()) {
@@ -994,12 +1041,18 @@ void GrblSession::pump() {
             if (queue[index] == "$G")
                 workZero->modalRequested = true;
         }
-        if ((dispatchCancelled && dispatchCancelled()) || (dispatchPreflight && dispatchPreflight()))
+        if ((dispatchCancelled && dispatchCancelled()) ||
+            (dispatchPreflight && dispatchPreflight()))
             return;
         if (serial.write(bytes) != bytes.size()) {
             fail("Serieller Schreibfehler.", ControllerDiagnostics::FaultCause::WriteFailure);
             return;
         }
+        // Conservative host policy, NOT a proven GRBL planner-full bound.
+        // Status traffic must never renew an outstanding command's deadline.
+        for (int line = 0; line < bytes.count('\n'); ++line)
+            ackDue.append(ackClock.elapsed() + 10000);
+        armAckDeadline();
         if (buffering) {
             inFlight.append(bytes.size());
             rxBytes += bytes.size();
@@ -1132,10 +1185,12 @@ void GrblSession::pause() {
     paused = !paused;
     pauseRequested = paused;
     if (paused) {
+        pauseAckDeadline();
         diagnostic.realtime(ControllerDiagnostics::Command::FeedHold, serial.write("!") == 1);
         timeout.stop();
         state = "Pausiert";
     } else {
+        resumeAckDeadline();
         diagnostic.realtime(ControllerDiagnostics::Command::CycleResume, serial.write("~") == 1);
         state = "Läuft";
         if (waitingAck || waitingIdle)
@@ -1145,6 +1200,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    clearAckDeadline();
     clearWorkZero();
     overrideReadbackPending = false;
     knownReportedMachinePosition = false;

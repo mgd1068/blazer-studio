@@ -12,6 +12,7 @@ class ControllerRuntimeWorker final : public QObject {
     ControllerRuntimeWorker(DeviceProfile profile,
                             std::shared_ptr<ControllerRuntimeMailbox> mailbox);
     ~ControllerRuntimeWorker() override;
+
   private:
     friend class ControllerRuntimeSession;
     friend class ControllerRuntimeTestAccess;
@@ -29,6 +30,7 @@ class ControllerRuntimeWorker final : public QObject {
     void initialize();
   private slots:
     void drain();
+
   private:
     void watchdog();
     void publish();

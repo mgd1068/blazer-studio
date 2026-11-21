@@ -86,6 +86,15 @@ class GrblSession : public ControllerSession {
     friend class ControllerRuntimeTestAccess;
     std::function<bool()> dispatchCancelled;
     std::function<bool()> dispatchPreflight;
+    QTimer ackTimeout;
+    QElapsedTimer ackClock;
+    QList<qint64> ackDue;
+    qint64 ackPausedAt = -1;
+    void clearAckDeadline();
+    void armAckDeadline();
+    void acknowledgeDeadline();
+    void pauseAckDeadline();
+    void resumeAckDeadline();
     int queueHead = 0;
     bool startPrepared(const PreparedControllerJob &job);
     bool commands(const QStringList &lines, bool buffered = false);

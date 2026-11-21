@@ -4,8 +4,20 @@
 #include <QMetaObject>
 #include <QMutexLocker>
 #include <deque>
-enum class ControllerRuntimeRequestKind { Open, Jog, Home, Zero, Frame, Pause, Override, Focus, FocusOff, Start };
+enum class ControllerRuntimeRequestKind {
+    Open,
+    Jog,
+    Home,
+    Zero,
+    Frame,
+    Pause,
+    Override,
+    Focus,
+    FocusOff,
+    Start
+};
 struct ControllerRuntimeRequest {
+    explicit ControllerRuntimeRequest(ControllerRuntimeRequestKind value) : kind(value) {}
     ControllerRuntimeRequestKind kind;
     quint64 id = 0, generation = 0;
     quint64 connectionEpoch = 0;
@@ -19,6 +31,8 @@ struct ControllerRuntimeRequest {
     ControllerRuntimeInputStamp input;
     PreparedControllerJob::Ptr prepared;
 };
+void retireControllerRequests(std::deque<ControllerRuntimeRequest> requests);
+void retireControllerJob(PreparedControllerJob::Ptr job);
 struct ControllerRuntimeMailbox {
     QMutex mutex;
     QObject *context = nullptr;
@@ -47,24 +61,38 @@ struct ControllerRuntimeMailbox {
         }
     }
     bool enqueue(ControllerRuntimeRequest request) {
-        QMutexLocker lock(&mutex);
-        if (!accepting || normal.size() >= 16 || !context) return false;
-        request.generation = generation.load();
-        request.connectionEpoch = latest.connectionEpoch;
-        request.focusGeneration = focusGeneration.load();
-        normal.push_back(std::move(request));
-        wakeLocked();
-        return true;
+        bool accepted = false;
+        {
+            QMutexLocker lock(&mutex);
+            if (accepting && normal.size() < 16 && context) {
+                request.generation = generation.load();
+                request.connectionEpoch = latest.connectionEpoch;
+                request.focusGeneration = focusGeneration.load();
+                normal.push_back(std::move(request));
+                wakeLocked();
+                accepted = true;
+            }
+        }
+        if (!accepted)
+            retireControllerJob(std::move(request.prepared));
+        return accepted;
     }
     void revoke(bool closing, bool final = false) {
         // Revocation never grants authority and never waits for a worker slot.
         generation.fetch_add(1);
         stop.store(true);
-        if (closing) close.store(true);
-        if (final) shutdown.store(true);
-        QMutexLocker lock(&mutex);
-        if (final) accepting = false;
-        normal.clear();
-        wakeLocked();
+        if (closing)
+            close.store(true);
+        if (final)
+            shutdown.store(true);
+        std::deque<ControllerRuntimeRequest> retired;
+        {
+            QMutexLocker lock(&mutex);
+            if (final)
+                accepting = false;
+            normal.swap(retired);
+            wakeLocked();
+        }
+        retireControllerRequests(std::move(retired));
     }
 };

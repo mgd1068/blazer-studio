@@ -1,7 +1,7 @@
 #pragma once
 #include "controllersession.h"
-#include "preparedcontrollerjob.h"
 #include "job.h"
+#include "preparedcontrollerjob.h"
 #include <QMutex>
 #include <QThread>
 #include <atomic>
@@ -75,6 +75,7 @@ class ControllerRuntimeSession final : public ControllerSession {
     QStringList m_log;
     QVariantMap m_diagnostic;
     quint64 m_nextRequest = 0, m_pendingOpen = 0;
+    bool m_closing = false;
     JobMoves m_candidateMoves;
     QByteArray m_candidateProfile;
     quint64 m_prepareSequence = 0;

@@ -9,12 +9,12 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
     simulatorFrameNonce = QUuid::createUuid().toRfc4122();
     document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
-        return !self || (!self->busy() && !self->firing() &&
+        return !self || (!self->occupied() && !self->requestPending() && !self->busy() && !self->firing() &&
                          (!self->session || !self->session->status().connected));
     });
     document->addSynchronousWorkGuard([self = QPointer<Machine>(this)]() -> QString {
         if (!self || self->simulation()) return {};
-        if (self->busy() || self->firing() || self->session->status().accessoryLeaseActive ||
+        if (self->occupied() || self->requestPending() || self->busy() || self->firing() || self->session->status().accessoryLeaseActive ||
             self->session->status().accessoryJobActive || self->session->status().accessoryFocusActive)
             return "Schwere Datei- und Geometrieaktionen warten, bis die aktive Geräteaktion beendet ist. STOPP bleibt verfügbar; die automatische Sicherung wird danach nachgeholt.";
         return {};
@@ -35,9 +35,9 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
 void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
     if (previewDeviceBinding == binding) return;
     previewDeviceBinding = binding; // Publish before STOPP notifications can reenter the manager.
-    if (live && connected()) {
+    if (live && (connected() || occupied() || requestPending())) {
         document->notify("Gerätebindung geändert. Verbindung vor weiterer Bearbeitung erneut prüfen.");
-        stop();
+        session->close();
     }
     refreshPreviewPosition();
 }
@@ -111,11 +111,11 @@ ControllerSubmission Machine::requestConnectHardware(const QString &port, const 
     if (!result.enqueued) document->notify(result.reason);
     emit changed(); return result;
 }
-bool Machine::occupied() const { return busy() || firing() || (live && session && session->status().occupied); }
+bool Machine::occupied() const { return pendingSimulator || busy() || firing() || (live && session && session->status().occupied); }
 bool Machine::requestPending() const { return pendingSimulator || (live && session && session->status().requestPending); }
 bool Machine::statusFresh() const { return live && session && session->status().statusFresh; }
 qint64 Machine::statusAgeMs() const { return live && session ? session->status().statusAgeMs : -1; }
-QString Machine::connectionPhase() const { return live && session ? session->status().connectionPhase : "closed"; }
+QString Machine::connectionPhase() const { return pendingSimulator?QString("closing"):live && session ? session->status().connectionPhase : "closed"; }
 bool Machine::jobPreparing() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return live && runtime && runtime->jobPreparing(); }
 bool Machine::jobPrepared() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return !live || (runtime&&runtime->jobPrepared()); }
 QString Machine::prepareReason() const { const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); return live&&runtime?runtime->prepareReason():QString(); }
