@@ -11,9 +11,10 @@
 - Begrenzte Importvarianten, heuristisches Nesting und keine verlustfreie LightBurn-Projektmigration. Native Grafiken erfordern eine Verlustvorschau und werden zunächst als Vorlagen eingefügt.
 - Grafikbibliothek: eigene einzelne Bibliothek mit Kontur-/PNG-Kopien. Farb-/Strichdarstellung und parametrisierte Text-/Filterbearbeitung werden ausdrücklich nicht erhalten. Mehrdatei-Workflow, Drag-and-drop und `.lbart`-Migration fehlen.
 - Reale Live-Overrides benötigen zusätzlich einen separat belegten Echtzeit-Verarbeitungsvertrag; Standard-GRBL kann wiederholte Overridebytes zusammenfassen. Virtuelle Einzelbyte-Tests erteilen keine solche Freigabe.
-- Job-/Rasterberechnung und CSV-Stapel laufen im Hintergrund. Import, Dateischreiben und einzelne Advanced-Editoraktionen können weiterhin die Oberfläche aufhalten.
+- Job-/Rasterberechnung und CSV-Stapel laufen im Hintergrund. Import, Dateischreiben, die ausdrückliche manuelle Registrierungsprüfung und einzelne Advanced-Editoraktionen können weiterhin die Oberfläche aufhalten.
 - Höchstens 500000 Bewegungen pro Job, zusätzliche Raster-/Dateibudgets. Überschreitungen werden abgelehnt.
 - Abbruch ist kooperativ; interne Qt-Geometrieaufrufe sind nicht mitten in ihrer Ausführung unterbrechbar.
+- Manueller Print-and-Cut-Teilumfang: zwei explizite Koordinatenpaare richten die tatsächliche Simulation/GCode-Ausgabe aus; nur sitzungsbezogen und kein realer Positions-/Referenznachweis. Projekt-/Verlaufswechsel entfernen diese Ausrichtung; Source-/Masken-/Profiländerung sperrt alte Zuordnungen bis neuer Prüfung oder ausdrücklichem Reset. Kamera-Markensuche und reale Genauigkeitsabnahme fehlen. [Vertrag](../MANUAL_PRINT_AND_CUT.md).
 - Eine feste FHD-Webcam wird extern für Prüfaufnahmen verwendet; ein integriertes abgenommenes Live-Kamerasystem fehlt. Rotary, Z-/Oberflächenvermessung und separate Absaugsteuerung sind nicht freigegeben.
 - Ein Prozessabsturz während CSV-Veröffentlichung kann einen vollständigen Teilstapel hinterlassen. Bestehende Ausgaben werden beim Wiederholen nicht überschrieben.
 - Die erste Paketplattform ist Ubuntu 26.04 x86_64. Unterstützung weiterer Systeme folgt erst nach Prüfung.

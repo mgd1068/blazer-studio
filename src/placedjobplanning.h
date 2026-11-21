@@ -1,5 +1,6 @@
 #pragma once
 #include "jobplacement.h"
+#include "manualregistration.h"
 #include <QJsonValue>
 
 namespace PlacedJobPlanning {
@@ -27,6 +28,7 @@ struct Context {
 struct Input {
     JobInput document;
     Context placement;
+    ManualRegistration::Context registration{};
 };
 struct Result {
     JobPlan plan;

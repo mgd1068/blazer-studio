@@ -22,6 +22,8 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(StartMode startMode READ startMode NOTIFY changed)
     Q_PROPERTY(JobOrigin jobOrigin READ jobOrigin NOTIFY changed)
     Q_PROPERTY(QVariantMap placementSummary READ placementSummary NOTIFY changed)
+    Q_PROPERTY(QVariantMap manualRegistrationSummary READ manualRegistrationSummary NOTIFY changed)
+    Q_PROPERTY(QString manualRegistrationOutputKey READ manualRegistrationOutputKey NOTIFY changed)
     Q_PROPERTY(QVariantMap beginnerSummary READ beginnerSummary NOTIFY changed)
     Q_PROPERTY(bool imageExportBusy READ imageExportBusy NOTIFY changed)
     Q_PROPERTY(bool batchBusy READ batchBusy NOTIFY changed)
@@ -82,6 +84,14 @@ class Document : public QAbstractListModel {
     bool setPreviewPosition(const JobPlacement::PositionSnapshot &position);
     void clearPreviewPosition();
     bool hasPreviewPosition() const { return m_previewPosition.has_value(); }
+    std::optional<JobPlacement::PositionSnapshot> previewPositionSnapshot() const { return m_previewPosition; }
+    QByteArray offlineRegistrationFrame() const;
+    bool manualRegistrationEnabled() const { return m_manualRegistration.has_value(); }
+    QVariantMap manualRegistrationSummary() const;
+    QString manualRegistrationOutputKey() const { return m_manualRegistration ? QString::fromLatin1(ManualRegistration::intentFingerprint(*m_manualRegistration)) : QString(); }
+    // C++ data-only API; no controller/reference/physical grant is created.
+    bool applyManualRegistration(const ManualRegistration::Intent &intent);
+    Q_INVOKABLE void resetManualRegistration();
     QVariantMap placementSummary() const;
     PlacedJobPlanning::Input planningInput() const;
     enum Roles {
@@ -313,6 +323,8 @@ class Document : public QAbstractListModel {
     quint64 m_framingRevision = 0;
     std::optional<Snapshot> m_beforeMove;
     PlacedJobPlanning::Intent m_placementIntent;
+    std::optional<ManualRegistration::Intent> m_manualRegistration;
+    quint64 m_registrationFrameRevision = 0;
     std::optional<JobPlacement::PositionSnapshot> m_previewPosition, m_confirmedUserOrigin;
     mutable QVariantMap m_syncPlacementSummary;
     mutable std::optional<JobPlan> m_job;

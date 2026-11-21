@@ -407,6 +407,9 @@ void Document::applySnapshot(const Snapshot &s) {
     m_guidesVisible = s.guidesVisible;
     m_guideSnapping = s.guideSnapping;
     m_placementIntent = s.placementIntent;
+    const bool registrationWasActive = m_manualRegistration.has_value();
+    m_manualRegistration.reset(); // Files/history never restore a runtime registration.
+    ++m_registrationFrameRevision;
     m_confirmedUserOrigin.reset(); // History/files restore intent, never runtime confirmation.
     if (profileChanged) m_previewPosition.reset();
     m_beforeMove.reset();
@@ -414,8 +417,13 @@ void Document::applySnapshot(const Snapshot &s) {
     if (profileChanged)
         emit deviceProfileChanged();
     refresh();
+    if (registrationWasActive)
+        notify("Print-and-Cut-Registrierung durch Projekt-/Verlaufswechsel entfernt. Zielpunkte vor registrierter Ausgabe erneut prüfen.");
 }
 void Document::demo() {
+    const bool registrationWasActive = manualRegistrationEnabled();
+    m_manualRegistration.reset();
+    ++m_registrationFrameRevision;
     m_placementIntent = {};
     m_confirmedUserOrigin.reset();
     m_guides.clear();
@@ -445,9 +453,12 @@ void Document::demo() {
     markClean();
     endResetModel();
     refresh();
-    notify("Beispielprojekt · Parameter sind Entwurfswerte, keine Materialempfehlung.");
+    notify(registrationWasActive
+        ? "Print-and-Cut-Registrierung entfernt. Beispielprojekt geladen; Zielpunkte vor registrierter Ausgabe erneut prüfen."
+        : "Beispielprojekt · Parameter sind Entwurfswerte, keine Materialempfehlung.");
 }
 void Document::newProject() {
+    const bool registrationWasActive = manualRegistrationEnabled();
     demo();
     beginResetModel();
     m_items.clear();
@@ -457,7 +468,9 @@ void Document::newProject() {
     markClean();
     endResetModel();
     refresh();
-    notify("Neues Projekt · SVG importieren oder Formen hinzufügen.");
+    notify(registrationWasActive
+        ? "Print-and-Cut-Registrierung entfernt. Neues Projekt; Zielpunkte vor registrierter Ausgabe erneut prüfen."
+        : "Neues Projekt · SVG importieren oder Formen hinzufügen.");
 }
 void Document::clearHistory() {
     m_clipboardPasteHash.clear();
@@ -1445,12 +1458,15 @@ bool Document::open(const QUrl &url) {
     }
     if (!canApplyDeviceProfile(state->deviceProfile))
         return false;
+    const bool registrationWasActive = manualRegistrationEnabled();
     clearHistory();
     applySnapshot(*state);
     markClean();
     setFileUrl(QUrl::fromLocalFile(QFileInfo(url.toLocalFile()).absoluteFilePath()));
     emit changed();
-    notify("Projekt geöffnet.");
+    notify(registrationWasActive
+        ? "Print-and-Cut-Registrierung entfernt. Projekt geöffnet; Zielpunkte vor registrierter Ausgabe erneut prüfen."
+        : "Projekt geöffnet.");
     emit projectFileUsed(m_fileUrl);
     return true;
 }
@@ -1505,13 +1521,16 @@ bool Document::newFromTemplate(const QUrl &url) {
     }
     if (!canApplyDeviceProfile(state->deviceProfile))
         return false;
+    const bool registrationWasActive = manualRegistrationEnabled();
     // A template starts an independent, unsaved document with fresh history.
     // Its source is never treated as the project's ordinary save destination.
     clearHistory();
     m_saved = Snapshot{};
     setFileUrl({});
     applySnapshot(*state);
-    notify("Neues Projekt aus Vorlage; bitte unter eigenem Projektnamen speichern.");
+    notify(registrationWasActive
+        ? "Print-and-Cut-Registrierung entfernt. Vorlage geladen; Zielpunkte erneut prüfen und separat speichern."
+        : "Neues Projekt aus Vorlage; bitte unter eigenem Projektnamen speichern.");
     return true;
 }
 QPainterPath Document::outline(const Artwork &a) {
@@ -1768,8 +1787,8 @@ bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSp
                                   double minPower, double maxPower, int steps) {
     if (!permitSynchronousWork())
         return false;
-    if (m_placementIntent.mode != JobPlacement::Mode::Absolute || cutSelectedGraphics()) {
-        notify("Materialtest-Export unterstützt noch keine relativen Startmodi oder Auswahlmasken; "
+    if (m_placementIntent.mode != JobPlacement::Mode::Absolute || cutSelectedGraphics() || manualRegistrationEnabled()) {
+        notify("Materialtest-Export unterstützt noch keine Registrierung, relativen Startmodi oder Auswahlmasken; "
                "keine absolute Ersatzdatei erzeugt.");
         return false;
     }

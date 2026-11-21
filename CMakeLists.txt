@@ -38,6 +38,7 @@ qt_add_library(blazer-core STATIC
     src/nativedesign.cpp src/nativedesign.h src/nativecompatibility.cpp src/nativecompatibility.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
+    src/manualregistration.cpp src/manualregistration.h src/manualregistrationcontroller.cpp src/manualregistrationcontroller.h
     src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imagelimits.h src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
     src/batchexport.cpp src/batchexport.h src/atomicfile.cpp src/atomicfile.h src/artwork.h src/cancellation.h src/jobpreparation.cpp src/jobpreparation.h src/document.cpp src/document.h src/geometry.h src/job.cpp src/job.h
     src/svgasset.cpp src/svgasset.h src/materiallibrary.cpp src/materiallibrary.h
@@ -66,7 +67,7 @@ endif()
 
 set(blazer_qml
     qml/NativeImportDialog.qml qml/VectorInspectionDialog.qml qml/TechnicalDiagnosticsDialog.qml qml/ArtLibraryDialog.qml qml/JobPlacementDialog.qml qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
-    qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
+    qml/ManualRegistrationDialog.qml qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml qml/ProjectDialog.qml qml/RecentProjectsDialog.qml qml/HistoryDialog.qml)
 qt_add_executable(blazer-studio src/main.cpp)
 qt_add_qml_module(blazer-studio URI BlazerStudio VERSION 1.0 QML_FILES ${blazer_qml})
@@ -131,6 +132,12 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-devicemanager-adversarial-tests tests/devicemanager_adversarial_test.cpp)
     target_link_libraries(blazer-devicemanager-adversarial-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME devicemanager_adversarial COMMAND blazer-devicemanager-adversarial-tests -platform offscreen)
+    qt_add_executable(blazer-manualregistration-tests tests/manualregistration_test.cpp)
+    target_link_libraries(blazer-manualregistration-tests PRIVATE blazer-core Qt6::Test Qt6::QuickControls2)
+    qt_add_resources(blazer-manualregistration-tests manual_registration_qml PREFIX /qt/qml/BlazerStudio FILES ${blazer_qml})
+    target_compile_definitions(blazer-manualregistration-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME manualregistration COMMAND blazer-manualregistration-tests -platform offscreen)
+    set_tests_properties(manualregistration PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     qt_add_executable(blazer-runtime-lifecycle-tests tests/runtimelifecycle_test.cpp)
     target_link_libraries(blazer-runtime-lifecycle-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME runtime_lifecycle COMMAND blazer-runtime-lifecycle-tests)

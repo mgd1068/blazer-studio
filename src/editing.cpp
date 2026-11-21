@@ -255,11 +255,14 @@ bool Document::restoreBytes(const QByteArray &bytes) {
     }
     if (!canApplyDeviceProfile(state->deviceProfile))
         return false;
+    const bool registrationWasActive = manualRegistrationEnabled();
     checkpoint("Wiederherstellung");
     m_saved = Snapshot{};
     setFileUrl({});
     applySnapshot(*state);
-    notify("Projekt wiederhergestellt; bitte separat speichern.");
+    notify(registrationWasActive
+        ? "Print-and-Cut-Registrierung entfernt. Wiederhergestellte Zielpunkte erneut prüfen und separat speichern."
+        : "Projekt wiederhergestellt; bitte separat speichern.");
     return true;
 }
 bool Document::command(const QString &action, const QVariantMap &args) {

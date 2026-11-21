@@ -187,6 +187,24 @@ PlacedJobPlanning::Result PlacedJobPlanning::finish(const Input &input, JobPlan 
     const auto output =
         input.document.cutSelectedGraphics ? graphics(input.document, true, cancel) : design;
     const auto &geometry = selectedOrigin ? output : design;
+    if (input.registration.intent) {
+        if (context.intent.mode != JobPlacement::Mode::Absolute)
+            return fail("Aktive Print-and-Cut-Registrierung benötigt absolute Ausgabe. Registrierung zurücksetzen oder Absolute Koordinaten wählen.");
+        auto registered = ManualRegistration::apply(input.document, result.plan,
+            *input.registration.intent, input.registration.offlineFrame, context.startPosition, cancel);
+        result.summary["registration"] = registered.summary;
+        if (!registered.valid()) return fail(registered.summary.value("reason").toString());
+        result.plan = std::move(registered.plan);
+        result.summary["valid"] = true;
+        result.summary["reason"] = registered.summary.value("reason");
+        result.summary["approachKnown"] = registered.summary.value("approachKnown");
+        result.summary["sourceFingerprint"] = registered.summary.value("sourceFingerprint");
+        if (output.any) {
+            result.summary["sourceGraphicsBounds"] = bounds(output.bounds);
+            result.summary["graphicsBounds"] = bounds(registered.transform.mapRect(output.bounds));
+        }
+        return result;
+    }
     if (design.any)
         result.summary["designGraphicsBounds"] = bounds(design.bounds);
     if (output.any)

@@ -13,6 +13,8 @@ QVariantMap Document::framingBounds(const QString &scope) const {
     };
     if (const auto reason = synchronousWorkBlockReason(); !reason.isEmpty())
         return invalid(reason);
+    if (manualRegistrationEnabled() && scope != "job")
+        return invalid("Aktive Print-and-Cut-Registrierung: nur den registrierten Auftragsrahmen verwenden. Auswahl-/Hilfsrahmen bleiben Entwurfskoordinaten.");
     if (!QStringList{"job", "selection", "tools", "t1", "t2"}.contains(scope))
         return invalid("Unbekanntes Ziel der Rahmenfahrt.");
     bool first = true;

@@ -421,8 +421,8 @@ bool Document::importProject(const QUrl &url) {
 bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &pattern) {
     if (!permitSynchronousWork())
         return false;
-    if (startMode() != AbsoluteCoordinates || cutSelectedGraphics()) {
-        notify("CSV-Stapelexport unterstützt noch keine relativen Startmodi oder Auswahlmasken; "
+    if (startMode() != AbsoluteCoordinates || cutSelectedGraphics() || manualRegistrationEnabled()) {
+        notify("CSV-Stapelexport unterstützt noch keine Registrierung, relativen Startmodi oder Auswahlmasken; "
                "keine absolute Ersatzdatei erzeugt.");
         return false;
     }

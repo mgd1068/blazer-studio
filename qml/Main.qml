@@ -35,6 +35,7 @@ ApplicationWindow {
     readonly property bool processingReady: !controllerRequestPending && machine.ready && (win.simulationMode || (controllerStatusFresh && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))
     readonly property var deviceService: typeof deviceManager !== "undefined" ? deviceManager : null
     readonly property var artStore: typeof artLibrary !== "undefined" ? artLibrary : null
+    readonly property var registrationService: typeof manualRegistrationController !== "undefined" ? manualRegistrationController : null
     readonly property var artService: typeof artLibraryController !== "undefined" ? artLibraryController : null
     readonly property var vectorInspector: typeof vectorInspectionService !== "undefined" ? vectorInspectionService : null
     readonly property var testLedger: typeof materialTestLedger !== "undefined" ? materialTestLedger : null
@@ -42,7 +43,7 @@ ApplicationWindow {
     property bool basic: true
     property bool proofConfirmed: false
     property string probeKey: ""
-    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey+project.cutSelectedGraphics+(project.cutSelectedGraphics ? JSON.stringify(project.selectedRows) : "")+(deviceService ? deviceService.bindingKey+deviceService.parameterHash : "")
+    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey+project.cutSelectedGraphics+(project.cutSelectedGraphics ? JSON.stringify(project.selectedRows) : "")+(deviceService ? deviceService.bindingKey+deviceService.parameterHash : "")+(typeof project.manualRegistrationOutputKey !== "undefined" ? project.manualRegistrationOutputKey : "")
     readonly property bool isBasicProbe: probeKey===parameterKey && project.count===1 && project.selection.width===5 && project.selection.height===5
     onParameterKeyChanged: proofConfirmed=false
     onBasicChanged: {
@@ -81,7 +82,7 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || technicalDiagnosticsPreview.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: controllerClosePending || startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible || artLibraryDialog.visible
+    readonly property bool projectDialogActive: controllerClosePending || startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || manualRegistrationDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible || artLibraryDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
@@ -213,6 +214,7 @@ ApplicationWindow {
     NativeImportDialog { id: nativeImportReview; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false); onImported: { win.page=0; win.proofConfirmed=false; Qt.callLater(win.revealObjectSelection) } }
     VectorInspectionDialog { id: vectorInspectionDialog; service: win.vectorInspector; dark: win.night; onAboutToShow: machine.focus(false) }
     JobPlacementDialog { id: jobPlacementDialog; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false) }
+    ManualRegistrationDialog { id: manualRegistrationDialog; document: project; service: win.registrationService; dark: win.night; onAboutToShow: machine.focus(false) }
     DeviceManagerDialog { id: deviceDialog; manager: win.deviceService; dark: win.night; onAboutToShow: machine.focus(false) }
     BarcodeDialog { id: barcodeDialog; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
     MaterialTestRecordDialog { id: materialRecordDialog; manager: win.deviceService; ledger: win.testLedger; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
@@ -699,6 +701,13 @@ ApplicationWindow {
             text: "Verbindung wird beendet. Das Fenster wartet auf die bestätigte Porttrennung. STOPP bleibt verfügbar; ein geschlossener Port bestätigt keine physische Laser-Abschaltung."
         }
         Label {
+            objectName: "manualRegistrationIndicator"
+            visible: !!win.registrationService && win.registrationService.state.enabled === true
+            Layout.fillWidth: true; leftPadding:18;rightPadding:18;topPadding:6;bottomPadding:6
+            wrapMode:Text.WordWrap;textFormat:Text.PlainText;color:win.ink
+            text: win.registrationService ? (win.registrationService.state.busy ? "Print and Cut: registrierte Ausgabe wird berechnet …" : win.registrationService.state.valid ? "Print and Cut aktiv · registrierte Simulation/GCode-Ausgabe · nur diese Sitzung" : "Print and Cut GESPERRT: "+win.registrationService.state.reason) : ""
+        }
+        Label {
             objectName: "synchronousWorkStatus"
             visible: !win.synchronousWorkReady
             Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 8; bottomPadding: 8
@@ -740,6 +749,7 @@ ApplicationWindow {
                     }
                     ActionButton { objectName: "manageDevicesButton"; text: "Geräte verwalten …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.deviceService; enabled: win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
                     ActionButton { objectName: "jobPlacementButton"; text: "Startposition & Ursprung …"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: !win.runtimeOccupied; onClicked: jobPlacementDialog.open() }
+                    ActionButton { objectName: "manualRegistrationButton"; text: win.registrationService && win.registrationService.state.enabled ? "Print and Cut · AKTIV …" : "Print and Cut …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.registrationService; enabled: !!win.registrationService && win.registrationService.blockReason.length === 0; onClicked: manualRegistrationDialog.open() }
                     ActionButton { objectName: "artLibraryButton"; text: "Grafikbibliothek …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.artService; enabled: !!win.artService && win.artService.blockReason.length === 0; onClicked: artLibraryDialog.open() }
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true

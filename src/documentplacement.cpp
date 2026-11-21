@@ -1,4 +1,6 @@
 #include "document.h"
+#include <QCryptographicHash>
+#include <QPointer>
 
 QStringList Document::selectedArtworkIds() const {
     QStringList ids;
@@ -37,7 +39,8 @@ void Document::refreshPlanning() {
         m_preparation.submit(planningInput());
 }
 PlacedJobPlanning::Input Document::planningInput() const {
-    return {jobInput(), {m_placementIntent, m_previewPosition, m_confirmedUserOrigin}};
+    return {jobInput(), {m_placementIntent, m_previewPosition, m_confirmedUserOrigin},
+            {m_manualRegistration, offlineRegistrationFrame()}};
 }
 bool Document::setStartMode(StartMode mode) {
     if (mode < AbsoluteCoordinates || mode > UserOrigin) {
@@ -162,4 +165,55 @@ QVariantMap Document::placementSummary() const {
     else
         summary["userOrigin"] = QVariantMap{{"present", false}};
     return summary;
+}
+
+QByteArray Document::offlineRegistrationFrame() const {
+    return QCryptographicHash::hash(QByteArrayLiteral("offline-g54-intent-v1:") +
+        m_framingInstance.toUtf8() + QByteArray::number(m_registrationFrameRevision) +
+        m_deviceProfile.outputFingerprint(), QCryptographicHash::Sha256).toHex();
+}
+QVariantMap Document::manualRegistrationSummary() const {
+    if (!m_manualRegistration)
+        return {{"enabled",false},{"valid",false},{"reason","Keine manuelle Ausgaberegistrierung aktiv."}};
+    auto summary = placementSummary().value("registration").toMap();
+    summary["enabled"] = true;
+    summary["busy"] = planningBusy();
+    if (summary.isEmpty() || !job().valid()) {
+        summary["valid"] = false;
+        summary["reason"] = job().errors.join("; ");
+    }
+    return summary;
+}
+bool Document::applyManualRegistration(const ManualRegistration::Intent &intent) {
+    if (!permitSynchronousWork()) return false;
+    if (planningBusy() || batchBusy() || imageExportBusy()) {
+        notify("Registrierung während Berechnung oder Export gesperrt."); return false;
+    }
+    const auto input = jobInput();
+    const auto plan = JobPlanner::build(input);
+    const auto checked = ManualRegistration::apply(input, plan, intent, offlineRegistrationFrame(), m_previewPosition);
+    if (!checked.valid()) { notify(checked.summary.value("reason").toString()); return false; }
+    // Registration affects output only. Selecting Absolute uses the existing undoable
+    // project intent; the measured/typed alignment itself is intentionally session-only.
+    if (startMode() != AbsoluteCoordinates) {
+        checkpoint("Absolute Ausgabe für Print and Cut");
+        m_placementIntent.mode = JobPlacement::Mode::Absolute;
+    }
+    m_manualRegistration = intent;
+    const QPointer<Document> alive(this);
+    refresh();
+    if (!alive) return true;
+    notify("Manuelle Ausgaberegistrierung aktiv: Simulation, GCode und Auftragsrahmen verwenden die registrierten Wege. Registrierung wird nicht im Projekt gespeichert.");
+    return true;
+}
+void Document::resetManualRegistration() {
+    if (!m_manualRegistration) return;
+    if (!permitSynchronousWork()) return;
+    m_manualRegistration.reset();
+    const QPointer<Document> alive(this);
+    refreshPlanning();
+    if (!alive) return;
+    emit changed();
+    if (!alive) return;
+    notify("Manuelle Ausgaberegistrierung ausdrücklich zurückgesetzt; Startmodus und Ursprung jetzt separat prüfen.");
 }
