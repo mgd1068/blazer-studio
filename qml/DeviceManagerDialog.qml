@@ -37,6 +37,12 @@ Dialog {
       ColumnLayout {
         width: deviceScroll.availableWidth; spacing: 10
         Label {
+            objectName: "deviceRuntimeConnectionStatus"
+            Layout.fillWidth: true; color: dialog.ink; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+            visible: text.length > 0
+            text: dialog.manager && typeof dialog.manager.connectionStatusText !== "undefined" ? dialog.manager.connectionStatusText : ""
+        }
+        Label {
             Layout.fillWidth: true; color: dialog.ink; wrapMode: Text.WordWrap
             text: "Jeder physische Laser erhält einen eigenen Eintrag – auch zwei gleiche Modelle. Auswählen öffnet keine Verbindung und bestätigt keine Maschinenkalibrierung."
         }

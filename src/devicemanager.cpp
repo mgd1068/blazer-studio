@@ -13,6 +13,25 @@ DeviceManager::DeviceManager(Document *d, Machine *m, QString path, QObject *par
     : QObject(parent), document(d), machine(m), library(std::move(path)) {
     connect(&library, &DeviceLibrary::changed, this, &DeviceManager::changed);
     connect(machine, &Simulator::changed, this, &DeviceManager::changed);
+    connect(machine, &Machine::connectionRequestFinished, this,
+            [this](quint64 requestId, bool opened, const QString &reason) {
+                if (!pendingConnectionRequestId || requestId != pendingConnectionRequestId)
+                    return;
+                const bool currentBinding = bindingKey() == pendingConnectionBinding;
+                pendingConnectionRequestId = 0;
+                pendingConnectionBinding.clear();
+                // The worker/facade also rejects stale epochs. A late UI result must not
+                // overwrite a different selected identity's message, even for the same model.
+                if (currentBinding) {
+                    lastMessage =
+                        opened ? "Anschluss geöffnet. Controllerprüfung läuft; Maschinenreferenz, "
+                                 "Koordinaten und Absaugung benötigen eigene Nachweise."
+                               : (reason.isEmpty() ? "Anschluss konnte nicht geöffnet werden. "
+                                                     "Keine Verbindung bestätigt."
+                                                   : reason);
+                }
+                emit changed();
+            });
     connect(document, &Document::changed, this, &DeviceManager::changed);
     connect(this, &DeviceManager::changed, this, [this] {
         machine->setPreviewDeviceBinding(bindingKey().toUtf8());
@@ -30,9 +49,36 @@ bool DeviceManager::fail(QString text) {
     emit changed();
     return false;
 }
+QString DeviceManager::connectionStatusText() const {
+    const auto phase = machine->connectionPhase();
+    if (phase == "closing")
+        return "Verbindung wird beendet. Gerätezuordnung erst nach bestätigter Trennung ändern.";
+    if (connectionRequestPending() || phase == "opening")
+        return "Verbindungsanfrage läuft. Anschlussöffnung und Controllerprüfung sind noch nicht "
+               "bestätigt.";
+    if (machine->simulation())
+        return "Simulatorbetrieb. Keine reale Verbindung oder Maschinenfreigabe.";
+    if (phase == "handshake")
+        return "Anschluss geöffnet; Controllerprüfung läuft. Keine Bewegungsfreigabe.";
+    if (phase == "fault")
+        return "Verbindung oder Controllerprüfung fehlgeschlagen. Status prüfen; keine "
+               "automatische Wiederverbindung.";
+    if (!machine->connected())
+        return "Reale Verbindung getrennt. Erneutes Verbinden muss ausdrücklich angefordert "
+               "werden.";
+    if (!machine->statusFresh())
+        return "Controllerdaten fehlen oder sind veraltet. Keine aktuelle Bereitschaft bestätigt.";
+    if (machine->connectionVerified())
+        return "Controllerprüfung bestätigt. Referenz, Fahrraum und Zubehör bleiben eigenständige "
+               "Freigaben.";
+    return "Realer Anschluss geöffnet; keine vollständige aktuelle Controllerprüfung bestätigt.";
+}
 QString DeviceManager::changeBlockReason() const {
     if (changing) return "Geräteänderung läuft. Bitte warten.";
     if (!library.writable()) return library.message();
+    if (machine->occupied() || machine->requestPending())
+        return "Gerätezuordnung gesperrt: Verbindungs- oder Geräteaktion läuft. Abschluss oder "
+               "bestätigte Trennung abwarten.";
     if (!machine->simulation() && machine->connected())
         return "Gerätezuordnung gesperrt: zuerst die echte Verbindung trennen.";
     if (machine->busy() || machine->firing())
@@ -53,6 +99,8 @@ void DeviceManager::refreshEndpoints() {
 }
 void DeviceManager::invalidateSelection() {
     selectedId.clear(); selectedBinding.clear();
+    pendingConnectionRequestId = 0;
+    pendingConnectionBinding.clear();
     lastMessage = "Gerätezuordnung hat sich geändert. Das physische Gerät erneut auswählen; keine Verbindung wurde geöffnet.";
     emit changed();
 }
@@ -158,13 +206,25 @@ bool DeviceManager::connectSelected() {
     if (!library.writable()) return fail(library.message());
     if (bindingKey().isEmpty()) return fail("Zuerst ein physisches Gerät in der Geräteverwaltung auswählen.");
     if (!machine->simulation() && machine->connected()) return fail("Eine echte Verbindung ist bereits geöffnet; zum Wechseln zuerst trennen.");
-    if (machine->busy() || machine->firing() || document->planningBusy() || document->batchBusy() || document->imageExportBusy()) return fail("Verbindung während Auftrag, Fokus, Berechnung oder Export gesperrt.");
+    if (connectionRequestPending() || machine->occupied() || machine->requestPending() ||
+        machine->busy() || machine->firing() || document->planningBusy() || document->batchBusy() ||
+        document->imageExportBusy())
+        return fail("Verbindung während einer offenen Anfrage, Geräteaktion, Berechnung oder eines "
+                    "Exports gesperrt.");
     Mutation mutation(*this);
     const auto endpoint = active()["endpoint"].toString();
     if (endpoint.isEmpty()) return fail("Für dieses Gerät fehlt der lokale Anschluss. In der Geräteverwaltung eintragen.");
     const auto error = DeviceBackends::runtimeSupportError(*library.profile(selectedId));
     if (!error.isEmpty()) return fail(error);
-    if (!machine->connectHardware(endpoint)) return fail(document->message());
-    lastMessage = "Verbindungsprüfung gestartet. Maschinenreferenz, Koordinaten und Absaugung benötigen eigene Nachweise.";
+    const auto binding = bindingKey();
+    const auto submission = machine->requestConnectHardware(endpoint, binding.toUtf8());
+    if (!submission.enqueued)
+        return fail(submission.reason.isEmpty()
+                        ? "Verbindungsanfrage nicht angenommen; kein Anschluss geöffnet."
+                        : submission.reason);
+    pendingConnectionRequestId = submission.requestId;
+    pendingConnectionBinding = binding;
+    lastMessage = "Verbindungsanfrage angenommen. Anschlussöffnung und Controllerprüfung sind noch "
+                  "nicht bestätigt.";
     emit changed(); return true;
 }

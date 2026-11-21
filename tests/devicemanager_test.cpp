@@ -1,10 +1,27 @@
 #include "devicemanager.h"
 #include "document.h"
 #include "machine.h"
+#include "support/runtimepeer.h"
 #include <QFile>
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+
+using RuntimeTestSupport::RuntimePeer;
+namespace {
+QString peerScript() {
+    return QFileInfo(QString::fromUtf8(__FILE__))
+        .absoluteDir()
+        .filePath("support/runtime_pty_peer.py");
+}
+bool configurePeer(RuntimePeer &peer, const QJsonObject &values) {
+    const auto reply = peer.control({{"action", "set"}, {"values", values}});
+    return reply.ok && reply.object["accepted"].toBool();
+}
+} // namespace
 
 class DeviceManagerTest : public QObject {
     Q_OBJECT
@@ -17,6 +34,112 @@ class DeviceManagerTest : public QObject {
         return *result;
     }
   private slots:
+    void asynchronousOpenAdmissionOwnsImmediateFenceAndCorrelatedResult() {
+        RuntimePeer peer;
+        QVERIFY(peer.start(peerScript()).ok);
+        QVERIFY(configurePeer(peer, {{"resetEnabled", false}}));
+        QTemporaryDir storage;
+        Document document;
+        document.newProject();
+        Machine machine(&document);
+        DeviceManager manager(&document, &machine, storage.filePath("devices.json"));
+        const auto a = manager.addCurrent("Synthetic A", peer.port());
+        const auto b = manager.addCurrent("Synthetic B", peer.port());
+        QVERIFY(manager.activate(a));
+        QSignalSpy completed(&machine, &Machine::connectionRequestFinished);
+        QVERIFY(manager.connectSelected()); // Local admission; no synchronous port-open claim.
+        QVERIFY(manager.connectionRequestPending());
+        QVERIFY(machine.occupied());
+        QVERIFY(machine.requestPending());
+        QVERIFY(!machine.connectionVerified()); // Admission itself never proves handshake/verification.
+        QVERIFY(!manager.connectSelected());
+        QVERIFY(!manager.activate(b));
+        QVERIFY(!manager.remove(a));
+        QVERIFY(!manager.update(a, "Changed", peer.port()));
+        QVERIFY(!document.setDeviceProfile(named(document.deviceProfile(), "Other profile", 300)));
+        QTRY_VERIFY_WITH_TIMEOUT(machine.connected(), 3000);
+        QTRY_COMPARE(completed.count(), 1);
+        QVERIFY(completed.first()[1].toBool());
+        QVERIFY(!manager.connectionRequestPending());
+        QVERIFY(!machine.connectionVerified());
+        QVERIFY(!manager.changeBlockReason().isEmpty());
+        QVERIFY(peer.control({{"action", "reply"}, {"data", "Grbl 1.3a ['$' for help]\r\n"}})
+                    .object["accepted"]
+                    .toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(machine.connectionVerified(), 5000);
+        QVERIFY(machine.statusFresh());
+        QVERIFY(!machine.positionReferenced());
+        machine.useSimulator();
+        if (machine.connectionPhase() == "closing")
+            QVERIFY(!machine.simulation());
+        QTRY_VERIFY_WITH_TIMEOUT(machine.simulation(), 3000);
+        QTRY_VERIFY(!machine.occupied());
+        QVERIFY(manager.activate(b));
+        const auto snapshot = peer.snapshot();
+        QVERIFY2(snapshot.ok, qPrintable(snapshot.error));
+        const auto wire = snapshot.object;
+        QVERIFY(wire.contains("counts"));
+    }
+    void cancellingAdmittedOpenCannotLeaveManagerPendingOrReconnectAutomatically() {
+        RuntimePeer peer;
+        QVERIFY(peer.start(peerScript()).ok);
+        QVERIFY(configurePeer(peer, {{"resetEnabled", false}}));
+        QTemporaryDir storage;
+        Document document;
+        document.newProject();
+        Machine machine(&document);
+        DeviceManager manager(&document, &machine, storage.filePath("devices.json"));
+        QVERIFY(manager.activate(manager.addCurrent("Synthetic cancellable", peer.port())));
+        QVERIFY(manager.connectSelected());
+        QVERIFY(manager.connectionRequestPending());
+        machine.useSimulator(); // Before processing any GUI-side open result.
+        QTRY_VERIFY_WITH_TIMEOUT(machine.simulation(), 3000);
+        QTRY_VERIFY(!machine.occupied());
+        QTRY_VERIFY(!manager.connectionRequestPending());
+        QTest::qWait(30);
+        QVERIFY(machine.simulation()); // Late Open result cannot switch back.
+        QVERIFY(manager.connectSelected());
+        QTRY_VERIFY_WITH_TIMEOUT(machine.connected(), 3000);
+        QVERIFY(!machine.connectionVerified());
+        machine.useSimulator();
+        QTRY_VERIFY(machine.simulation());
+        QTRY_VERIFY(!manager.connectionRequestPending());
+    }
+    void admittedMissingPortFailsAsynchronouslyAndOldResultCannotCompleteNextAttempt() {
+        QTemporaryDir storage;
+        Document document;
+        document.newProject();
+        Machine machine(&document);
+        DeviceManager manager(&document, &machine, storage.filePath("devices.json"));
+        const auto endpoint = storage.filePath("missing-port");
+        QVERIFY(!QFileInfo::exists(endpoint));
+        const auto a = manager.addCurrent("Missing synthetic endpoint", endpoint);
+        QVERIFY(manager.activate(a));
+        QSignalSpy completed(&machine, &Machine::connectionRequestFinished);
+        QVERIFY(manager.connectSelected());
+        QVERIFY(manager.connectionRequestPending());
+        QTRY_COMPARE_WITH_TIMEOUT(completed.count(), 1, 3000);
+        QVERIFY(!completed.first()[1].toBool());
+        QVERIFY(!manager.connectionRequestPending());
+        QVERIFY(!machine.connected());
+        QVERIFY(!manager.message().isEmpty());
+        QVERIFY(!manager.message().contains("Anfrage angenommen"));
+        const auto oldId = completed.first()[0].toULongLong();
+        QTRY_VERIFY(!machine.occupied());
+        QVERIFY(manager.connectSelected());
+        QVERIFY(manager.connectionRequestPending());
+        const auto pendingMessage = manager.message();
+        machine.connectionRequestFinished(oldId, true,
+                                          "Stale result must not replace current request");
+        QVERIFY(manager.connectionRequestPending());
+        QCOMPARE(manager.message(), pendingMessage);
+        QTRY_COMPARE_WITH_TIMEOUT(completed.count(), 3,
+                                  3000); // One injected old result, then actual new result.
+        QVERIFY(!completed.last()[1].toBool());
+        QVERIFY(!manager.connectionRequestPending());
+        machine.useSimulator();
+        QTRY_VERIFY(machine.simulation());
+    }
     void maskedParameterHashTracksActualObjectParameters() {
         QTemporaryDir storage;
         Document document;
