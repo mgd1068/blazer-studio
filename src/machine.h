@@ -14,6 +14,8 @@ class Machine : public Simulator {
     Q_PROPERTY(QString homingSafetyError READ homingSafetyError NOTIFY changed)
     Q_PROPERTY(QString extractionSafetyError READ extractionSafetyError NOTIFY changed)
     Q_PROPERTY(QStringList processingSafetyErrors READ processingSafetyErrors NOTIFY changed)
+    Q_PROPERTY(bool overridesReady READ overridesReady NOTIFY changed)
+    Q_PROPERTY(QString overridesSafetyError READ overridesSafetyError NOTIFY changed)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
@@ -46,8 +48,16 @@ class Machine : public Simulator {
         if (!extractionSafetyError().isEmpty()) errors << extractionSafetyError();
         return errors;
     }
+    QString overridesSafetyError() const {
+        if (!live || !session) return "Live-Overrides sind nur für eine eingerichtete reale Verbindung verfügbar.";
+        const auto errors = processingSafetyErrors();
+        if (!errors.isEmpty()) return errors.join("\n");
+        return session->status().overridesSafetyError;
+    }
+    bool overridesReady() const { return overridesSafetyError().isEmpty(); }
     Q_INVOKABLE bool setOverrides(int feed, int power) {
-        return live && session && session->overrides(feed, power);
+        if (!overridesReady()) return false;
+        return session->overrides(feed, power);
     }
 
     bool connectHardware(const QString &port);

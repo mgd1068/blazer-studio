@@ -1069,11 +1069,14 @@ ApplicationWindow {
                                 }
                                 ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
                                 RowLayout {
+                                    id: overrideInputs
                                     visible: !win.basic && typeof machine.setOverrides!=="undefined"
-                                    NumberField { id: feedOverride; label: "v"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; onEdited: n=>value=n }
-                                    NumberField { id: powerOverride; label: "P"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; onEdited: n=>value=n }
-                                    ActionButton { text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && machine.connected; onClicked: {if(!machine.setOverrides(feedOverride.value,powerOverride.value))project.notify("Override abgelehnt: Statusrückmeldung Ov erforderlich; v 10–200 %, P 10–100 %.")} }
+                                    readonly property bool valid: Number.isInteger(feedOverride.numericValue()) && feedOverride.numericValue() >= 10 && feedOverride.numericValue() <= 200 && Number.isInteger(powerOverride.numericValue()) && powerOverride.numericValue() >= 10 && powerOverride.numericValue() <= 100
+                                    NumberField { id: feedOverride; objectName: "feedOverrideInput"; label: "v"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
+                                    NumberField { id: powerOverride; objectName: "powerOverrideInput"; label: "P"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
+                                    ActionButton { objectName: "applyLiveOverrides"; text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && typeof machine.overridesReady !== "undefined" && machine.overridesReady && overrideInputs.valid; onClicked: { if (!enabled) return; if(!machine.setOverrides(feedOverride.numericValue(),powerOverride.numericValue()))project.notify("Live-Override abgelehnt. Aktuelle Gerätefreigabe und Rückmeldung prüfen.") } }
                                 }
+                                Text { objectName: "overrideReadinessReason"; visible: overrideInputs.visible; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.muted; font.pixelSize: 11; text: !overrideInputs.valid ? "Ganzzahlige Werte eingeben: Vorschub 10–200 %, Leistung 10–100 %. Ungültige Eingaben werden nicht durch alte Werte ersetzt." : typeof machine.overridesSafetyError !== "undefined" ? machine.overridesSafetyError : "Live-Overrides sind für diese Verbindung nicht eingerichtet." }
                                 Repeater { model: !win.basic && typeof machine.capabilities!=="undefined" ? machine.capabilities : []
                                     Text { required property var modelData; text: modelData.name+": "+modelData.status+" · "+modelData.detail; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 }
