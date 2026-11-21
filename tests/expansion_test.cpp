@@ -1355,9 +1355,25 @@ class ExpansionTest : public QObject {
             "0</XForm><VertList>V0 0c0x1c1x1V10 0c0x1c1x1V10 10c0x1c1x1</VertList><PrimList>L0 1L1 "
             "2L2 0</PrimList></Shape><Shape Type=\"Rect\" W=\"5\" H=\"5\"><XForm>1 0 0 1 20 "
             "20</XForm></Shape></Children></Shape></LightBurnProject>");
-        QVERIFY2(d.importFile(lb), qPrintable(d.message()));
-        QCOMPARE(d.history().last().toMap()["label"].toString(),QString("Geometrie importieren"));
+        const auto beforeNative = d.projectBytes();
+        QVERIFY(!d.importFile(lb)); // Strict migration never ignores the source mirror.
+        QVERIFY(!d.previewNativeImport(lb)["geometryValidated"].toBool());
+        QCOMPARE(d.projectBytes(), beforeNative);
+        QFile nativeFile(lb.toLocalFile());
+        QVERIFY(nativeFile.open(QIODevice::ReadOnly));
+        auto unmirrored = nativeFile.readAll();
+        nativeFile.close();
+        unmirrored.replace("MirrorY=\"True\"", "MirrorY=\"False\"");
+        lb = write("geometry.lbrn2", unmirrored);
+        const auto preview = d.previewNativeImport(lb);
+        QVERIFY2(preview["geometryValidated"].toBool(), qPrintable(preview["error"].toString()));
+        QVERIFY2(d.importNativeGeometry(lb, preview["sourceSha256"].toString()),
+                 qPrintable(d.message()));
+        QCOMPARE(d.history().last().toMap()["label"].toString(), QString("Geometrie importieren"));
         QCOMPARE(d.count(), 2);
+        QCOMPARE(d.items()[0].toolLayer, 1);
+        QCOMPARE(d.items()[1].toolLayer, 1);
+        QVERIFY(!d.job().valid());
         QVERIFY(d.items()[0].bounds.x() >= 10);
         auto group = d.items()[0].groupId;
         QVERIFY(!group.isEmpty());

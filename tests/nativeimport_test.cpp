@@ -69,7 +69,16 @@ class NativeImportTest : public QObject {
         QCOMPARE(result.elements[1].toolLayer, 1);
         Document d;
         d.newProject();
-        QVERIFY2(d.importFile(write("shared.lbrn2", data)), qPrintable(d.message()));
+        const auto sharedFile = write("shared.lbrn2", data);
+        const auto sharedPreview = d.previewNativeImport(sharedFile);
+        QVERIFY2(sharedPreview["geometryValidated"].toBool(),
+                 qPrintable(sharedPreview["error"].toString()));
+        QVERIFY2(d.importNativeGeometry(sharedFile, sharedPreview["sourceSha256"].toString()),
+                 qPrintable(d.message()));
+        const auto templates = d.projectBytes();
+        QVERIFY(!d.job().valid());
+        d.setBasicOperation(
+            "outline"); // Explicit local assignment; importing geometry alone grants no output.
         QCOMPARE(d.count(), 3);
         QVERIFY(d.job().valid());
         const auto before = d.projectBytes();
@@ -78,7 +87,12 @@ class NativeImportTest : public QObject {
         QCOMPARE(restored.job().gcode(), d.job().gcode());
         QCOMPARE(restored.items()[1].toolLayer, 1);
         d.undo();
+        QCOMPARE(d.projectBytes(), templates);
+        QVERIFY(!d.job().valid());
+        d.undo();
         QCOMPARE(d.count(), 0);
+        d.redo();
+        QCOMPARE(d.projectBytes(), templates);
         d.redo();
         QCOMPARE(d.projectBytes(), before);
     }
@@ -302,7 +316,12 @@ class NativeImportTest : public QObject {
             project(rectangle() + bitmap(),
                     "<Operation><feedRate Value=\"33333\"/><spindleRPM Value=\"25000\"/>"
                     "<CustomGCode Value=\"M3S25000\"/></Operation><Notes>Foreign notes</Notes>");
-        QVERIFY2(d.importFile(write("native.mage", source)), qPrintable(d.message()));
+        const auto nativeFile = write("native.mage", source);
+        const auto nativePreview = d.previewNativeImport(nativeFile);
+        QVERIFY2(nativePreview["geometryValidated"].toBool(),
+                 qPrintable(nativePreview["error"].toString()));
+        QVERIFY2(d.importNativeGeometry(nativeFile, nativePreview["sourceSha256"].toString()),
+                 qPrintable(d.message()));
         QCOMPARE(d.count(), 3);
         QCOMPARE(d.items()[1].bounds, QRectF(15, 17.5, 10, 5));
         QCOMPARE(d.items()[2].kind, QString("image"));
@@ -315,6 +334,13 @@ class NativeImportTest : public QObject {
         QCOMPARE(d.fileUrl(), own);
         QVERIFY(d.items()[1].settings.isEmpty());
         QVERIFY(d.items()[2].settings.isEmpty());
+        const auto templates = d.projectBytes();
+        QCOMPARE(d.items()[1].toolLayer, 1);
+        QCOMPARE(d.items()[2].toolLayer, 1);
+        QVERIFY(!d.job().valid());
+        d.setBasicOperation("fill"); // Explicit local engraving assignment covers vector and PNG.
+        QCOMPARE(d.items()[1].toolLayer, 0);
+        QCOMPARE(d.items()[2].toolLayer, 0);
         const auto imported = d.projectBytes();
         const auto code = d.job().gcode();
         QVERIFY2(d.job().valid(), qPrintable(d.job().errors.join(";")));
@@ -324,8 +350,13 @@ class NativeImportTest : public QObject {
         QCOMPARE(restored.job().gcode(), code);
         QCOMPARE(restored.items()[2].reliefAsset->image, d.items()[2].reliefAsset->image);
         d.undo();
+        QCOMPARE(d.projectBytes(), templates);
+        QVERIFY(!d.job().valid());
+        d.undo();
         QCOMPARE(d.projectBytes(), before);
         QCOMPARE(d.fileUrl(), own);
+        d.redo();
+        QCOMPARE(d.projectBytes(), templates);
         d.redo();
         QCOMPARE(d.projectBytes(), imported);
     }

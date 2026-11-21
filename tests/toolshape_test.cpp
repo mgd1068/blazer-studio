@@ -14,6 +14,11 @@
 class ToolShapeTest : public QObject {
     Q_OBJECT
     QTemporaryDir temp;
+    bool reviewedGeometry(Document &document, const QUrl &file) {
+        const auto preview = document.previewNativeImport(file);
+        return preview["geometryValidated"].toBool() &&
+               document.importNativeGeometry(file, preview["sourceSha256"].toString());
+    }
     QUrl write(const QString &name, const QByteArray &bytes) {
         QFile f(temp.filePath(name));
         if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size())
@@ -114,21 +119,46 @@ class ToolShapeTest : public QObject {
         QCOMPARE(narrow["height"].toDouble(), .1);
     }
     void bedEdgePathBoxesPreservePhysicalEndpointsAndRejectOutsideGeometry() {
-        const QList<QPair<QPointF,QPointF>> lines{{{10,0},{30,0}},{{10,150},{30,150}},{{0,10},{0,30}},{{200,10},{200,30}}};
-        for(const auto &ends:lines) {
-            const QByteArray vertices="V"+QByteArray::number(ends.first.x())+" "+QByteArray::number(ends.first.y())+"V"+QByteArray::number(ends.second.x())+" "+QByteArray::number(ends.second.y());
-            const auto bytes=QByteArray(R"(<LightBurnProject><Shape Type="Path"><VertList>)")+vertices+"</VertList><PrimList>LineOpen</PrimList></Shape></LightBurnProject>";
-            Document d;d.newProject();QVERIFY(d.importFile(write("edge.lbrn2",bytes)));QVERIFY(d.job().valid());
-            QString error;const auto path=JobPlanner::geometry(d.items()[0],error,true);QVERIFY(error.isEmpty());
-            QVERIFY(QLineF(QPointF(path.elementAt(0)),ends.first).length()<1e-9);
-            QVERIFY(QLineF(QPointF(path.elementAt(1)),ends.second).length()<1e-9);
-            const auto frame=d.framingBounds("job");QVERIFY(frame["valid"].toBool());
-            const QRectF bounds(frame["x"].toDouble(),frame["y"].toDouble(),frame["width"].toDouble(),frame["height"].toDouble());
-            QVERIFY(bounds.left()>=0 && bounds.top()>=0 && bounds.right()<=200 && bounds.bottom()<=150);
-            QVERIFY(bounds.contains(ends.first));QVERIFY(bounds.contains(ends.second));
+        const QList<QPair<QPointF, QPointF>> lines{
+            {{10, 0}, {30, 0}}, {{10, 150}, {30, 150}}, {{0, 10}, {0, 30}}, {{200, 10}, {200, 30}}};
+        for (const auto &ends : lines) {
+            const QByteArray vertices = "V" + QByteArray::number(ends.first.x()) + " " +
+                                        QByteArray::number(ends.first.y()) + "V" +
+                                        QByteArray::number(ends.second.x()) + " " +
+                                        QByteArray::number(ends.second.y());
+            const auto bytes =
+                QByteArray(R"(<LightBurnProject><Shape Type="Path"><VertList>)") + vertices +
+                "</VertList><PrimList>LineOpen</PrimList></Shape></LightBurnProject>";
+            Document d;
+            d.newProject();
+            QVERIFY(reviewedGeometry(d, write("edge.lbrn2", bytes)));
+            QVERIFY(!d.job().valid());
+            d.setBasicOperation("outline");
+            QVERIFY(d.job().valid());
+            QString error;
+            const auto path = JobPlanner::geometry(d.items()[0], error, true);
+            QVERIFY(error.isEmpty());
+            QVERIFY(QLineF(QPointF(path.elementAt(0)), ends.first).length() < 1e-9);
+            QVERIFY(QLineF(QPointF(path.elementAt(1)), ends.second).length() < 1e-9);
+            const auto frame = d.framingBounds("job");
+            QVERIFY(frame["valid"].toBool());
+            const QRectF bounds(frame["x"].toDouble(), frame["y"].toDouble(),
+                                frame["width"].toDouble(), frame["height"].toDouble());
+            QVERIFY(bounds.left() >= 0 && bounds.top() >= 0 && bounds.right() <= 200 &&
+                    bounds.bottom() <= 150);
+            QVERIFY(bounds.contains(ends.first));
+            QVERIFY(bounds.contains(ends.second));
         }
-        Document outside;outside.newProject();QVERIFY(outside.importFile(write("outside-edge.lbrn2",R"(<LightBurnProject><Shape Type="Path"><VertList>V-1 10V-1 30</VertList><PrimList>LineOpen</PrimList></Shape></LightBurnProject>)")));
-        QVERIFY(!outside.job().valid());QVERIFY(!outside.framingBounds("job")["valid"].toBool());
+        Document outside;
+        outside.newProject();
+        QVERIFY(reviewedGeometry(
+            outside,
+            write(
+                "outside-edge.lbrn2",
+                R"(<LightBurnProject><Shape Type="Path"><VertList>V-1 10V-1 30</VertList><PrimList>LineOpen</PrimList></Shape></LightBurnProject>)")));
+        outside.setBasicOperation("outline");
+        QVERIFY(!outside.job().valid());
+        QVERIFY(!outside.framingBounds("job")["valid"].toBool());
         QVERIFY(!outside.framingBounds("selection")["valid"].toBool());
     }
     void helpersNeverEnterJobBoundsFrameOrSvgEvenOutsideBed() {
@@ -290,10 +320,11 @@ class ToolShapeTest : public QObject {
         bitmap.newProject();
         QVERIFY(bitmap.importImage(QUrl::fromLocalFile(file)));
         QVERIFY(bitmap.setToolLayer(1));
-        const auto beforeModeChange=bitmap.projectBytes();
-        bitmap.setLayerSetting(0,"mode","Schnitt");
-        QCOMPARE(bitmap.projectBytes(),beforeModeChange);
-        Document modeRoundtrip;QVERIFY(modeRoundtrip.restoreBytes(bitmap.projectBytes()));
+        const auto beforeModeChange = bitmap.projectBytes();
+        bitmap.setLayerSetting(0, "mode", "Schnitt");
+        QCOMPARE(bitmap.projectBytes(), beforeModeChange);
+        Document modeRoundtrip;
+        QVERIFY(modeRoundtrip.restoreBytes(bitmap.projectBytes()));
         bitmap.setProperty("x", -200.);
         QVERIFY(bitmap.job().moves.isEmpty());
         QVERIFY(bitmap.copySelectionToClipboard());
@@ -303,7 +334,7 @@ class ToolShapeTest : public QObject {
         Document restored;
         restored.newProject();
         QVERIFY(restored.pasteFromClipboard(true));
-        QCOMPARE(restored.count(),1);
+        QCOMPARE(restored.count(), 1);
         QCOMPARE(restored.items()[0].kind, QString("image"));
         QCOMPARE(restored.items()[0].toolLayer, 1);
         QVERIFY(restored.items()[0].reliefAsset);
@@ -337,7 +368,8 @@ class ToolShapeTest : public QObject {
             "50</XForm></Shape>"
             "</BackupPath></Shape>";
         const auto file = "<LightBurnProject>" + shapes + "</LightBurnProject>";
-        const auto parsed = NativeDesign::read(file, false);
+        const auto parsed =
+            NativeDesign::read(file, false, {NativeDesign::ImportIntent::GeometryOnly, false});
         QVERIFY2(parsed.error.isEmpty(), qPrintable(parsed.error));
         QCOMPARE(parsed.elements.size(), 4);
         const QList<int> expected{1, 2, 0, 1};
@@ -345,7 +377,12 @@ class ToolShapeTest : public QObject {
             QCOMPARE(parsed.elements[i].toolLayer, expected[i]);
         Document d;
         d.newProject();
-        QVERIFY(d.importFile(write("tools.lbrn2", file)));
+        QVERIFY(reviewedGeometry(d, write("tools.lbrn2", file)));
+        const QList<int> importedRoles{1, 2, 1, 1};
+        for (int i = 0; i < 4; ++i)
+            QCOMPARE(d.items()[i].toolLayer, importedRoles[i]);
+        QVERIFY(!d.job().valid());
+        d.setBasicOperation("outline"); // Only pending source-output geometry is selected.
         for (int i = 0; i < 4; ++i)
             QCOMPARE(d.items()[i].toolLayer, expected[i]);
         QVERIFY(d.job().valid());
@@ -355,12 +392,12 @@ class ToolShapeTest : public QObject {
         const auto custom = NativeDesign::read(
             "<LightBurnProject><CutSetting type=\"Tool\"><index Value=\"5\"/></CutSetting><Shape "
             "Type=\"Rect\" CutIndex=\"5\" W=\"5\" H=\"5\"/></LightBurnProject>",
-            false);
+            false, {NativeDesign::ImportIntent::GeometryOnly, false});
         QVERIFY(custom.error.isEmpty());
         QCOMPARE(custom.elements[0].toolLayer, 1);
         QVERIFY(!NativeDesign::read("<LightBurnProject><Shape Type=\"Rect\" CutIndex=\"30.5\" "
                                     "W=\"5\" H=\"5\"/></LightBurnProject>",
-                                    false)
+                                    false, {NativeDesign::ImportIntent::GeometryOnly, false})
                      .error.isEmpty());
     }
 };
