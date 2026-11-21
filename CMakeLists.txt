@@ -19,6 +19,7 @@ option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
+    src/jobplacement.cpp src/jobplacement.h
     src/barcode.cpp src/barcode.h
     src/clipboard.cpp src/guides.cpp src/guide.h src/framing.cpp
     src/deviceprofile.cpp src/deviceprofile.h src/devicelibrary.cpp src/devicelibrary.h src/devicemanager.cpp src/devicemanager.h
@@ -84,6 +85,9 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-dialog-input-tests PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/qml")
     add_test(NAME dialog_input COMMAND blazer-dialog-input-tests -platform offscreen)
     set_tests_properties(dialog_input PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic")
+    qt_add_executable(blazer-jobplacement-tests tests/jobplacement_test.cpp)
+    target_link_libraries(blazer-jobplacement-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME jobplacement COMMAND blazer-jobplacement-tests -platform offscreen)
     qt_add_executable(blazer-settingsbundle-tests tests/settingsbundle_test.cpp)
     target_link_libraries(blazer-settingsbundle-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME settingsbundle COMMAND blazer-settingsbundle-tests -platform offscreen)
