@@ -83,3 +83,22 @@ wire error/hangup/flooding, repeated destruction/FD baseline, and external typed
 sensor epoch/binding rejection when an actual adapter ingress exists. These tests
 add no sensor adapter or hardware grants. Raw GRBL `ok` carries no epoch/ID; host
 epoch checks must not be misrepresented as firmware acknowledgement authentication.
+
+### ACK deadline counterexample and conservative policy
+
+A separately added case `missingAcksCannotBeKeptAliveByUnrelatedHealthyStatus`
+starts a real 20000-edge prepared stream, then suppresses ACKs after at least
+20 peer-observed commands. Flow is refreshed on a worker timer and status remains
+fresh Run; the test explicitly confirms an outstanding ACK. After 9200 ms with
+the GUI responsive, it sleeps the GUI for 2000 ms and requires the independent
+10000-ms host ACK bound to expire before GUI return.
+
+Against unchanged ac27197 the case fails in 11467 ms: no reset is observed. Fresh
+Run status renews the core's general timeout indefinitely. The original passing
+16-case normal/SAN evidence remains separate and is not presented as ACK coverage.
+Root subsequently accepted a distinct conservative 10-second **host** ACK limit;
+that can abort slow/planner-full operations and is not a firmware/mechanical
+shutdown guarantee. Motion owns the product fix and its separate explicit host
+Hold remaining-budget policy. The test remains a red counterexample until that
+fix is validated on a new immutable checkpoint. Evidence and exact proposed test
+patch are retained in `blazer-controller-runtime-tests-20261121/accessory-lane/`.

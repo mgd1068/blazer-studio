@@ -26,7 +26,7 @@ class ControllerRuntimeTestAccess {
   public:
     struct Probe {
         bool initialized = false, affinity = false, lease = false, releaseRequired = false;
-        bool job = false, focus = false;
+        bool job = false, focus = false, awaitingAck = false;
         quint64 generation = 0, epoch = 0;
         qint64 flowAtMs = -1, clockMs = -1, statusAtNs = -1;
         QString extractionError;
@@ -75,6 +75,7 @@ class ControllerRuntimeTestAccess {
             result->lease = worker.m_accessory.activeLease();
             result->releaseRequired = worker.m_accessory.releaseRequired();
             result->job = worker.m_jobActive;
+            result->awaitingAck = core.waitingAck;
             result->focus = worker.m_focusActive;
             result->generation = worker.m_mailbox->generation.load();
             result->epoch = worker.m_connectionEpoch;
@@ -430,6 +431,41 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QVERIFY(reset >= probe->statusAtNs + 1495000000LL);
         QVERIFY(reset <= probe->statusAtNs + 1750000000LL);
         qInfo() << "Status observation age at peer reset ms" << (reset - probe->statusAtNs) / 1000000;
+        QVERIFY(noResumeOrAccessoryOff(journal));
+    }
+    void missingAcksCannotBeKeptAliveByUnrelatedHealthyStatus() {
+        RuntimePeer peer;
+        QVERIFY(startPeer(peer));
+        RuntimeOwner owner;
+        auto &runtime = *owner.runtime;
+        QVERIFY(open(runtime, peer));
+        QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
+        QVERIFY(ControllerRuntimeTestAccess::commission(runtime));
+        QVERIFY(ControllerRuntimeTestAccess::refreshFlow(runtime));
+        QVERIFY(runtime.requestStart(streamingJob()).enqueued);
+        QTRY_VERIFY_WITH_TIMEOUT(totalCommands(peer) >= 20, 3000);
+        QVERIFY(peer.control({{"action", "set"}, {"values", QJsonObject{{"ackEnabled", false}}}}).ok);
+        const auto before = events(peer);
+        qint64 lastAckAt = -1;
+        for (const auto &value : before) {
+            const auto event = value.toObject();
+            if (event.value("kind") == "ack") lastAckAt = event.value("atNs").toInteger();
+        }
+        QVERIFY(lastAckAt > 0);
+        const auto probe = ControllerRuntimeTestAccess::probe(runtime);
+        QVERIFY(probe && probe->job && probe->lease && probe->awaitingAck && probe->extractionError.isEmpty());
+        QTest::qWait(9200); // GUI responsive until shortly before the ACK-specific bound.
+        const auto healthy = ControllerRuntimeTestAccess::probe(runtime);
+        QVERIFY(healthy && healthy->job && healthy->awaitingAck && healthy->extractionError.isEmpty());
+        QVERIFY(runtime.status().statusFresh);
+        const auto begin = RuntimePeer::monotonicNs();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        const auto end = RuntimePeer::monotonicNs();
+        const auto journal = events(peer);
+        const auto reset = firstResetAfter(journal, begin);
+        QVERIFY2(reset >= begin && reset < end, "Independent ACK deadline did not stop before GUI return; status must not renew ACK age");
+        QVERIFY(reset >= lastAckAt + 9995000000LL);
+        QVERIFY(reset <= lastAckAt + 10250000000LL);
         QVERIFY(noResumeOrAccessoryOff(journal));
     }
     void stopLatchCancelsPreparedStartBeforeAnyMotion() {
