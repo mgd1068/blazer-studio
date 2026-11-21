@@ -12,17 +12,27 @@ ApplicationWindow {
     title: (project.dirty ? "● " : "") + project.title + " — Blazer Studio"
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
-    readonly property bool grblVerified: !simulationMode && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
-    readonly property bool positioningReady: machine.ready && machine.positionReferenced && (win.simulationMode || (typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
+    readonly property bool controllerRequestPending: typeof machine.requestPending !== "undefined" && machine.requestPending
+    readonly property bool runtimeOccupied: (typeof machine.occupied !== "undefined" ? machine.occupied : !simulationMode) || controllerRequestPending || machine.busy || machine.firing
+    readonly property string controllerConnectionPhase: typeof machine.connectionPhase !== "undefined" ? machine.connectionPhase : "closed"
+    readonly property bool controllerStatusFresh: simulationMode || (typeof machine.statusFresh !== "undefined" && machine.statusFresh)
+    readonly property bool controllerJobPreparing: !simulationMode && typeof machine.jobPreparing !== "undefined" && machine.jobPreparing
+    readonly property bool controllerJobPrepared: simulationMode || (typeof machine.jobPrepared !== "undefined" && machine.jobPrepared)
+    readonly property string controllerPrepareReason: typeof machine.prepareReason !== "undefined" ? machine.prepareReason : "Controllerauftrag ist noch nicht vorbereitet."
+    readonly property string controllerStatusAge: typeof machine.statusAgeMs !== "undefined" && machine.statusAgeMs >= 0 ? Math.floor(machine.statusAgeMs) + " ms" : "unbekannt"
+    readonly property string controllerViewState: controllerClosePending || controllerConnectionPhase === "closing" ? "Porttrennung läuft" : controllerConnectionPhase === "opening" ? "Verbindungsanfrage läuft" : simulationMode ? machine.state : controllerRequestPending ? "Geräteanfrage läuft" : !controllerStatusFresh ? "Controllerdaten unbekannt/veraltet" : controllerConnectionPhase === "handshake" ? "Controllerprüfung läuft" : machine.state
+    readonly property bool grblVerified: !simulationMode && controllerConnectionPhase !== "opening" && controllerConnectionPhase !== "closing" && controllerStatusFresh && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
+    readonly property bool positioningReady: !controllerRequestPending && machine.ready && machine.positionReferenced && (win.simulationMode || (controllerStatusFresh && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
     readonly property string synchronousWorkBlockReason: typeof project.synchronousWorkBlockReason !== "undefined" ? project.synchronousWorkBlockReason : ""
     readonly property bool synchronousWorkReady: synchronousWorkBlockReason.length === 0
     function allowSynchronousUiWork() {
+        if (controllerClosePending) { project.notify("Fenster wartet auf die bestätigte Porttrennung; neue Dateiaktionen sind zurückgestellt."); return false }
         if (synchronousWorkReady) return true
         pendingAction = ""; pendingProjectFile = ""
         project.notify(synchronousWorkBlockReason)
         return false
     }
-    readonly property bool processingReady: machine.ready && (win.simulationMode || (typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))
+    readonly property bool processingReady: !controllerRequestPending && machine.ready && (win.simulationMode || (controllerStatusFresh && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))
     readonly property var deviceService: typeof deviceManager !== "undefined" ? deviceManager : null
     readonly property var artStore: typeof artLibrary !== "undefined" ? artLibrary : null
     readonly property var artService: typeof artLibraryController !== "undefined" ? artLibraryController : null
@@ -71,12 +81,15 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || technicalDiagnosticsPreview.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible || artLibraryDialog.visible
+    readonly property bool projectDialogActive: controllerClosePending || startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible || artLibraryDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
+        if (!simulationMode && (controllerRequestPending || controllerConnectionPhase === "opening" || controllerConnectionPhase === "closing")) return "Verbindungs- oder Geräteanfrage läuft. Bestätigten Abschluss abwarten; STOPP bleibt verfügbar.";
+        if (!simulationMode && !controllerStatusFresh) return "Controllerdaten fehlen oder sind veraltet. Keine aktuelle Bereitschaft bestätigt; Datenalter: " + controllerStatusAge + ".";
         if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
         if (!project.jobSummary.valid) return "Auftrag noch nicht bereit: " + project.jobSummary.errors.join(" ");
+        if (!simulationMode && (controllerJobPreparing || !controllerJobPrepared)) return controllerPrepareReason || "Controllerauftrag wird vorbereitet. Nach Abschluss erneut ausdrücklich starten.";
         if (!simulationMode && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0) return machine.processingSafetyErrors.join("\n");
         if (!simulationMode && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length > 0) return machine.motionSafetyError;
         if (!simulationMode && !machine.positionReferenced) return "Maschinenreferenz fehlt. Die aktuelle Position ist noch kein verlässlicher Nullpunkt. Referenzfahrt und Arbeitsnullpunkt im Bereich »Gerät« prüfen; nach einer Kollision keinen neuen Versuch starten.";
@@ -90,6 +103,51 @@ ApplicationWindow {
         return "";
     }
     property bool discardCloseApproved: false
+    property bool controllerClosePending: false
+    property bool controllerCloseCompletionQueued: false
+    property int controllerCloseIntent: 0
+    property var controllerCloseDocument: null
+    property var controllerCloseRevision: 0
+    property bool controllerCloseDirty: false
+    function controllerPortClosed() {
+        return win.simulationMode && win.controllerConnectionPhase === "closed" && !win.runtimeOccupied && !win.controllerRequestPending
+    }
+    function maybeFinishControllerClose() {
+        if (!controllerClosePending || controllerCloseCompletionQueued || !controllerPortClosed()) return
+        controllerCloseCompletionQueued = true
+        const intent = controllerCloseIntent
+        Qt.callLater(() => {
+            controllerCloseCompletionQueued = false
+            if (!controllerClosePending || controllerCloseIntent !== intent || !win.visible || !controllerPortClosed()) return
+            if (!project || project !== controllerCloseDocument) {
+                controllerClosePending = false
+                controllerCloseIntent++
+                return
+            }
+            // Consent belongs to this window/document/revision. New light edits
+            // during asynchronous close need a fresh unsaved-changes decision.
+            const unchanged = project.historyRevision === controllerCloseRevision && project.dirty === controllerCloseDirty
+            controllerClosePending = false
+            controllerCloseIntent++
+            const previous = discardCloseApproved
+            discardCloseApproved = unchanged
+            win.close()
+            discardCloseApproved = previous
+        })
+    }
+    function beginControllerClose() {
+        if (controllerClosePending) return
+        controllerCloseDocument = project
+        controllerCloseRevision = project.historyRevision
+        controllerCloseDirty = project.dirty
+        controllerCloseIntent++
+        controllerClosePending = true
+        proofConfirmed = false
+        // useSimulator keeps real mode until the matching worker epoch confirms
+        // port closed and no runtime action. It never waits in the GUI thread.
+        machine.useSimulator()
+        maybeFinishControllerClose()
+    }
     readonly property color bg: night ? "#18232d" : "#f3f6f8"
     readonly property color panel: night ? "#202e39" : "#ffffff"
     readonly property color line: night ? "#34434f" : "#e3e9ee"
@@ -235,6 +293,7 @@ ApplicationWindow {
             project.setLayer(project.layers[0].enabled ? 0 : 1)
     }
     function requestAction(action) {
+        if (controllerClosePending) return
         if (["open","template","recent"].indexOf(action) >= 0 && !allowSynchronousUiWork()) return
         if (project.dirty) { pendingAction = action; discardDialog.open() }
         else performAction(action)
@@ -313,16 +372,30 @@ ApplicationWindow {
         onAboutToShow: machine.focus(false)
     }
     onClosing: function(close) {
+        if (controllerClosePending) { close.accepted = false; maybeFinishControllerClose(); return }
         machine.focus(false)
-        if (project.dirty && !discardCloseApproved) { close.accepted = false; pendingAction = "close"; discardDialog.open() }
-        else { machine.stop(); if(typeof recovery!=="undefined") recovery.closeSession() }
+        if (project.dirty && !discardCloseApproved) { close.accepted = false; pendingAction = "close"; discardDialog.open(); return }
+        if (!win.simulationMode || win.controllerConnectionPhase === "opening" || win.controllerConnectionPhase === "closing") {
+            close.accepted = false
+            beginControllerClose()
+            return
+        }
+        machine.stop()
+        if(typeof recovery!=="undefined") recovery.closeSession()
+    }
+    onVisibleChanged: {
+        if (!visible && controllerClosePending) {
+            controllerClosePending = false
+            controllerCloseIntent++
+        }
     }
     onActiveChanged: if (!active) machine.focus(false)
     onPageChanged: { machine.focus(false); if(basic && page>2)basic=false }
     Connections {
         target: machine
         function onChanged() {
-            if (!win.simulationMode && (!machine.connected || (typeof machine.connectionVerified !== "undefined" && !machine.connectionVerified))) win.proofConfirmed = false
+            if (!win.simulationMode && !win.grblVerified) win.proofConfirmed = false
+            win.maybeFinishControllerClose()
         }
     }
     Connections {
@@ -613,16 +686,30 @@ ApplicationWindow {
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
                     objectName: "startJobButton"; text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
-                    primary: true; compact: true; enabled: win.page === 0 || win.startBlockReason.length === 0; hint: win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason
+                    primary: true; compact: true; enabled: !win.controllerClosePending && (win.page === 0 || win.startBlockReason.length === 0); hint: win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason
                     onClicked: { if (win.page === 0) win.page = 1; else { win.page = 2; machine.start() } }
                 }
             }
+        }
+        Label {
+            objectName: "controllerCloseStatus"
+            visible: win.controllerClosePending
+            Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 8; bottomPadding: 8
+            wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.ink
+            text: "Verbindung wird beendet. Das Fenster wartet auf die bestätigte Porttrennung. STOPP bleibt verfügbar; ein geschlossener Port bestätigt keine physische Laser-Abschaltung."
         }
         Label {
             objectName: "synchronousWorkStatus"
             visible: !win.synchronousWorkReady
             Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 8; bottomPadding: 8
             wrapMode: Text.WordWrap; textFormat: Text.PlainText; text: win.synchronousWorkBlockReason; color: win.ink
+        }
+        Label {
+            objectName: "controllerPreparationStatus"
+            visible: !win.simulationMode && project.jobSummary.valid && (win.controllerJobPreparing || !win.controllerJobPrepared)
+            Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 6; bottomPadding: 6
+            wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.ink
+            text: win.controllerPrepareReason || "Controllerauftrag wird vorbereitet. Nach Abschluss erneut ausdrücklich starten; Vorbereitung erteilt keine Maschinenfreigabe."
         }
         RowLayout {
             Layout.fillWidth: true; Layout.fillHeight: true; spacing: 0
@@ -652,7 +739,7 @@ ApplicationWindow {
                         }
                     }
                     ActionButton { objectName: "manageDevicesButton"; text: "Geräte verwalten …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.deviceService; enabled: win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
-                    ActionButton { objectName: "jobPlacementButton"; text: "Startposition & Ursprung …"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: !machine.busy && !machine.firing; onClicked: jobPlacementDialog.open() }
+                    ActionButton { objectName: "jobPlacementButton"; text: "Startposition & Ursprung …"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: !win.runtimeOccupied; onClicked: jobPlacementDialog.open() }
                     ActionButton { objectName: "artLibraryButton"; text: "Grafikbibliothek …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.artService; enabled: !!win.artService && win.artService.blockReason.length === 0; onClicked: artLibraryDialog.open() }
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true
@@ -984,9 +1071,9 @@ ApplicationWindow {
                                 Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; spacing: 15
                                 RowLayout {
                                     Text { text: "Gerät & Positionierung"; color: win.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                                    ActionButton { text: win.simulationMode ? (machine.connected ? "Simulator trennen" : "Simulator verbinden") : "GRBL trennen"; dark: win.night; onClicked: machine.toggleConnection() }
+                                    ActionButton { objectName: "disconnectControllerButton"; text: win.controllerConnectionPhase === "closing" ? "Trennung läuft …" : win.controllerConnectionPhase === "opening" ? "Verbindungsanfrage abbrechen" : win.simulationMode ? (machine.connected ? "Simulator trennen" : "Simulator verbinden") : "GRBL trennen"; dark: win.night; onClicked: machine.toggleConnection() }
                                 }
-                                Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : "GRBL / Blaze-X ESP32 · echte Hardwareverbindung · S-Max 1000 / Lasermodus werden geprüft."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                Text { text: win.simulationMode ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : machine.connected ? "Serieller GRBL-Anschluss geöffnet. Controllerprüfung, Maschinenreferenz und Zubehör sind getrennte Nachweise." : "Realer Controllerbetrieb angefordert; noch kein geöffneter Anschluss bestätigt."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 RowLayout {
                                     visible: typeof machine.simulation !== "undefined"
                                     Layout.fillWidth: true
@@ -996,20 +1083,20 @@ ApplicationWindow {
                                         contentItem: Text { text: serialPortChoice.displayText; color: win.ink; font: serialPortChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: 20 }
                                         indicator: Text { x: serialPortChoice.width-width-8; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink }
                                     }
-                                    ActionButton { objectName: "editDeviceConnection"; text: "Zuordnung …"; dark: win.night; enabled: !!win.deviceService; onClicked: deviceDialog.open() }
+                                    ActionButton { objectName: "editDeviceConnection"; text: "Zuordnung …"; dark: win.night; enabled: !!win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
                                     ActionButton {
                                         objectName: "connectGrblButton"
-                                        text: win.grblVerified ? "GRBL verbunden" : (!win.simulationMode && machine.connected ? "GRBL wird geprüft …" : "GRBL verbinden")
+                                        text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet …" : win.controllerConnectionPhase === "opening" ? "Anschluss wird geöffnet …" : win.grblVerified ? "GRBL verbunden" : (!win.simulationMode && machine.connected ? (win.controllerConnectionPhase !== "handshake" && !win.controllerStatusFresh ? "Controllerdaten veraltet" : "GRBL wird geprüft …") : "GRBL verbinden")
                                         primary: win.grblVerified; dark: win.night
-                                        enabled: win.grblVerified || (!machine.busy && !machine.firing && (win.simulationMode || !machine.connected) && win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0)
+                                        enabled: win.grblVerified || (!win.runtimeOccupied && (win.simulationMode || !machine.connected) && win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0)
                                         hint: win.grblVerified ? "Verbindung und Controllerprüfung bestätigt. Ein Klick startet keinen neuen Reset oder Auftrag. Zum erneuten Verbinden zuerst trennen." : "Öffnet den USB-Anschluss und setzt den Controller zurück. Ein alter gepufferter Auftrag wird verworfen; Referenzierung und Position danach neu prüfen."
-                                        onClicked: if ((win.simulationMode || !machine.connected) && win.deviceService) win.deviceService.connectSelected()
+                                        onClicked: if (enabled && !win.runtimeOccupied && (win.simulationMode || !machine.connected) && win.deviceService) win.deviceService.connectSelected()
                                     }
-                                    ActionButton { text: "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
+                                    ActionButton { objectName: "useSimulatorButton"; text: win.controllerConnectionPhase === "closing" ? "Simulator nach Trennung" : "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
                                 }
                                 Text {
                                     objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
-                                    text: win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : machine.state + (machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
+                                    text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet. Simulator und Gerätewechsel warten auf die bestätigte Trennung." : win.controllerConnectionPhase === "opening" ? "Anschlussöffnung angefordert · noch keine Verbindung oder Controllerprüfung bestätigt" : win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : win.controllerConnectionPhase === "handshake" ? "Anschluss geöffnet · Controllerprüfung läuft · " + machine.state : win.controllerViewState + (!win.controllerStatusFresh ? " (" + win.controllerStatusAge + ")" : machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
                                     color: win.grblVerified ? "#209b76" : win.muted
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
@@ -1021,20 +1108,21 @@ ApplicationWindow {
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
                                 Rectangle {
-                                    Layout.fillWidth: true; height: 233; radius: 9; color: win.panel; border.color: win.line
+                                    Layout.fillWidth: true; Layout.preferredHeight: Math.max(233, positionControls.implicitHeight + 44); radius: 9; color: win.panel; border.color: win.line
                                     RowLayout {
+                                        id: positionControls
                                         anchors.fill: parent; anchors.margins: 22; spacing: 26
                                         ColumnLayout {
                                             Layout.fillWidth: true; spacing: 12
                                             SectionLabel { text: "POSITIONIEREN"; dark: win.night }
-                                            Text { text: "X  " + machine.x.toFixed(1) + "     Y  " + machine.y.toFixed(1) + " mm"; color: win.ink; font.pixelSize: 19; font.family: "DejaVu Sans Mono" }
+                                            Text { objectName: "controllerPositionReadout"; Layout.fillWidth: true; wrapMode: Text.WordWrap; text: !win.simulationMode && (!win.controllerStatusFresh || !machine.positionReferenced) ? "Position unbekannt oder nicht referenziert" : "X  " + machine.x.toFixed(1) + "     Y  " + machine.y.toFixed(1) + " mm"; color: win.ink; font.pixelSize: 19; font.family: "DejaVu Sans Mono" }
                                             Text { text: "Schrittweite"; color: win.muted; font.pixelSize: 11 }
                                             Row {
                                                 spacing: 4
                                                 Repeater { model: [1,10,25]; delegate: ActionButton { required property int modelData; text: modelData + " mm"; dark: win.night; compact: true; selected: win.step === modelData; onClicked: win.step = modelData } }
                                             }
                                             ActionButton { visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: win.positioningReady; onClicked: machine.setWorkZero() }
-                                            ActionButton { text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing && (win.simulationMode || (typeof machine.homingSafetyError !== "undefined" && machine.homingSafetyError.length === 0)); onClicked: machine.home() }
+                                            ActionButton { objectName: "homeControllerButton"; text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !win.runtimeOccupied && (win.simulationMode || (win.controllerStatusFresh && typeof machine.homingSafetyError !== "undefined" && machine.homingSafetyError.length === 0)); onClicked: machine.home() }
                                         }
                                         GridLayout {
                                             columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: win.positioningReady
@@ -1059,7 +1147,7 @@ ApplicationWindow {
                                             Text { text: machine.firing ? project.deviceInfo.focusPower+" % angefordert" : "Fokuspunkt mit "+project.deviceInfo.focusPower+" %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
                                             Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei "+project.deviceInfo.focusPower+" % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
                                         }
-                                        ActionButton { objectName: "focusHold"; text: "◎  Halten für "+project.deviceInfo.focusPower+" %"; primary: true; implicitHeight: 44; enabled: win.processingReady || machine.firing; onPressedChanged: machine.focus(pressed) }
+                                        ActionButton { id: focusHoldControl; objectName: "focusHold"; text: "◎  Halten für "+project.deviceInfo.focusPower+" %"; primary: true; implicitHeight: 44; enabled: win.processingReady || machine.firing; Component.onCompleted: machine.registerFocusControl(focusHoldControl); onPressed: machine.beginFocus(); onReleased: machine.endFocus(); onCanceled: machine.endFocus(); Component.onDestruction: machine.endFocus() }
                                     }
                                 }
                                 ColumnLayout {
@@ -1070,7 +1158,7 @@ ApplicationWindow {
                                         textRole: "label"; valueRole: "scope"
                                         model: [{label:"Laserauftrag",scope:"job"},{label:"Sichtbare Auswahl",scope:"selection"},{label:"Hilfsformen T1 + T2",scope:"tools"},{label:"Nur Hilfsformen T1",scope:"t1"},{label:"Nur Hilfsformen T2",scope:"t2"}]
                                         currentIndex: model.findIndex(row=>row.scope===win.frameScope)
-                                        enabled: !machine.busy && !machine.firing
+                                        enabled: !win.runtimeOccupied
                                         onActivated: index=>win.frameScope=currentValue
                                     }
                                     Text {
@@ -1082,7 +1170,7 @@ ApplicationWindow {
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 8
                                     ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: win.positioningReady && (win.simulationMode || project.startMode === 0) && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
-                                    ActionButton { objectName: "pauseJobButton"; text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
+                                    ActionButton { objectName: "pauseJobButton"; text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || (machine.paused && (win.simulationMode || (win.controllerStatusFresh && !win.controllerRequestPending && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))); onClicked: machine.pause() }
                                     ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }
                                 ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
@@ -1092,9 +1180,9 @@ ApplicationWindow {
                                     readonly property bool valid: Number.isInteger(feedOverride.numericValue()) && feedOverride.numericValue() >= 10 && feedOverride.numericValue() <= 200 && Number.isInteger(powerOverride.numericValue()) && powerOverride.numericValue() >= 10 && powerOverride.numericValue() <= 100
                                     NumberField { id: feedOverride; objectName: "feedOverrideInput"; label: "v"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
                                     NumberField { id: powerOverride; objectName: "powerOverrideInput"; label: "P"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
-                                    ActionButton { objectName: "applyLiveOverrides"; text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && typeof machine.overridesReady !== "undefined" && machine.overridesReady && overrideInputs.valid; onClicked: { if (!enabled) return; if(!machine.setOverrides(feedOverride.numericValue(),powerOverride.numericValue()))project.notify("Live-Override abgelehnt. Aktuelle Gerätefreigabe und Rückmeldung prüfen.") } }
+                                    ActionButton { objectName: "applyLiveOverrides"; text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && win.controllerStatusFresh && !win.controllerRequestPending && typeof machine.overridesReady !== "undefined" && machine.overridesReady && overrideInputs.valid; onClicked: { if (!enabled) return; if(!machine.setOverrides(feedOverride.numericValue(),powerOverride.numericValue()))project.notify("Live-Override abgelehnt. Aktuelle Gerätefreigabe und Rückmeldung prüfen.") } }
                                 }
-                                Text { objectName: "overrideReadinessReason"; visible: overrideInputs.visible; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.muted; font.pixelSize: 11; text: !overrideInputs.valid ? "Ganzzahlige Werte eingeben: Vorschub 10–200 %, Leistung 10–100 %. Ungültige Eingaben werden nicht durch alte Werte ersetzt." : typeof machine.overridesSafetyError !== "undefined" ? machine.overridesSafetyError : "Live-Overrides sind für diese Verbindung nicht eingerichtet." }
+                                Text { objectName: "overrideReadinessReason"; visible: overrideInputs.visible; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.muted; font.pixelSize: 11; text: !win.simulationMode && !win.controllerStatusFresh ? "Controllerdaten fehlen oder sind veraltet; Live-Änderung gesperrt." : !overrideInputs.valid ? "Ganzzahlige Werte eingeben: Vorschub 10–200 %, Leistung 10–100 %. Ungültige Eingaben werden nicht durch alte Werte ersetzt." : typeof machine.overridesSafetyError !== "undefined" ? machine.overridesSafetyError : "Live-Overrides sind für diese Verbindung nicht eingerichtet." }
                                 Repeater { model: !win.basic && typeof machine.capabilities!=="undefined" ? machine.capabilities : []
                                     Text { required property var modelData; text: modelData.name+": "+modelData.status+" · "+modelData.detail; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 }
@@ -1113,8 +1201,8 @@ ApplicationWindow {
                     Rectangle { height: 1; width: parent.width; color: win.line }
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
-                        Text { objectName: "activePageFooter"; text: "●  " + (win.page === 2 ? machine.state : project.pages[project.activePage]); textFormat: Text.PlainText; color: "#209b76"; font.pixelSize: 12; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight }
-                        Text { objectName: "workspaceHint"; text: win.page === 2 ? "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm" : "Ziehen: "+(win.lengthUnit==="in" ? "0.025 in" : "0,5 mm")+"   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 11 }
+                        Text { objectName: "activePageFooter"; text: "●  " + (win.page === 2 ? win.controllerViewState : project.pages[project.activePage]); textFormat: Text.PlainText; color: win.page === 2 && !win.simulationMode && !win.controllerStatusFresh ? "#c07b2a" : "#209b76"; font.pixelSize: 12; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight }
+                        Text { objectName: "workspaceHint"; text: win.page === 2 ? (!win.simulationMode && (!win.controllerStatusFresh || !machine.positionReferenced) ? "Controllerposition unbekannt oder nicht referenziert" : "X " + machine.x.toFixed(1) + "  /  Y " + machine.y.toFixed(1) + " mm") : "Ziehen: "+(win.lengthUnit==="in" ? "0.025 in" : "0,5 mm")+"   ·   Mausrad: Zoom   ·   Mitteltaste: Verschieben"; color: win.muted; font.pixelSize: 11 }
                     }
                 }
             }
@@ -1219,7 +1307,7 @@ ApplicationWindow {
                 anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
                 Text { text: project.message; textFormat: Text.PlainText; color: "#a6bac8"; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
                 Text { objectName: "deferredRecoveryStatus"; visible: typeof recovery !== "undefined" && typeof recovery.deferred !== "undefined" && recovery.deferred; text: "Sicherung vorgemerkt"; color: "#e7cc8a"; font.pixelSize: 10 }
-                Text { text: win.simulationMode ? "SIMULATION · KEINE LASEREMISSION" : "HARDWARE · " + machine.state; color: "#81c9b3"; font.pixelSize: 8; font.letterSpacing: .8 }
+                Text { objectName: "controllerModeStatus"; text: win.simulationMode ? "SIMULATION · KEINE LASEREMISSION" : "HARDWARE · " + win.controllerViewState; color: win.simulationMode || win.grblVerified ? "#81c9b3" : "#c07b2a"; font.pixelSize: 8; font.letterSpacing: .8 }
             }
         }
     }

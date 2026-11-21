@@ -8,11 +8,14 @@
 #include "materialtestledger.h"
 #include "registration.h"
 #include "reliefpreview.h"
+#include "support/runtimepeer.h"
 #include "vectorinspectionservice.h"
 #include "workspace.h"
 #include <QClipboard>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QMimeData>
 #include <QQmlApplicationEngine>
@@ -22,6 +25,19 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <algorithm>
+
+using RuntimeTestSupport::RuntimePeer;
+namespace {
+QString peerScript() {
+    return QFileInfo(QString::fromUtf8(__FILE__))
+        .absoluteDir()
+        .filePath("support/runtime_pty_peer.py");
+}
+bool configurePeer(RuntimePeer &peer, const QJsonObject &values) {
+    const auto reply = peer.control({{"action", "set"}, {"values", values}});
+    return reply.ok && reply.object["accepted"].toBool();
+}
+} // namespace
 
 namespace {
 QQuickItem *find(QQuickItem *root, const QString &name) {
@@ -63,6 +79,178 @@ class FeatureWorkflowTest : public QObject {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio",1,0,"Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio",1,0,"ReliefPreview");
+    }
+    void asynchronousRuntimeConnectionThroughRealMain_data() {
+        QTest::addColumn<bool>("compactDark");
+        QTest::newRow("runtime-normal-light") << false;
+        QTest::newRow("runtime-compact-dark") << true;
+    }
+    void asynchronousRuntimeConnectionThroughRealMain() {
+        QFETCH(bool, compactDark);
+        RuntimePeer peer;
+        QVERIFY(peer.start(peerScript()).ok);
+        QVERIFY(configurePeer(peer, {{"resetEnabled", false}}));
+        QTemporaryDir storage;
+        Document project;
+        project.newProject();
+        project.addShape("rect");
+        Machine machine(
+            &project); // Only peer.port(), created above by an independent synthetic process.
+        DeviceManager devices(&project, &machine, storage.filePath("devices.json"));
+        const auto a = devices.addCurrent("Synthetic runtime", peer.port());
+        QVERIFY(devices.activate(a));
+        MaterialLibrary materials(storage.filePath("materials.json"));
+        MaterialTestLedger ledger(storage.filePath("ledger.json"));
+        ArtLibrary arts(storage.filePath("arts.json"));
+        ArtLibraryController artController(&project, &machine, &arts);
+        VectorInspectionService vectors(&project);
+        Registration registration;
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        QVERIFY(services.finishOnboarding());
+        QVERIFY(services.setDarkTheme(compactDark));
+        QQmlApplicationEngine engine;
+        auto *context = engine.rootContext();
+        context->setContextProperty("project", &project);
+        context->setContextProperty("machine", &machine);
+        context->setContextProperty("deviceManager", &devices);
+        context->setContextProperty("materialLibrary", &materials);
+        context->setContextProperty("materialTestLedger", &ledger);
+        context->setContextProperty("artLibrary", &arts);
+        context->setContextProperty("artLibraryController", &artController);
+        context->setContextProperty("vectorInspectionService", &vectors);
+        context->setContextProperty("cameraRegistration", &registration);
+        context->setContextProperty("appServices", &services);
+        engine.load(QUrl::fromLocalFile(QString(BLAZER_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->resize(compactDark ? 1180 : 1480, compactDark ? 760 : 920);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto item = [&](const QString &name) { return find(window->contentItem(), name); };
+        auto object = [&](const char *name) { return window->findChild<QObject *>(name); };
+        QTRY_VERIFY(object("startupSafetyDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("acknowledgeStartupSafety")));
+        QTRY_VERIFY(!object("startupSafetyDialog")->property("visible").toBool());
+        window->setProperty("page", 2);
+        auto *connect = item("connectGrblButton");
+        QVERIFY(connect);
+        QTRY_VERIFY(connect->isEnabled());
+        QVERIFY(click(window, connect));
+        QTRY_VERIFY_WITH_TIMEOUT(!machine.simulation() && machine.connected(), 3000);
+        QVERIFY(!machine.connectionVerified());
+        QVERIFY(!window->property("grblVerified").toBool());
+        QVERIFY(!connect->isEnabled());
+        QVERIFY(machine.occupied());
+        QVERIFY(!project.hasPreviewPosition());
+        QTRY_VERIFY(
+            item("grblConnectionStatus")
+                ->property("text")
+                .toString()
+                .contains("prüf", Qt::CaseInsensitive) ||
+            item("grblConnectionStatus")->property("text").toString().contains("bestätigt"));
+        QVERIFY(!devices.changeBlockReason().isEmpty());
+        QVERIFY(!item("focusHold")->isEnabled());
+        QVERIFY(!item("homeControllerButton")->isEnabled());
+        QVERIFY(peer.control({{"action", "reply"}, {"data", "Grbl 1.3a ['$' for help]\r\n"}})
+                    .object["accepted"]
+                    .toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(machine.connectionVerified(), 5000);
+        QTRY_VERIFY(window->property("grblVerified").toBool());
+        QVERIFY(machine.statusFresh());
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!window->property("positioningReady").toBool());
+        QVERIFY(item("controllerPositionReadout")
+                    ->property("text")
+                    .toString()
+                    .contains("nicht referenziert"));
+        // Signal/binding changes without a native press are never a new emission intent.
+        auto *focus = item("focusHold");
+        QVERIFY(focus);
+        QVERIFY(QMetaObject::invokeMethod(focus, "pressedChanged"));
+        QVERIFY(QMetaObject::invokeMethod(focus, "pressed"));
+        QVERIFY(!machine.firing());
+        // Cancelling the unsaved-changes dialog must never leave a delayed close intent.
+        window->close();
+        QTRY_VERIFY(object("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("cancelCloseButton")));
+        QTRY_VERIFY(!object("discardDialog")->property("visible").toBool());
+        QVERIFY(window->isVisible());
+        QVERIFY(!window->property("controllerClosePending").toBool());
+        QVERIFY(machine.connected());
+        QVERIFY(configurePeer(peer, {{"statusEnabled", false}}));
+        QTRY_VERIFY_WITH_TIMEOUT(!machine.statusFresh(), 3000);
+        QTRY_VERIFY(!window->property("grblVerified").toBool());
+        QVERIFY(!window->property("processingReady").toBool());
+        QVERIFY(!item("applyLiveOverrides")->isEnabled());
+        QVERIFY(item("grblConnectionStatus")->property("text").toString().contains("veraltet"));
+        QVERIFY(
+            item("controllerPositionReadout")->property("text").toString().contains("unbekannt"));
+        QVERIFY(!item("activePageFooter")->property("text").toString().contains("Bereit"));
+        QVERIFY(item("controllerModeStatus")->property("text").toString().contains("veraltet"));
+        QVERIFY(click(
+            window, item("controllerPositionReadout"))); // Reveal wrapped status/position controls.
+        const auto folder = qEnvironmentVariable("BLAZER_RUNTIME_UI_EVIDENCE");
+        if (!folder.isEmpty()) {
+            QVERIFY(QDir().mkpath(folder));
+            QTest::qWait(60);
+            QVERIFY(window->grabWindow().save(folder + "/runtime-stale-" + QTest::currentDataTag() +
+                                              ".png"));
+        }
+        QTRY_VERIFY(!machine.occupied());
+        const auto clean = QUrl::fromLocalFile(storage.filePath("close-intent.blazer"));
+        QVERIFY(project.save(clean));
+        QVERIFY(!project.dirty());
+        window->close();
+        QVERIFY(window->isVisible());
+        QVERIFY(window->property("controllerClosePending").toBool());
+        QVERIFY(item("controllerCloseStatus")->isVisible());
+        const auto closeIntent = window->property("controllerCloseIntent");
+        window->close(); // Idempotent X while awaiting the matching port-close epoch.
+        QCOMPARE(window->property("controllerCloseIntent"), closeIntent);
+        if (compactDark) {
+            // Retiring the old window visibility lifetime also retires its close intent.
+            window->hide();
+            QVERIFY(!window->property("controllerClosePending").toBool());
+            window->show();
+            QTRY_VERIFY_WITH_TIMEOUT(machine.simulation() && !machine.occupied(), 3000);
+            QTest::qWait(100);
+            QVERIFY(window->isVisible());
+            QVERIFY(!object("discardDialog")->property("visible").toBool());
+        }
+        // A permitted light edit after the first X must not inherit the old clean-close consent.
+        QVERIFY(project.setMetadata("Edited while port closure was pending", "Retain this edit"));
+        if (compactDark) window->close(); // New explicit action, never the retired intent.
+        QTRY_VERIFY_WITH_TIMEOUT(machine.simulation() && !machine.occupied(), 3000);
+        QTRY_VERIFY(object("discardDialog")->property("visible").toBool());
+        QVERIFY(window->isVisible());
+        QVERIFY(!window->property("controllerClosePending").toBool());
+        QVERIFY(click(window, item("cancelCloseButton")));
+        QTRY_VERIFY(!object("discardDialog")->property("visible").toBool());
+        QTest::qWait(100);
+        QVERIFY(window->isVisible());
+        QVERIFY(project.dirty());
+        window->close();
+        QTRY_VERIFY(object("discardDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("discardChangesButton")));
+        QTRY_VERIFY_WITH_TIMEOUT(!window->isVisible(), 3000);
+        QVERIFY(machine.simulation());
+        QCOMPARE(machine.connectionPhase(), QString("closed"));
+        QVERIFY(!machine.occupied());
+        QVERIFY(!machine.requestPending());
+        const auto snapshot = peer.snapshot();
+        QVERIFY2(snapshot.ok, qPrintable(snapshot.error));
+        const auto wire = snapshot.object;
+        QVERIFY(wire.contains("events"));
+        for (const auto &event : wire["events"].toArray()) {
+            const auto row = event.toObject();
+            const auto command = row["value"].toString();
+            if (row["kind"] == "command") {
+                QVERIFY(!command.startsWith("G1 "));
+                QVERIFY(!command.startsWith("M3"));
+                QVERIFY(!command.startsWith("M4"));
+                QVERIFY(command != "$H");
+            }
+        }
     }
     void synchronousWorkGatesThroughRealMain_data() {
         QTest::addColumn<bool>("compactDark");

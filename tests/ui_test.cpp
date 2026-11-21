@@ -21,8 +21,18 @@
 class UiMachine : public Simulator {
     Q_OBJECT
     Q_PROPERTY(bool simulation READ simulation WRITE setSimulation NOTIFY changed)
+    Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
+    Q_PROPERTY(bool statusFresh READ statusFresh NOTIFY changed)
+    Q_PROPERTY(QString connectionPhase READ connectionPhase NOTIFY changed)
     Q_PROPERTY(bool connectionVerified READ connectionVerified WRITE setConnectionVerified NOTIFY changed)
   public:
+    // Layout-only simulator double; worker freshness/queue semantics are tested with real Machine.
+    bool jobPrepared() const { return true; }
+    bool statusFresh() const { return true; }
+    QString connectionPhase() const { return m_simulation ? "closed" : m_verified ? "idle" : "handshake"; }
+    Q_INVOKABLE void registerFocusControl(QObject *) {}
+    Q_INVOKABLE void beginFocus() { focus(true); }
+    Q_INVOKABLE void endFocus() { focus(false); }
     bool simulation() const { return m_simulation; }
     bool connectionVerified() const { return m_verified; }
     bool positionReferenced() const override { return m_referenced; }
