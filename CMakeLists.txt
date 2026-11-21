@@ -19,6 +19,7 @@ option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
+    src/barcode.cpp src/barcode.h
     src/clipboard.cpp src/guides.cpp src/guide.h src/framing.cpp
     src/deviceprofile.cpp src/deviceprofile.h src/devicelibrary.cpp src/devicelibrary.h src/devicemanager.cpp src/devicemanager.h
     src/materialtestledger.cpp src/materialtestledger.h
@@ -73,6 +74,10 @@ if(BUILD_TESTING)
     target_include_directories(blazer-accessory-tests PRIVATE src)
     target_link_libraries(blazer-accessory-tests PRIVATE Qt6::Core Qt6::Test)
     add_test(NAME accessorycontract COMMAND blazer-accessory-tests)
+    qt_add_executable(blazer-barcode-tests tests/barcode_test.cpp)
+    target_link_libraries(blazer-barcode-tests PRIVATE blazer-core Qt6::Test)
+    target_compile_definitions(blazer-barcode-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME barcode COMMAND blazer-barcode-tests -platform offscreen)
     qt_add_executable(blazer-controlleradapter-tests tests/controlleradapter_test.cpp)
     target_link_libraries(blazer-controlleradapter-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME controlleradapter COMMAND blazer-controlleradapter-tests -platform offscreen)

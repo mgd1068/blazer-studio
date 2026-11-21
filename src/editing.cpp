@@ -1,4 +1,5 @@
 #include "document.h"
+#include "barcode.h"
 #include "geometry.h"
 #include "imagelimits.h"
 #include "imageprocessing.h"
@@ -34,6 +35,10 @@ QString editLabel(const QString &action) {
         {"imageRotate", "Bild drehen"}, {"imageMirror", "Bild spiegeln"},
         {"imageToRelief", "Bild als Relief"}};
     return labels.value(action, "Bearbeitung");
+}
+bool reservesCodeQuietZone(const Artwork &artwork) {
+    return artwork.style.value("qr", false).toBool() ||
+           artwork.style.value("barcode", false).toBool();
 }
 bool validPageName(const QString &name) {
     return !name.trimmed().isEmpty() && name.size() <= 200 && !name.contains('\n') &&
@@ -256,6 +261,42 @@ bool Document::command(const QString &action, const QVariantMap &args) {
         notify(message);
         return false;
     };
+    if (action == "barcode") {
+        if (args.value("text").metaType().id() != QMetaType::QString)
+            return fail("Code 128-B benötigt Text.");
+        const auto text = args.value("text").toString();
+        const auto code = Barcode::code128B(text);
+        if (!code.valid())
+            return fail(code.error);
+        auto number = [&](const char *key, double fallback, double &value) {
+            const auto input = args.value(key, fallback);
+            const auto type = input.metaType().id();
+            if (type != QMetaType::Double && type != QMetaType::Int && type != QMetaType::LongLong)
+                return false;
+            value = input.toDouble();
+            return std::isfinite(value);
+        };
+        double module, height, x, y;
+        if (!number("moduleWidth", .3, module) || !number("height", 15., height) ||
+            !number("x", 10., x) || !number("y", 10., y) || module < .1 || module > 2 ||
+            height < 1 || height > Geometry::coordinateLimit)
+            return fail("Code 128-B: Modulbreite 0,1–2 mm und Höhe 1–2000 mm erforderlich.");
+        Artwork a;
+        a.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        a.name = "Code 128-B: " + text.left(40);
+        a.kind = "path";
+        a.text = text;
+        a.layer = 0;
+        a.style["barcode"] = true;
+        a.bounds = QRectF(x, y, code.modules * module, height);
+        a.path = code.path;
+        if (!Geometry::insideBed(a.bounds, {bedWidth(), bedHeight()}))
+            return fail("Code 128-B passt einschließlich Ruhezonen nicht in den Arbeitsraum; nicht skaliert.");
+        if (!canAppend(a))
+            return false;
+        appendArtwork(a);
+        return true;
+    }
     if (action == "qr") {
         auto text = args.value("text").toString();
         if (text.isEmpty() || text.toUtf8().size() > 1000)
@@ -725,7 +766,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
                     auto p = JobPlanner::geometry(result[i], error, true);
                     if (!error.isEmpty())
                         return fail(error);
-                    if (result[i].style.value("qr", false).toBool()) {
+                    if (reservesCodeQuietZone(result[i])) {
                         p = {};
                         p.addRect(result[i].bounds);
                     }
@@ -766,7 +807,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
                         if (poly.size() > 1 && QLineF(poly.first(), poly.last()).length() > 1e-6)
                             open = true;
                     QPainterPath footprint = path;
-                    if (open || result[member].style.value("qr", false).toBool()) {
+                    if (open || reservesCodeQuietZone(result[member])) {
                         footprint = {};
                         footprint.addRect(result[member].bounds);
                     }
@@ -814,7 +855,7 @@ bool Document::command(const QString &action, const QVariantMap &args) {
                             for (int member : members) {
                                 auto a = result[member];
                                 auto path = rt.map(actuals[member]).translated(delta);
-                                if (a.style.value("qr", false).toBool()) {
+                                if (reservesCodeQuietZone(a)) {
                                     auto b = rt.mapRect(a.bounds).translated(delta);
                                     QTransform norm;
                                     norm.scale(1 / b.width(), 1 / b.height());
@@ -937,7 +978,9 @@ bool Document::exportSvg(const QUrl &url) const {
             out.writeAttribute("fill", (a.engraveOutline || m_layers[a.layer].toMap()["mode"] == "Schnitt")
                                            ? "none"
                                            : layerColor(a.layer).name());
-            out.writeAttribute("stroke", layerColor(a.layer).name());
+            out.writeAttribute("stroke", a.style.value("barcode", false).toBool() &&
+                                             !a.engraveOutline && m_layers[a.layer].toMap()["mode"] != "Schnitt"
+                                         ? "none" : layerColor(a.layer).name());
             out.writeAttribute("stroke-width", "0.1");
             out.writeEndElement();
         }

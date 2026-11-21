@@ -44,3 +44,12 @@ actually includes. User-created designs retain their own rights.
 - **Inkscape:** optional separately installed conversion program for PDF/AI/EPS,
   invoked as a process. No Inkscape source/binary is bundled. Its own GPL rights
   remain unchanged. Source: <https://inkscape.org/>.
+- **ZXing Code 128 symbol data:** standard run-width patterns in `src/barcode.cpp`
+  were checked against `Code128Reader.java` (copyright 2008 ZXing authors,
+  Apache-2.0); represented locally as digit strings. The encoder and application
+  integration are independent code. Source:
+  <https://github.com/zxing/zxing/blob/master/core/src/main/java/com/google/zxing/oned/Code128Reader.java>.
+  License text is in `LICENSES/Apache-2.0.txt`.
+- **ZBar:** optional installed decoder used only by barcode image acceptance tests
+  through its C ABI. Not bundled or linked into the application. Source:
+  <https://github.com/mchehab/zbar>.

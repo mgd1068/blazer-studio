@@ -576,7 +576,8 @@ void Document::appendArtwork(const Artwork &a) {
         {"ellipse", "Ellipse hinzufügen"}, {"text", "Text hinzufügen"},
         {"svg", "Vektor importieren"}, {"image", "Bild importieren"},
         {"relief", "Relief importieren"}, {"path", "Pfad hinzufügen"}};
-    checkpoint(a.style.value("qr", false).toBool() ? QString("QR-Code hinzufügen")
+    checkpoint(a.style.value("barcode", false).toBool() ? QString("Code 128-B hinzufügen")
+               : a.style.value("qr", false).toBool() ? QString("QR-Code hinzufügen")
                                                    : labels.value(a.kind, "Objekt hinzufügen"));
     const int row = m_items.size();
     beginInsertRows({}, row, row);
@@ -1257,7 +1258,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
             if (a.style.size() > 20)
                 return {};
             const QSet<QString> strings{"font", "imageMode"},
-                booleans{"bold", "invert", "ellipseMask", "qr"};
+                booleans{"bold", "invert", "ellipseMask", "qr", "barcode"};
             for (auto it = a.style.begin(); it != a.style.end(); ++it) {
                 if (strings.contains(it.key())) {
                     if (it.value().metaType().id() != QMetaType::QString ||
