@@ -1,5 +1,6 @@
 #include "document.h"
 #include "grbl.h"
+#include "preparedcontrollerjob.h"
 #include "machine.h"
 #include <QJsonDocument>
 #include <QClipboard>
@@ -233,6 +234,108 @@ class GrblTest : public QObject {
             QTRY_VERIFY(session.workZero && session.workZero->modalReadback);
     }
   private slots:
+    void preparedCompactGateMatchesActualHalfMillimetreWireTargets_data() {
+        QTest::addColumn<bool>("yAxis");
+        QTest::addColumn<bool>("lower");
+        QTest::addColumn<bool>("signedOffset");
+        for (bool y : {false, true})
+            for (bool low : {false, true})
+                for (bool offset : {false, true})
+                    QTest::newRow(qPrintable(QString("%1-%2-%3").arg(y ? "y" : "x")
+                        .arg(low ? "lower-deny" : "upper-accept").arg(offset ? "negative-wco" : "zero-wco")))
+                        << y << low << offset;
+    }
+    void preparedCompactGateMatchesActualHalfMillimetreWireTargets() {
+        QFETCH(bool, yAxis);
+        QFETCH(bool, lower);
+        QFETCH(bool, signedOffset);
+        // Decimal half cases were absent from the original three-decimal random corpus.
+        JobPlan plan;
+        const QPointF from = yAxis ? QPointF(10, .0045) : QPointF(.0045, 10);
+        const QPointF to = yAxis ? QPointF(20, .0045) : QPointF(.0045, 20);
+        plan.moves = {{from, to, 5000, 100, 0, false}};
+        const auto prepared = PreparedControllerJob::prepare(plan);
+        QVERIFY(prepared->valid());
+        QCOMPARE(prepared->firstApproach(), from);
+        const auto box = prepared->workBounds();
+        QCOMPARE(yAxis ? box.height() : box.width(), 0.);
+        const QPointF offset = signedOffset ? QPointF(-100, -75) : QPointF();
+        QRectF envelope(offset, QSizeF(200, 150));
+        const double offsetAxis = yAxis ? offset.y() : offset.x();
+        if (yAxis) {
+            if (lower) envelope.setTop(offsetAxis + .005);
+            else envelope.setBottom(offsetAxis + .004);
+        } else {
+            if (lower) envelope.setLeft(offsetAxis + .005);
+            else envelope.setRight(offsetAxis + .004);
+        }
+        // Parse the emitted bytes independently; do not call the wire formatter
+        // or duplicate std::round in this oracle.
+        QList<QPointF> targets;
+        const QRegularExpression line("^G[01] X([+-]?[0-9]+(?:\\.[0-9]+)?) Y([+-]?[0-9]+(?:\\.[0-9]+)?)(?: |$)");
+        for (const auto &text : prepared->lines()) {
+            const auto match = line.match(text);
+            if (match.hasMatch())
+                targets.append({match.captured(1).toDouble(), match.captured(2).toDouble()});
+        }
+        QCOMPARE(targets.size(), 2);
+        QCOMPARE(yAxis ? targets[0].y() : targets[0].x(), .004);
+        QVERIFY(prepared->lines().indexOf("M4 S1000") >
+                prepared->lines().indexOf(yAxis ? "G0 X10.000 Y0.004" : "G0 X0.004 Y10.000"));
+        bool everyWireTargetInside = true;
+        for (const auto target : targets) {
+            const auto physical = target + offset;
+            everyWireTargetInside &= physical.x() >= envelope.left() && physical.x() <= envelope.right() &&
+                                     physical.y() >= envelope.top() && physical.y() <= envelope.bottom();
+        }
+        QCOMPARE(everyWireTargetInside, !lower); // Both acceptance and denial are meaningful.
+        GrblSession session; // No port is opened or enumerated by this test.
+        session.commissionedEnvelope = envelope;
+        session.commissionedModalContract = true;
+        session.knownOffset = true;
+        session.offset = offset;
+        const bool compactGate = session.insideMachineBed(box.topLeft()) &&
+                                 session.insideMachineBed(box.topRight()) &&
+                                 session.insideMachineBed(box.bottomLeft()) &&
+                                 session.insideMachineBed(box.bottomRight());
+        QCOMPARE(compactGate, everyWireTargetInside);
+    }
+    void relativeJogUsesRawReportedPositionPlusEncodedDelta_data() {
+        QTest::addColumn<double>("rawMachineX");
+        QTest::addColumn<double>("wcoX");
+        QTest::addColumn<int>("direction");
+        QTest::newRow("positive-zero-wco") << .0054 << 0. << 1;
+        QTest::newRow("positive-negative-wco") << .0054 << -.2 << 1;
+        QTest::newRow("signed-negative-wco") << -.0054 << -100. << -1;
+    }
+    void relativeJogUsesRawReportedPositionPlusEncodedDelta() {
+        QFETCH(double, rawMachineX);
+        QFETCH(double, wcoX);
+        QFETCH(int, direction);
+        Controller controller; // Opens only its own generated synthetic PTY.
+        controller.machinePosition = {rawMachineX, 10};
+        controller.workOffset = {wcoX, 0};
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        session.positionReferenced = true;
+        session.commissionedModalContract = true;
+        session.commissionedEnvelope = direction > 0 ? QRectF(-198.995, 0, 200, 150)
+                                                    : QRectF(-1.005, 0, 200, 150);
+        QVERIFY(session.motionSafetyError().isEmpty());
+        const auto before = controller.commands.size();
+        session.jog(direction * 1., 0);
+        QTest::qWait(100);
+        // Raw target is +/-1.0054: outside the signed envelope by .0004 mm.
+        for (int i = before; i < controller.commands.size(); ++i)
+            QVERIFY2(!controller.commands[i].startsWith("$J="), qPrintable(controller.commands[i]));
+        QVERIFY(!session.executing());
+        // Positive acceptance: .999 mm gives +/-1.0044, genuinely inside.
+        session.jog(direction * .999, 0);
+        const auto expected = QString("$J=G91 G21 X%1 Y0.000 F600")
+                                  .arg(direction > 0 ? "0.999" : "-0.999");
+        QTRY_VERIFY(controller.commands.contains(expected));
+    }
     void actualMachineRegistrationBlocksHeavyDocumentSideEffects_data() {
         QTest::addColumn<QString>("activity");
         for (const auto &activity : {"job", "paused-job", "jog", "focus", "frame", "home", "zero",
