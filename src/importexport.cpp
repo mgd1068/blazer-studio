@@ -4,6 +4,7 @@
 #include "nativedesign.h"
 #include "plotimport.h"
 #include <QDir>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -14,12 +15,53 @@
 #include <QUuid>
 #include <cmath>
 #include <functional>
+#include <algorithm>
 namespace {
 QString uid() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 } // namespace
 bool Document::importFile(const QUrl &url) {
+    return importFileInternal(url);
+}
+QVariantMap Document::previewNativeImport(const QUrl &url, bool allowSystemFontSubstitution) {
+    const auto invalid = [](QString message) {
+        return QVariantMap{{"complete",false},{"blocked",true},{"canImportGeometry",false},
+                           {"geometryValidated",false},{"sourceSha256",QString()},
+                           {"issues",QVariantList{}},{"error",std::move(message)}};
+    };
+    if (!url.isLocalFile()) return invalid("Eine lokale LightBurn- oder MillMage-Datei auswählen.");
+    const QFileInfo info(url.toLocalFile());
+    const auto ext = info.suffix().toLower();
+    if (!info.isFile() || !QStringList{"lbrn","lbrn2","mage"}.contains(ext))
+        return invalid("Kein unterstütztes reguläres natives Projekt.");
+    QFile file(info.filePath());
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 16*1024*1024)
+        return invalid("Natives Projekt nicht lesbar oder größer als 16 MiB.");
+    const auto bytes = file.read(16*1024*1024+1);
+    if (bytes.size() > 16*1024*1024 || !file.atEnd() || file.error() != QFileDevice::NoError)
+        return invalid("Natives Projekt konnte nicht vollständig innerhalb des Datenlimits gelesen werden.");
+    const auto parsed = NativeDesign::read(bytes,ext=="mage",
+                                         {NativeDesign::ImportIntent::GeometryOnly,allowSystemFontSubstitution});
+    auto report = parsed.compatibility.toVariantMap();
+    report["error"] = parsed.error;
+    report["geometryValidated"] = parsed.error.isEmpty() && parsed.compatibility.geometryValidated;
+    return report;
+}
+bool Document::importNativeGeometry(const QUrl &url, const QString &expectedSourceSha256,
+                                     bool allowSystemFontSubstitution) {
+    if (!url.isLocalFile() || !QFileInfo(url.toLocalFile()).isFile() ||
+        !QStringList{"lbrn","lbrn2","mage"}.contains(QFileInfo(url.toLocalFile()).suffix().toLower())) {
+        notify("Eine lokale native Projektdatei auswählen; kein Import."); return false;
+    }
+    if (expectedSourceSha256.size()!=64 || !std::all_of(expectedSourceSha256.cbegin(),expectedSourceSha256.cend(),[](QChar c) {
+            return (c>='0' && c<='9') || (c>='a' && c<='f'); })) {
+        notify("Zuerst eine unveränderte Importvorschau prüfen; kein Import."); return false;
+    }
+    return importFileInternal(url,expectedSourceSha256,true,allowSystemFontSubstitution);
+}
+bool Document::importFileInternal(const QUrl &url, const QString &expectedNativeSha256,
+                                 bool nativeGeometryOnly, bool allowSystemFontSubstitution) {
     if (!url.isLocalFile())
         return false;
     auto ext = QFileInfo(url.toLocalFile()).suffix().toLower();
@@ -58,6 +100,7 @@ bool Document::importFile(const QUrl &url) {
     if (!file.open(QIODevice::ReadOnly) || file.size() > 16 * 1024 * 1024)
         return false;
     QList<Artwork> imported;
+    QList<int> pendingNativeGeometry;
     const bool hpgl = ext == "hpgl" || ext == "plt";
     const bool gcode = ext == "gc" || ext == "gcode" || ext == "nc";
     const bool ruida = ext == "rd";
@@ -221,11 +264,21 @@ bool Document::importFile(const QUrl &url) {
             return false;
         }
     } else if (native) {
-        const auto result = NativeDesign::read(file.read(16 * 1024 * 1024 + 1), ext == "mage");
+        const auto bytes = file.read(16 * 1024 * 1024 + 1);
+        if (!file.atEnd() || file.error()!=QFileDevice::NoError || bytes.size()>16*1024*1024) {
+            notify("Natives Projekt überschreitet das Datenlimit oder ist nicht vollständig lesbar; kein Import."); return false;
+        }
+        if (nativeGeometryOnly && QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex()) != expectedNativeSha256) {
+            notify("Die native Projektdatei hat sich seit der Vorschau geändert. Erneut prüfen; kein Import."); return false;
+        }
+        const auto result = NativeDesign::read(bytes, ext == "mage",
+            {nativeGeometryOnly ? NativeDesign::ImportIntent::GeometryOnly : NativeDesign::ImportIntent::PreserveProjectSemantics,
+             allowSystemFontSubstitution});
         if (!result.error.isEmpty()) {
             notify(result.error + "; kein Teilimport.");
             return false;
         }
+        QHash<QString,QString> importedGroups;
         for (const auto &element : result.elements) {
             Artwork a;
             a.id = uid();
@@ -233,7 +286,14 @@ bool Document::importFile(const QUrl &url) {
             a.page = m_activePage;
             a.visible = element.visible;
             a.toolLayer = element.toolLayer;
-            a.groupId = element.group;
+            if (element.toolLayer == 0) {
+                pendingNativeGeometry.append(imported.size());
+                a.toolLayer = 1; // Explicit geometry import does not enable previously disabled source output.
+            }
+            if (!element.group.isEmpty()) {
+                if (!importedGroups.contains(element.group)) importedGroups.insert(element.group,uid());
+                a.groupId = importedGroups.value(element.group);
+            }
             a.groupName = a.groupId.isEmpty() ? QString() : "Importgruppe";
             if (element.image) {
                 a.kind = "image";
@@ -279,14 +339,15 @@ bool Document::importFile(const QUrl &url) {
     normalizeGroups();
     m_selected = m_items.size() - imported.size();
     m_selection = {m_selected};
+    if (nativeGeometryOnly && !pendingNativeGeometry.isEmpty()) {
+        m_selection.clear();
+        for (const auto row : pendingNativeGeometry) m_selection.append(m_items.size()-imported.size()+row);
+        m_selected = m_selection.first();
+    }
     endResetModel();
     refresh();
     notify(QString::number(imported.size()) +
-           (native ? (ext == "mage" ? " MillMage-Grafikobjekte importiert; Fräsoperationen, "
-                                      "Maschinenparameter und Projektursprung nicht übernommen."
-                                    : " LightBurn-Grafikobjekte importiert; Schnittparameter und "
-                                      "Ursprung/Spiegelung nicht übernommen. Text ohne Konturen "
-                                      "verwendet Systemschriften.")
+           (native ? " native Grafikobjekte als Vorlagen importiert. Bearbeitung rechts ausdrücklich wählen; Quellparameter wurden nicht übernommen."
             : ruida ? " RDWorks-Pfadobjekt importiert (" + plotInterpretation +
                           "). Gemeinsam links unten platziert, Y nach oben; Leistung, Vorschub, "
                           "Quellen- und Geräteparameter nicht übernommen."

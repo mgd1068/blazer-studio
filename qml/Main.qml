@@ -16,6 +16,7 @@ ApplicationWindow {
     readonly property bool positioningReady: machine.ready && machine.positionReferenced && (win.simulationMode || (typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
     readonly property bool processingReady: machine.ready && (win.simulationMode || (typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))
     readonly property var deviceService: typeof deviceManager !== "undefined" ? deviceManager : null
+    readonly property var vectorInspector: typeof vectorInspectionService !== "undefined" ? vectorInspectionService : null
     readonly property var testLedger: typeof materialTestLedger !== "undefined" ? materialTestLedger : null
     property bool preferencesSyncing: true
     property bool basic: true
@@ -60,7 +61,7 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible
+    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
@@ -139,6 +140,8 @@ ApplicationWindow {
         if(project.fileUrl.toString().length>0)saveDialog.selectedFile=project.fileUrl
         saveDialog.open()
     }
+    NativeImportDialog { id: nativeImportReview; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false); onImported: { win.page=0; win.proofConfirmed=false; Qt.callLater(win.revealObjectSelection) } }
+    VectorInspectionDialog { id: vectorInspectionDialog; service: win.vectorInspector; dark: win.night; onAboutToShow: machine.focus(false) }
     JobPlacementDialog { id: jobPlacementDialog; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false) }
     DeviceManagerDialog { id: deviceDialog; manager: win.deviceService; dark: win.night; onAboutToShow: machine.focus(false) }
     BarcodeDialog { id: barcodeDialog; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
@@ -202,6 +205,7 @@ ApplicationWindow {
         objectList.positionViewAtIndex(project.selected, ListView.Contain)
     }
     function importMotif(file) {
+        if (/\.(?:lbrn2?|mage)(?:[?#].*)?$/i.test(file.toString())) { nativeImportReview.inspectFile(file); return }
         let useProfile = basic && !project.beginnerSummary.requiresAdvanced && !project.beginnerSummary.modified
         if(project.importFile(file) && useProfile)project.applyBasicMaterial(project.material)
     }
@@ -359,7 +363,7 @@ ApplicationWindow {
     FileDialog { id: cameraPhoto; title: "Referenzfoto des Arbeitsraums"; nameFilters: ["Bilder (*.png *.jpg *.jpeg)"]; onAccepted: {if(!cameraRegistration.load(selectedFile))project.notify("Referenzfoto ungültig.")} }
     FileDialog { id: photoDepth; title: "Foto für lokale Tiefenschätzung"; nameFilters: ["Bilder (*.png *.jpg *.jpeg *.webp)"]; onAccepted: depthService.estimate(selectedFile) }
     property url csvPath
-    FileDialog { id: universalImport; title: "Grafik, GCode, Modell oder Projekt importieren"; nameFilters: ["Unterstützte Dateien (*.svg *.dxf *.hpgl *.plt *.gc *.gcode *.nc *.rd *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.blazer *.lbrn *.lbrn2 *.mage)"]; onAccepted: project.importFile(selectedFile) }
+    FileDialog { id: universalImport; objectName: "universalImportDialog"; onVisibleChanged: if (visible) machine.focus(false); title: "Grafik, GCode, Modell oder Projekt importieren"; nameFilters: ["Unterstützte Dateien (*.svg *.dxf *.hpgl *.plt *.gc *.gcode *.nc *.rd *.pdf *.ai *.eps *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.stl *.obj *.blazer *.lbrn *.lbrn2 *.mage)"]; onAccepted: { if (/\.(lbrn2?|mage)$/i.test(selectedFile.toString())) nativeImportReview.inspectFile(selectedFile); else project.importFile(selectedFile) } }
     FileDialog { id: vectorExport; title: "Vektoren exportieren"; fileMode: FileDialog.SaveFile; defaultSuffix: "svg"; onAccepted: project.exportSvg(selectedFile) }
     FileDialog { id: csvImport; title: "CSV für variable Textfelder"; nameFilters: ["CSV (*.csv)"]; onAccepted: {win.csvPath=selectedFile;csvDirectory.open()} }
     FolderDialog { id: csvDirectory; title: "Ausgabeverzeichnis für neue GCode-Dateien"; onAccepted: project.batch(win.csvPath,selectedFolder,"") }
@@ -549,6 +553,7 @@ ApplicationWindow {
                         MenuItem { objectName: "projectMetadataMenuItem"; text: "Projektangaben …"; onTriggered: projectDetails.open() }
                         MenuItem { objectName: "historyMenuItem"; text: "Bearbeitungsverlauf …"; onTriggered: historyDialog.open() }
                         MenuItem { objectName: "settingsBundleMenuItem"; text: "Bedieneinstellungen übertragen …"; onTriggered: settingsBundleDialog.open() }
+                        MenuItem { objectName: "vectorInspectionMenuItem"; text: "Vektorgeometrie prüfen …"; enabled: !!win.vectorInspector; onTriggered: vectorInspectionDialog.open() }
                         MenuSeparator {}
                         MenuItem { objectName: "newTemplateMenuItem"; text: "Neu aus Vorlage …"; onTriggered: win.requestAction("template") }
                         MenuItem { objectName: "saveTemplateMenuItem"; text: "Als Vorlage speichern …"; onTriggered: saveTemplateDialog.open() }
@@ -782,7 +787,7 @@ ApplicationWindow {
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 6
                                     Text { text: "Bearbeitung"; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true }
-                                    Text { visible: win.basic; text: objectRow.artLayer === 0 ? (objectRow.artOutline ? "Rand gravieren" : "Fläche gravieren") : "Durchschneiden"; color: win.ink; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Text { visible: win.basic; text: objectRow.artToolLayer > 0 ? "Vorlage · keine Ausgabe" : objectRow.artLayer === 0 ? (objectRow.artOutline ? "Rand gravieren" : "Fläche gravieren") : "Durchschneiden"; color: win.ink; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                     ComboBox { HelpBubble { target: parent }
                                         id: objectOperation
                                         objectName: "objectOperation" + objectRow.index
@@ -1157,7 +1162,8 @@ ApplicationWindow {
                                 ActionButton { objectName: "cutObjectButton"; text: "Durchschneiden"; hint: "Verwendet die Schnittwerte des Materials. Für einen markierten Rand stattdessen Rand gravieren wählen."; dark: win.night; compact: true; Layout.fillWidth: true; selected: project.selection.toolLayer===0 && project.selection.layer === 1; enabled: project.selected >= 0 && project.layers[1].enabled && (!project.material.cut || project.material.cut.enabled); onClicked: project.setBasicOperation("cut") }
                             }
                             ActionButton { text: project.selection.visible ? "Objekt ausblenden" : "Objekt einblenden"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: project.selected >= 0; onClicked: project.toggleVisible(project.selected) }
-                            Rectangle { visible: !win.basic; Layout.fillWidth: true; height: 1; color: win.line }
+                            ActionButton { objectName: "vectorInspectionButton"; text: "Vektoren prüfen …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.vectorInspector; onClicked: vectorInspectionDialog.open() }
+                    Rectangle { visible: !win.basic; Layout.fillWidth: true; height: 1; color: win.line }
                             SectionLabel { visible: !win.basic; text: "GERÄTEPROFIL"; dark: win.night }
                             Repeater {
                                 model: win.basic ? [] : [{k:"Verbindung",v:project.deviceInfo.controller+" · seriell"},{k:"Baudrate",v:String(project.deviceInfo.baudRate)},{k:"S-Max",v:String(project.deviceInfo.powerScale)},{k:"Fokuspunkt",v:project.deviceInfo.focusPower+" % / S"+Math.round(project.deviceInfo.focusPower*project.deviceInfo.powerScale/100)},{k:"Z-Achse",v:project.deviceInfo.zEnabled ? "Aktiviert" : "Deaktiviert"}]

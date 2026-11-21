@@ -4,6 +4,7 @@
 #include "document.h"
 #include "devicemanager.h"
 #include "materialtestledger.h"
+#include "vectorinspectionservice.h"
 #include "deviceprofile.h"
 #include "machine.h"
 #include "materiallibrary.h"
@@ -126,6 +127,7 @@ int main(int argc, char **argv) {
                       transient ? Machine::HardwareAccess::Disabled
                                 : Machine::HardwareAccess::Allowed);
     DeviceManager deviceManager(&document, &simulator, transient ? transientRecovery.filePath("devices.json") : QString());
+    VectorInspectionService vectorInspectionService(&document);
     MaterialTestLedger materialTestLedger(transient ? transientRecovery.filePath("material-tests.json") : QString());
     ApplicationServices services(
         &document, &simulator, transient ? transientRecovery.filePath("settings.ini") : QString());
@@ -143,6 +145,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("machine", &simulator);
     engine.rootContext()->setContextProperty("deviceManager", &deviceManager);
     engine.rootContext()->setContextProperty("materialTestLedger", &materialTestLedger);
+    engine.rootContext()->setContextProperty("vectorInspectionService", &vectorInspectionService);
     engine.rootContext()->setContextProperty("deviceProfile", profile);
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,

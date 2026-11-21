@@ -732,6 +732,10 @@ class WorkflowTest : public QObject {
         QVERIFY(!machine.firing());
         QTRY_VERIFY_WITH_TIMEOUT(machine.ready(), 6000);
         QVERIFY(screenshot("device"));
+        // A completed frame changes the explicitly known simulator head. Wait for
+        // its new laser-free approach to be replanned before requesting a job.
+        QTRY_VERIFY_WITH_TIMEOUT(!project.planningBusy(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(item("startJobButton")->isEnabled(), 5000);
         QVERIFY(click(window, item("startJobButton")));
         QTRY_VERIFY(machine.running());
         QVERIFY(machine.simulation());
@@ -1044,12 +1048,19 @@ class WorkflowTest : public QObject {
         QTRY_VERIFY(importPicker->property("visible").toBool());
         QVERIFY(importPicker->property("nameFilters").toStringList().join(' ').contains("*.mage"));
         QVERIFY(chooseFile("importMotifDialog",magePath));
+        auto *nativeReview=window->findChild<QObject *>("nativeImportReviewDialog");
+        QVERIFY(nativeReview); QTRY_VERIFY(nativeReview->property("visible").toBool());
+        QCOMPARE(project.count(),0); // Review has no mutation or output side effect.
+        QVERIFY(click(window,item("confirmNativeGeometryImport")));
         QTRY_COMPARE(project.count(),1);
+        QCOMPARE(project.items()[0].toolLayer,1);
+        QVERIFY(!project.job().valid());
         QCOMPARE(project.items()[0].bounds,QRectF(15,17.5,10,5));
         QCOMPARE(project.material()["id"].toString(),sourceProfile["id"].toString());
         QCOMPARE(project.layers()[0].toMap()["power"].toDouble(),100.);
         QCOMPARE(project.layers()[0].toMap()["speed"].toDouble(),5000.);
-        QVERIFY(project.message().contains("MillMage"));
+        QVERIFY(project.items()[0].name.startsWith("MillMage"));
+        QVERIFY(project.message().contains("Vorlagen"));
         QVERIFY(!machine.running());
         QVERIFY(screenshot("millmage-import"));
         project.newProject();

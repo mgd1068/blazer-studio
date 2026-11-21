@@ -54,6 +54,7 @@ QVariantList materialLayers(const QVariantList &current, const QVariantMap &prof
 }
 } // namespace
 Document::Document(QObject *p) : QAbstractListModel(p) {
+    m_framingInstance = QUuid::createUuid().toString(QUuid::WithoutBraces);
     connect(&m_preparation, &JobPreparation::changed, this, &Document::changed);
     connect(&m_batch, &BatchExport::changed, this, &Document::changed);
     connect(&m_batch, &BatchExport::finished, this, &Document::notify);

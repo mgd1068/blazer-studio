@@ -84,3 +84,18 @@ Modi sind ganzzahlig 0–2, Anker 0–8; `userOrigin` ist null oder genau ein Ob
 
 
 Prüfstand der Document-Integration am 21.11.2026: `placementdocument` **10 QtTest-Ergebnisse, 0 Fehler, 0 übersprungene Fälle**, einschließlich identischer Laufzeitstands-No-ops und exakter Intentkoordinaten für Dirty/Undo. `core`, `expansion`, `deviceworkspace`, `release`, `job` und die Integrationsfälle bestanden zusammen 6/6 CTest-Programme in 14,32 s; zuvor bestanden zusätzlich `stability` und der reine `jobplacement`-Vertrag (3/3 zusammen mit Integration, 14,41 s). 235 lokale Dokumentziele lösen auf. Evidenz unter `/home/mathias/benslab/analysis/blazer-rebuild-20261121/agent-placement-document/`. Keine Main-/Machine-Änderung, Installation oder reale Geräteaktion.
+
+## Simulator provider and frame requests
+
+Machine supplies a simulator-only position snapshot while idle. Its frame binds
+an instance nonce, output profile and selected physical-device identity; exact
+point/frame changes increment the position revision. Running or paused simulation
+freezes the start snapshot. Real sessions never consume simulator coordinates.
+Saved user origins are portable intent; reopening or changing coordinate frames
+requires explicit confirmation, and no confirmation grants hardware access.
+
+A frame request binds the Document instance and current planning revision. Machine
+compares the entire request with a freshly computed canonical frame, including
+scope, selection and bounds. Jogging, source/parameter edits, a different Document
+or modified bounds invalidate old requests. Relative real-machine framing and
+job output remain unavailable pending actual coordinate commissioning.

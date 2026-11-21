@@ -766,6 +766,18 @@ class UiTest : public QObject {
             QTest::qWait(50);
             auto *object = item(qPrintable(QString("objectRow%1").arg(row)));
             QVERIFY(object);
+            // Position the outer sidebar as well as the inner object list. The
+            // material editor above may have scrolled the sidebar away from it.
+            for (auto *parent = list->parentItem(); parent; parent = parent->parentItem()) {
+                if (!parent->property("contentY").isValid()) continue;
+                const auto local = object->mapToItem(parent, QPointF(60, 14));
+                const double delta = local.y() < 5 ? local.y()-5
+                    : local.y()+object->height() > parent->height()-5
+                    ? local.y()+object->height()-parent->height()+5 : 0;
+                const double limit = std::max(0., parent->property("contentHeight").toDouble()-parent->height());
+                parent->setProperty("contentY",std::clamp(parent->property("contentY").toDouble()+delta,0.,limit));
+            }
+            QTest::qWait(50);
             // Use the name area, leaving the row's operation selector and checkbox independent.
             auto point = object->mapToScene(
                 QPointF(60, object->property("artGroupFirst").toBool() ? 44 : 14));

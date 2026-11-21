@@ -58,9 +58,9 @@ Dialog {
             }
             Label {
                 objectName: "previewHeadPosition"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink
-                text: dialog.simulation && dialog.summary.previewPositionKnown ? "Simulatorposition: X " + dialog.length(dialog.modelMachine.x) + " · Y " + dialog.length(dialog.modelMachine.y) : "Keine freigegebene Vorschauposition für ein reales Gerät vorhanden. Gemeldete 0/0 sind kein Positionsnachweis."
+                text: dialog.simulation && dialog.summary.previewPositionKnown ? "Simulatorposition: X " + dialog.length(dialog.modelMachine.x) + " · Y " + dialog.length(dialog.modelMachine.y) : dialog.simulation ? "Keine aktuelle Simulatorposition bekannt. Den Simulator zuerst verbinden und einen laufenden Ablauf beenden." : "Keine freigegebene Vorschauposition für ein reales Gerät vorhanden. Gemeldete 0/0 sind kein Positionsnachweis."
             }
-            ActionButton { objectName: "refreshPlacementPosition"; text: "Simulatorposition aktualisieren"; dark: dialog.dark; enabled: dialog.simulation && dialog.editable; onClicked: dialog.modelMachine.refreshPreviewPosition() }
+            ActionButton { objectName: "refreshPlacementPosition"; text: "Simulatorposition aktualisieren"; dark: dialog.dark; enabled: dialog.simulation && dialog.editable && dialog.modelMachine.connected && dialog.modelMachine.ready; onClicked: dialog.modelMachine.refreshPreviewPosition() }
             Label {
                 visible: dialog.document.startMode === 2
                 Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink

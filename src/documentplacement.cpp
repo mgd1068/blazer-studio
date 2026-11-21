@@ -1,6 +1,7 @@
 #include "document.h"
 
 void Document::refreshPlanning() {
+    ++m_framingRevision;
     m_job.reset();
     m_syncPlacementSummary.clear();
     if (m_background)

@@ -7,6 +7,7 @@
 #include "registration.h"
 #include "reliefpreview.h"
 #include "workspace.h"
+#include "vectorinspectionservice.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -72,6 +73,7 @@ class FeatureWorkflowTest : public QObject {
         DeviceManager devices(&project, &machine, storage.filePath("devices.json"));
         MaterialTestLedger ledger(storage.filePath("material-tests.json"));
         MaterialLibrary library(storage.filePath("materials.json"));
+        VectorInspectionService vectorInspector(&project);
         Registration registration;
         ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
         QVERIFY(services.finishOnboarding()); QVERIFY(services.setDarkTheme(compactDark));
@@ -81,6 +83,7 @@ class FeatureWorkflowTest : public QObject {
         context->setContextProperty("deviceManager", &devices); context->setContextProperty("materialTestLedger", &ledger);
         context->setContextProperty("materialLibrary", &library); context->setContextProperty("cameraRegistration", &registration);
         context->setContextProperty("appServices", &services);
+        context->setContextProperty("vectorInspectionService", &vectorInspector);
         for (const auto &pair : {qMakePair("deviceProfile", "blaze-x-m3.json"),qMakePair("manufacturerReference", "manufacturer-materials.json")}) {
             QFile file(QStringLiteral(BLAZER_SOURCE_DIR "/profiles/") + pair.second);
             QVERIFY(file.open(QIODevice::ReadOnly));
@@ -139,6 +142,25 @@ class FeatureWorkflowTest : public QObject {
         QTRY_VERIFY(!window->property("proofConfirmed").toBool());
         QVERIFY(machine.simulation()); QVERIFY(machine.ports().isEmpty());
 
+        QVERIFY(press("jobPlacementButton"));
+        QTRY_VERIFY(object("jobPlacementDialog")->property("visible").toBool());
+        auto *mode = item("startModeChoice"); QVERIFY(mode);
+        QVERIFY(QMetaObject::invokeMethod(mode,"activated",Q_ARG(int,1)));
+        QCOMPARE(project.startMode(),Document::CurrentPosition);
+        for (int anchor=0;anchor<9;++anchor) {
+            QVERIFY(press(QString("jobOrigin%1").arg(anchor)));
+            QCOMPARE(int(project.jobOrigin()),anchor);
+            QVERIFY2(project.job().valid(),qPrintable(project.job().errors.join("; ")));
+        }
+        QVERIFY(picture("current-position"));
+        QVERIFY(QMetaObject::invokeMethod(mode,"activated",Q_ARG(int,2)));
+        QVERIFY(!project.job().valid());
+        QVERIFY(press("captureJobUserOrigin"));
+        QVERIFY(project.placementSummary()["originConfirmed"].toBool());
+        QVERIFY(project.job().valid()); QVERIFY(picture("user-origin"));
+        QVERIFY(QMetaObject::invokeMethod(mode,"activated",Q_ARG(int,0)));
+        QVERIFY(QMetaObject::invokeMethod(object("jobPlacementDialog"),"close"));
+
         const auto beforeBarcode = project.count();
         QVERIFY(press("barcodeToolButton"));
         QVERIFY(text("barcodeText","HELLO42")); QVERIFY(raw("barcodeModuleWidth","0.3 mm"));
@@ -146,6 +168,26 @@ class FeatureWorkflowTest : public QObject {
         QVERIFY(press("createBarcodeButton")); QTRY_COMPARE(project.count(),beforeBarcode+1);
         QVERIFY(project.items().last().style.value("barcode").toBool()); QVERIFY(project.job().valid());
         QVERIFY(picture("barcode"));
+
+        const auto nativePath = storage.filePath("review.lbrn2");
+        QFile nativeFile(nativePath); QVERIFY(nativeFile.open(QIODevice::WriteOnly));
+        const QByteArray foreign = "<LightBurnProject><CutSetting type='Cut'><maxPower Value='100'/><speed Value='1'/></CutSetting><Shape Type='Rect' W='10' H='5'><XForm>1 0 0 1 20 20</XForm></Shape></LightBurnProject>";
+        QCOMPARE(nativeFile.write(foreign),foreign.size()); nativeFile.close();
+        const auto beforeNativeCount=project.count(); const auto beforeNativeCode=project.job().gcode();
+        QVERIFY(press("importMotifButton")); QVERIFY(fileResult("importMotifDialog",nativePath));
+        QTRY_VERIFY(object("nativeImportReviewDialog")->property("visible").toBool());
+        QVERIFY(item("confirmNativeGeometryImport")->isEnabled());
+        QVERIFY(picture("native-review")); QVERIFY(press("confirmNativeGeometryImport"));
+        QTRY_COMPARE(project.count(),beforeNativeCount+1);
+        QCOMPARE(project.items().last().toolLayer,1); QCOMPARE(project.job().gcode(),beforeNativeCode);
+        project.setBasicOperation("outline"); QCOMPARE(project.items().last().toolLayer,0);
+        QVERIFY(press("vectorInspectionButton"));
+        QTRY_VERIFY(object("vectorInspectionDialog")->property("visible").toBool());
+        QVERIFY(press("inspectAllVectors"));
+        QTRY_VERIFY_WITH_TIMEOUT(!vectorInspector.busy(),5000);
+        QVERIFY(vectorInspector.report()["complete"].toBool());
+        QVERIFY(picture("vector-inspection"));
+        QVERIFY(QMetaObject::invokeMethod(object("vectorInspectionDialog"),"close"));
 
         QVERIFY(press("materialTestHistoryButton"));
         QTRY_VERIFY(object("materialTestRecordDialog")->property("visible").toBool());

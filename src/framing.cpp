@@ -80,7 +80,12 @@ QVariantMap Document::framingBounds(const QString &scope) const {
     const QRectF rect(x, y, width, height);
     if (!Geometry::insideBed(rect, workArea()))
         return invalid("Ungültige Grenzen der Rahmenfahrt.");
-    return {{"outputFingerprint", QString::fromLatin1(m_deviceProfile.outputFingerprint())},
+    QVariantList selection;
+    for (int row : m_selection) selection.append(row);
+    return {{"documentInstance", m_framingInstance},
+            {"sourceRevision", QVariant::fromValue(m_framingRevision)},
+            {"selection", scope == "selection" ? selection : QVariantList{}},
+            {"outputFingerprint", QString::fromLatin1(m_deviceProfile.outputFingerprint())},
             {"valid", true},
             {"scope", scope},
             {"reason", QString()},

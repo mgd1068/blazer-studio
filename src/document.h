@@ -138,6 +138,9 @@ class Document : public QAbstractListModel {
     QByteArray projectBytes() const { return serialize(); }
     bool restoreBytes(const QByteArray &bytes);
     Q_INVOKABLE bool importFile(const QUrl &url);
+    Q_INVOKABLE QVariantMap previewNativeImport(const QUrl &url, bool allowSystemFontSubstitution = false);
+    Q_INVOKABLE bool importNativeGeometry(const QUrl &url, const QString &expectedSourceSha256,
+                                          bool allowSystemFontSubstitution = false);
     Q_INVOKABLE bool importModel(const QUrl &url);
     Q_INVOKABLE bool exportSvg(const QUrl &url) const;
     Q_INVOKABLE bool importProject(const QUrl &url);
@@ -229,6 +232,8 @@ class Document : public QAbstractListModel {
     void fileUrlChanged();
 
   private:
+    bool importFileInternal(const QUrl &url, const QString &expectedNativeSha256 = {},
+                            bool nativeGeometryOnly = false, bool allowSystemFontSubstitution = false);
     struct Snapshot {
         QList<Artwork> items;
         QVariantList layers;
@@ -286,6 +291,8 @@ class Document : public QAbstractListModel {
     };
     QList<HistoryEntry> m_undo, m_redo;
     quint64 m_historyRevision = 0;
+    QString m_framingInstance;
+    quint64 m_framingRevision = 0;
     std::optional<Snapshot> m_beforeMove;
     PlacedJobPlanning::Intent m_placementIntent;
     std::optional<JobPlacement::PositionSnapshot> m_previewPosition, m_confirmedUserOrigin;

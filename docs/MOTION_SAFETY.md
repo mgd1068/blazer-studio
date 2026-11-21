@@ -139,3 +139,12 @@ Mechanik, tatsächliche Endschalter, UART-Zeitverhalten, Planner-Latenz noch
 optische Leistung ab. Es kann bereits vom Controller empfangene Befehle nicht
 rückgängig machen und beweist keine Not-Aus-Wirkung. Kein reales Gerät und
 keine reale serielle Schnittstelle wurden für diese Tests geöffnet.
+
+## Active evidence loss
+
+Machine now stops immediately when verified position/reference evidence is lost
+while a stream, focus or accessory lease is active. The active flags must not be
+cleared before deciding whether STOPP is required. Nested session notifications
+observe the new evidence boundary first. The watchdog also checks an executing
+session's motion evidence independently of accessory flags. This is software
+fail-closed behavior, not proof of physical shutdown.

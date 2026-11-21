@@ -100,3 +100,19 @@ project archives. Existing parser geometry fixtures explicitly select the limite
 geometry and font workflow. Successful Document geometry-insertion regression
 cases must use the new reviewed entrypoint provided by the root integration;
 legacy `importFile(native)` is intentionally denied.
+
+## Review workflow in the application
+
+All native import pickers route `.lbrn`, `.lbrn2` and `.mage` through the same
+explicit geometry review. `Document::previewNativeImport` performs the bounded
+reader validation without changing the destination. `importNativeGeometry`
+re-reads the local file and requires the exact reviewed SHA-256; a changed source
+requires another review. System-font substitution has a separate unchecked
+permission. Unsupported geometry/resources remain rejected.
+
+Imported source output geometry starts as non-output T1 templates. Source T1/T2
+helpers retain their helper role and are excluded from the pending output
+selection. The user assigns a local operation explicitly; neither foreign output
+flags nor power/feed settings activate processing. Import and later assignment
+are separate undo steps. Each import receives new group identities. Destination
+project identity, material and operations are retained.

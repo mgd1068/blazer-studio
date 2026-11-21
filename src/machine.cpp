@@ -15,7 +15,12 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
             lastProcessingSafetyErrors = errors;
             emit changed(); // Also refresh stale airflow/status evidence while idle.
         }
-        if (live && (accessoryJobActive || accessoryFocusActive || firing()) && !errors.isEmpty()) {
+        const auto status = session ? session->status() : ControllerStatus{};
+        const bool unsafeMotion = live && status.executing &&
+            (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty());
+        const bool unsafeOutput = live && (accessoryJobActive || accessoryFocusActive || firing()) &&
+            !errors.isEmpty();
+        if (unsafeMotion || unsafeOutput) {
             document->notify("Auftrag abgebrochen: " + errors.join("\n"));
             stop();
         }
@@ -82,9 +87,19 @@ void Machine::syncDeviceProfile() {
                 accessoryFocusActive = false;
             } else if (live && ((sessionWasVerified && !status.verified) ||
                                 (sessionWasReferenced && !status.positionReferenced))) {
+                // Preserve the loss boundary before a protective STOPP emits
+                // nested session notifications. Never erase the active-output
+                // evidence and then rely on a watchdog to rediscover it.
+                const bool mustStop = status.executing || status.firing ||
+                    accessoryJobActive || accessoryFocusActive;
+                sessionWasVerified = status.verified;
+                sessionWasReferenced = status.positionReferenced;
                 accessory.transition(AccessoryContract::Event::Fault);
-                accessoryJobActive = false;
-                accessoryFocusActive = false;
+                if (mustStop) {
+                    document->notify("Auftrag abgebrochen: Positions- oder Verbindungsnachweis verloren.");
+                    stop();
+                    return;
+                }
             } else if (live && (accessoryJobActive || accessoryFocusActive) && !status.executing && !status.firing) {
                 accessoryJobActive = false;
                 accessoryFocusActive = false;
@@ -183,10 +198,19 @@ void Machine::frame(const QVariantMap &b) {
         document->notify("Rahmenziel gehört zu einem anderen Geräteprofil.");
         return;
     }
+    if (live && document->startMode() != Document::AbsoluteCoordinates) {
+        document->notify("Relative Rahmenfahrt ist für reale Hardware noch nicht eingerichtet.");
+        return;
+    }
+    const auto current = document->framingBounds(b.value("scope").toString());
+    if (!b.value("valid").toBool() || !current.value("valid").toBool() || b != current) {
+        document->notify("Rahmenziel ist veraltet oder verändert. Aktuelle Vorschau erneut prüfen.");
+        return;
+    }
     if (live)
-        session->frame(b);
+        session->frame(current);
     else
-        Simulator::frame(b);
+        Simulator::frame(current);
 }
 void Machine::start() {
     if (document->planningBusy()) {
