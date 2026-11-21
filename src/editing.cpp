@@ -220,9 +220,7 @@ void Document::activatePage(int page) {
     m_activePage = page;
     m_selection.clear();
     m_selected = -1;
-    m_job.reset();
-    if (m_background)
-        m_preparation.submit(jobInput());
+    refreshPlanning();
     if (!m_items.isEmpty())
         emit dataChanged(index(0), index(m_items.size() - 1));
     emit changed();

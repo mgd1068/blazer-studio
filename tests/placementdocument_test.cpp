@@ -1,4 +1,5 @@
 #include "document.h"
+#include "machine.h"
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -293,6 +294,106 @@ class PlacementDocumentTest : public QObject {
         QTRY_COMPARE_WITH_TIMEOUT(document.planningState(), QString("ready"), 5000);
         QCOMPARE(rectangle(document.placementSummary()["graphicsBounds"].toMap()),
                  QRectF(110, 85, 20, 10));
+    }
+    void pageChangesPreservePlacementContext_data() {
+        QTest::addColumn<bool>("background");
+        QTest::addColumn<int>("mode");
+        QTest::addColumn<int>("anchor");
+        QTest::addColumn<bool>("confirmed");
+        for (bool background : {false, true})
+            for (int anchor : {0, 4, 8})
+                for (int kind : {0, 1, 2}) {
+                    const auto name = QString("%1-anchor%2-%3")
+                                          .arg(background ? "async" : "sync")
+                                          .arg(anchor)
+                                          .arg(kind == 0   ? "current"
+                                               : kind == 1 ? "user-confirmed"
+                                                           : "user-unconfirmed");
+                    QTest::newRow(name.toLatin1().constData())
+                        << background << (kind == 0 ? 1 : 2) << anchor << (kind != 2);
+                }
+    }
+    void pageChangesPreservePlacementContext() {
+        QFETCH(bool, background);
+        QFETCH(int, mode);
+        QFETCH(int, anchor);
+        QFETCH(bool, confirmed);
+        Document document;
+        document.newProject();
+        rectangle(document);
+        QVERIFY(document.addPage("Second"));
+        document.activatePage(1);
+        document.addShape("ellipse");
+        document.setLayer(1);
+        document.setProperty("x", 10.);
+        document.setProperty("y", 20.);
+        document.setProperty("width", 20.);
+        document.setProperty("height", 10.);
+        document.activatePage(0);
+        QVERIFY(document.setPreviewPosition(position(document, {100, 80})));
+        if (mode == 2)
+            QVERIFY(document.captureUserOrigin());
+        QVERIFY(document.setStartMode(Document::StartMode(mode)));
+        QVERIFY(document.setJobOrigin(Document::JobOrigin(anchor)));
+        if (!confirmed) {
+            const auto file =
+                QUrl::fromLocalFile(storage.filePath(QString(QTest::currentDataTag()) + ".blazer"));
+            QVERIFY(document.save(file));
+            QVERIFY(document.open(file));
+        }
+        document.setBackgroundPlanning(background);
+        auto ready = [&](bool valid) {
+            if (background)
+                QTRY_COMPARE_WITH_TIMEOUT(document.planningState(),
+                                          valid ? QString("ready") : QString("failed"), 5000);
+            QCOMPARE(document.job().valid(), valid);
+        };
+        ready(confirmed);
+        const auto before = document.framingBounds("job");
+        document.activatePage(1);
+        ready(confirmed);
+        const auto output =
+            QUrl::fromLocalFile(storage.filePath(QString(QTest::currentDataTag()) + ".gcode"));
+        if (!confirmed) {
+            QVERIFY(!document.exportGcode(output));
+            QVERIFY(!QFile::exists(output.toLocalFile()));
+            QVERIFY(!document.placementSummary()["originConfirmed"].toBool());
+            QVERIFY(document.confirmUserOrigin());
+            ready(true);
+        }
+        const QRectF expected = anchor == 0   ? QRectF(100, 80, 20, 10)
+                                : anchor == 4 ? QRectF(90, 75, 20, 10)
+                                              : QRectF(80, 70, 20, 10);
+        QCOMPARE(rectangle(document.placementSummary()["graphicsBounds"].toMap()), expected);
+        if (confirmed)
+            QVERIFY(document.framingBounds("job")["sourceRevision"] != before["sourceRevision"]);
+        const auto sync = PlacedJobPlanning::build(document.planningInput()).plan;
+        QVERIFY(sync.valid());
+        QCOMPARE(document.job().motionFingerprint(), sync.motionFingerprint());
+        QVERIFY(document.exportGcode(output));
+        QCOMPARE(read(output), sync.encodedProgram().payload());
+        document.activatePage(0);
+        ready(true);
+        QCOMPARE(rectangle(document.placementSummary()["graphicsBounds"].toMap()), expected);
+        QCOMPARE(document.job().motionFingerprint(),
+                 PlacedJobPlanning::build(document.planningInput()).plan.motionFingerprint());
+    }
+    void pageChangesInvalidateIdenticalBoundsFrameTargets() {
+        Document document;
+        document.newProject();
+        rectangle(document);
+        QVERIFY(document.addPage("Second"));
+        document.activatePage(1);
+        rectangle(document);
+        document.activatePage(0);
+        Machine machine(&document, nullptr, Machine::HardwareAccess::Disabled);
+        const auto original = document.framingBounds("job");
+        QVERIFY(original["valid"].toBool());
+        document.activatePage(1);
+        QCOMPARE(rectangle(document.framingBounds("job")), rectangle(original));
+        machine.frame(original);
+        QVERIFY(!machine.busy());
+        QVERIFY(document.message().contains("veraltet"));
     }
     void slowBackgroundSourceCannotPublishOldPositionAfterResubmit() {
         Document document;
