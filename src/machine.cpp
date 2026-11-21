@@ -6,8 +6,13 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     accessoryClock.start();
     accessoryWatchdog.setInterval(50);
     connect(&accessoryWatchdog, &QTimer::timeout, this, [this] {
-        if (live && (accessoryJobActive || firing()) && !processingSafetyErrors().isEmpty()) {
-            document->notify("Auftrag abgebrochen: " + processingSafetyErrors().join("\n"));
+        const auto errors = processingSafetyErrors();
+        if (errors != lastProcessingSafetyErrors) {
+            lastProcessingSafetyErrors = errors;
+            emit changed(); // Also refresh stale airflow/status evidence while idle.
+        }
+        if (live && (accessoryJobActive || firing()) && !errors.isEmpty()) {
+            document->notify("Auftrag abgebrochen: " + errors.join("\n"));
             stop();
         }
     });
@@ -26,15 +31,25 @@ void Machine::syncDeviceProfile() {
     live = false;
     accessory = AccessoryContract(true);
     accessoryJobActive = false;
+    sessionWasVerified = sessionWasReferenced = false;
     QString error;
     session = ControllerSessions::create(document->deviceProfile(), error);
     if (session)
         connect(session.get(), &ControllerSession::changed, this, [this] {
-            if (live && accessoryJobActive && !session->status().executing) {
+            const auto status = session->status();
+            if (live && !status.connected) {
+                accessory.transition(AccessoryContract::Event::Disconnect);
                 accessoryJobActive = false;
-                accessory.transition(session->status().connected ? AccessoryContract::Event::Complete
-                                                                : AccessoryContract::Event::Disconnect);
+            } else if (live && ((sessionWasVerified && !status.verified) ||
+                                (sessionWasReferenced && !status.positionReferenced))) {
+                accessory.transition(AccessoryContract::Event::Fault);
+                accessoryJobActive = false;
+            } else if (live && accessoryJobActive && !status.executing) {
+                accessoryJobActive = false;
+                accessory.transition(AccessoryContract::Event::Complete);
             }
+            sessionWasVerified = status.verified;
+            sessionWasReferenced = status.positionReferenced;
             emit changed();
         });
     else
@@ -83,7 +98,7 @@ void Machine::useSimulator() {
 }
 void Machine::toggleConnection() {
     if (live)
-        session->close();
+        disconnectFault();
     else
         Simulator::toggleConnection();
 }
@@ -184,9 +199,9 @@ void Machine::disconnectFault() {
 QVariantList Machine::capabilities() const {
     return {
         QVariantMap{{"name", "XY / GRBL / Referenzfahrt"},
-                    {"status", "Vorhanden"},
-                    {"detail", "M3: Grundkonfiguration und erste Kraftpapierbearbeitung bestätigt; "
-                               "vollständige Geräteabnahme offen."}},
+                    {"status", "Protokoll vorhanden · Gerätebetrieb gesperrt"},
+                    {"detail", "Nach gemeldeter Kollision sind Maschinenkoordinaten, Grenzen und "
+                               "Nullpunktzuordnung nicht unabhängig bestätigt. Keine Hardwarefreigabe."}},
         QVariantMap{{"name", "Kamera und Registrierung"},
                     {"status", "Referenzfoto, keine Live-Anbindung"},
                     {"detail", "Manuelles Bild mit Vierpunktregistrierung verfügbar; Live-Kamera "
@@ -198,6 +213,7 @@ QVariantList Machine::capabilities() const {
                     {"status", "Keine Messhardware"},
                     {"detail", "Keine automatische Höhen- oder Fokuskompensation."}},
         QVariantMap{{"name", "Absaugung separat schalten"},
-                    {"status", "Protokoll ungeklärt"},
-                    {"detail", "Keine geratenen Lüfterbefehle; manuelle Bedienung erforderlich."}}};
+                    {"status", "Ausgangszuordnung und Luftstrom nicht bestätigt"},
+                    {"detail", "Gehäuseabsaugung und Air Assist sind getrennt. Unbekannter "
+                               "Zubehörzustand gibt keine Bearbeitung frei."}}};
 }

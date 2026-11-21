@@ -183,6 +183,10 @@ class GrblTest : public QObject {
     }
     void requireReference(Machine &machine) {
         supplySyntheticContract(*static_cast<GrblSession *>(machine.session.get()));
+        if (!machine.positionReferenced()) {
+            machine.home();
+            QTRY_VERIFY(machine.ready() && machine.positionReferenced());
+        }
         machine.accessory = AccessoryContract(true);
         QVERIFY(machine.accessory.configure(AccessoryContract::Role::EnclosureExtraction,
                                              {"synthetic-pty-extraction", "virtual fixture only, no hardware", true}));
@@ -193,12 +197,45 @@ class GrblTest : public QObject {
         QVERIFY(machine.accessory.observe(AccessoryContract::Role::EnclosureExtraction,
                                          AccessoryContract::PhysicalState::Flowing,
                                          "virtual airflow fixture", now, now));
-        if (machine.positionReferenced())
-            return;
-        machine.home();
-        QTRY_VERIFY(machine.ready() && machine.positionReferenced());
     }
   private slots:
+    void idleDisconnectAndUnsolicitedResetInvalidateAccessoryEvidence() {
+        for (const bool reset : {false, true}) {
+            Controller controller;
+            Document document; document.setBackgroundPlanning(false);
+            Machine machine(&document);
+            QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+            requireReference(machine);
+            QVERIFY(machine.extractionSafetyError().isEmpty());
+            QVERIFY(!machine.accessoryJobActive);
+            if (reset) {
+                controller.reply("Grbl 1.3a ['$' for help]\r\n");
+                QTRY_VERIFY(!machine.accessory.verified(AccessoryContract::Role::EnclosureExtraction) ||
+                            machine.accessory.state(AccessoryContract::Role::EnclosureExtraction).physical == AccessoryContract::PhysicalState::Unknown);
+            } else {
+                machine.toggleConnection();
+                QVERIFY(!machine.connected());
+                QCOMPARE(machine.accessory.state(AccessoryContract::Role::EnclosureExtraction).physical,
+                         AccessoryContract::PhysicalState::Unknown);
+            }
+            QVERIFY(!machine.extractionSafetyError().isEmpty());
+            QVERIFY(!controller.commands.contains("M9"));
+        }
+    }
+    void idleAirflowExpiryNotifiesConsumersWithoutIncomingControllerReports() {
+        Controller controller;
+        Document document; document.setBackgroundPlanning(false);
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port)); QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        QTRY_VERIFY(machine.lastProcessingSafetyErrors.isEmpty());
+        QSignalSpy changes(&machine,&Simulator::changed);
+        controller.respondToStatus = false;
+        QTRY_VERIFY_WITH_TIMEOUT(!machine.extractionSafetyError().isEmpty(),4000);
+        QTRY_VERIFY_WITH_TIMEOUT(machine.lastProcessingSafetyErrors.contains(machine.extractionSafetyError()),500);
+        QVERIFY(!changes.isEmpty());
+        QVERIFY(!machine.accessoryJobActive);
+    }
     void facadeRejectsUnknownExtractionDespiteSyntheticMotionContract() {
         Controller controller;
         Document document; document.setBackgroundPlanning(false); document.newProject(); document.addShape("rect");

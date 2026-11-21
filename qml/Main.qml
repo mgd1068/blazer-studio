@@ -13,6 +13,8 @@ ApplicationWindow {
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
     readonly property bool grblVerified: !simulationMode && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
+    readonly property bool positioningReady: machine.ready && machine.positionReferenced && (win.simulationMode || (typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
+    readonly property bool processingReady: machine.ready && (win.simulationMode || (typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))
     readonly property var deviceService: typeof deviceManager !== "undefined" ? deviceManager : null
     readonly property var testLedger: typeof materialTestLedger !== "undefined" ? materialTestLedger : null
     property bool preferencesSyncing: true
@@ -290,6 +292,12 @@ ApplicationWindow {
     }
     onActiveChanged: if (!active) machine.focus(false)
     onPageChanged: { machine.focus(false); if(basic && page>2)basic=false }
+    Connections {
+        target: machine
+        function onChanged() {
+            if (!win.simulationMode && (!machine.connected || (typeof machine.connectionVerified !== "undefined" && !machine.connectionVerified))) win.proofConfirmed = false
+        }
+    }
     Connections {
         target: project
         function onChanged() { if(win.operation>=project.layers.length)win.operation=0;win.refreshFraming() }
@@ -988,11 +996,11 @@ ApplicationWindow {
                                                 spacing: 4
                                                 Repeater { model: [1,10,25]; delegate: ActionButton { required property int modelData; text: modelData + " mm"; dark: win.night; compact: true; selected: win.step === modelData; onClicked: win.step = modelData } }
                                             }
-                                            ActionButton { visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: machine.ready && machine.positionReferenced; onClicked: machine.setWorkZero() }
+                                            ActionButton { visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: win.positioningReady; onClicked: machine.setWorkZero() }
                                             ActionButton { text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !machine.busy && !machine.firing; onClicked: machine.home() }
                                         }
                                         GridLayout {
-                                            columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: machine.ready && machine.positionReferenced
+                                            columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: win.positioningReady
                                             Item { width: 48; height: 46 }
                                             ActionButton { text: "↑"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(0,win.step) }
                                             Item { width: 48; height: 46 }
@@ -1014,7 +1022,7 @@ ApplicationWindow {
                                             Text { text: machine.firing ? project.deviceInfo.focusPower+" % angefordert" : "Fokuspunkt mit "+project.deviceInfo.focusPower+" %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
                                             Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei "+project.deviceInfo.focusPower+" % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
                                         }
-                                        ActionButton { objectName: "focusHold"; text: "◎  Halten für "+project.deviceInfo.focusPower+" %"; primary: true; implicitHeight: 44; enabled: machine.ready || machine.firing; onPressedChanged: machine.focus(pressed) }
+                                        ActionButton { objectName: "focusHold"; text: "◎  Halten für "+project.deviceInfo.focusPower+" %"; primary: true; implicitHeight: 44; enabled: win.processingReady || machine.firing; onPressedChanged: machine.focus(pressed) }
                                     }
                                 }
                                 ColumnLayout {
@@ -1036,7 +1044,7 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true; spacing: 8
-                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: machine.ready && machine.positionReferenced && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
+                                    ActionButton { objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: win.positioningReady && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
                                     ActionButton { objectName: "pauseJobButton"; text: machine.paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || machine.paused; onClicked: machine.pause() }
                                     ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                                 }

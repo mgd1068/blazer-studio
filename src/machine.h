@@ -89,4 +89,6 @@ class Machine : public Simulator {
     QElapsedTimer accessoryClock;
     bool accessoryJobActive = false;
     QTimer accessoryWatchdog;
+    QStringList lastProcessingSafetyErrors;
+    bool sessionWasVerified = false, sessionWasReferenced = false;
 };

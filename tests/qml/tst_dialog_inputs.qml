@@ -38,6 +38,8 @@ Item {
         property string bindingKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         property string parameterHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         property string activeId: "one"
+        property var endpoints: []
+        function refreshEndpoints() {}
         property string changeBlockReason: ""
         property string message: ""
         property var instances: [
