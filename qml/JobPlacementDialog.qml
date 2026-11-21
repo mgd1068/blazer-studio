@@ -26,6 +26,27 @@ Dialog {
         id: placementScroll; clip: true; contentWidth: availableWidth
         ColumnLayout {
             width: placementScroll.availableWidth; spacing: 12
+            CheckBox {
+                id: selectedOutput; objectName: "cutSelectedGraphicsChoice"
+                Layout.fillWidth: true; enabled: dialog.editable
+                checked: dialog.document.cutSelectedGraphics
+                text: "Nur ausgewählte Grafiken ausgeben"
+                contentItem: Text { text: selectedOutput.text; textFormat: Text.PlainText; color: dialog.ink; wrapMode: Text.WordWrap; leftPadding: selectedOutput.indicator.width + selectedOutput.spacing; verticalAlignment: Text.AlignVCenter }
+                onClicked: dialog.document.setCutSelectedGraphics(checked)
+            }
+            CheckBox {
+                id: selectionOrigin; objectName: "useSelectionOriginChoice"
+                Layout.fillWidth: true
+                enabled: dialog.editable && dialog.document.cutSelectedGraphics && dialog.document.startMode !== 0
+                checked: dialog.document.useSelectionOrigin
+                text: "Auswahl als Bezug für die neun Ursprungspunkte verwenden"
+                contentItem: Text { text: selectionOrigin.text; textFormat: Text.PlainText; color: selectionOrigin.enabled ? dialog.ink : (dialog.dark ? "#9babb6" : "#657680"); wrapMode: Text.WordWrap; leftPadding: selectionOrigin.indicator.width + selectionOrigin.spacing; verticalAlignment: Text.AlignVCenter }
+                onClicked: dialog.document.setUseSelectionOrigin(checked)
+            }
+            Label {
+                objectName: "outputSelectionExplanation"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink
+                text: !dialog.document.cutSelectedGraphics ? "Ausgabe: alle aktiven Grafiken auf diesem Blatt. Die Auswahl im Editor schränkt den Auftrag nicht ein." : "Ausgabe: nur ausgewählte aktive Grafiken auf diesem Blatt. Eine leere oder nicht ausgebende Auswahl erzeugt keinen Auftrag." + (dialog.document.startMode === 0 ? " Absolute Zeichnungskoordinaten bleiben erhalten; der Auswahlursprung hat hier keine Wirkung." : dialog.document.useSelectionOrigin ? " Die Ursprungspunkte beziehen sich auf die Auswahl, um sie separat zu platzieren." : " Die Ursprungspunkte beziehen sich weiterhin auf das gesamte wirksame Design, damit eine Teilausgabe ihre ursprüngliche Lage behält.")
+            }
             Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink; text: "Diese Auswahl ändert die Ausgabevorschau sofort. Zeichnungsobjekte bleiben an ihrer Position. Eine Rückfahrt nach Auftragsende wird damit nicht eingeschaltet." }
             ToolCombo { dark: dialog.dark;
                 objectName: "startModeChoice"; Layout.fillWidth: true

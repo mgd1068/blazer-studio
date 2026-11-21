@@ -22,7 +22,7 @@ ApplicationWindow {
     property bool basic: true
     property bool proofConfirmed: false
     property string probeKey: ""
-    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey+(deviceService ? deviceService.bindingKey+deviceService.parameterHash : "")
+    readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey+project.cutSelectedGraphics+(project.cutSelectedGraphics ? JSON.stringify(project.selectedRows) : "")+(deviceService ? deviceService.bindingKey+deviceService.parameterHash : "")
     readonly property bool isBasicProbe: probeKey===parameterKey && project.count===1 && project.selection.width===5 && project.selection.height===5
     onParameterKeyChanged: proofConfirmed=false
     onBasicChanged: {

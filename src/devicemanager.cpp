@@ -72,7 +72,7 @@ QString DeviceManager::parameterHash() const {
     // A material history match never confirms the current material checkbox.
     QSet<QString> signatures;
     for (const auto &art : document->items()) {
-        if (!art.visible || art.toolLayer || art.page != document->activePage()) continue;
+        if (!document->outputs(art)) continue;
         QVariantList extraOperations;
         for (const auto operation : art.extraOperations) extraOperations.append(operation);
         const QVariantMap values{{"kind", art.kind}, {"layer", art.layer},
@@ -82,7 +82,8 @@ QString DeviceManager::parameterHash() const {
         signatures.insert(QString::fromUtf8(QJsonDocument::fromVariant(values).toJson(QJsonDocument::Compact)));
     }
     auto sorted = signatures.values(); std::sort(sorted.begin(), sorted.end());
-    const QVariantMap parameters{{"contract", 1},
+    const QVariantMap parameters{{"contract", 2},
+                                {"cutSelectedGraphics", document->cutSelectedGraphics()},
                                 {"profile", QString::fromLatin1(document->deviceProfile().outputFingerprint())},
                                 {"material", document->material()}, {"layers", document->layers()},
                                 {"operations", sorted}};
