@@ -284,6 +284,167 @@ class GrblTest : public QObject {
         QVERIFY(!controller.commands.contains("M9"));
         QVERIFY(!machine.accessoryJobActive);
     }
+    void protectiveStopDoesNotResendResetWhileAwaitingStartup() {
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        controller.respondToReset = false;
+        const auto before = controller.realtime.count(char(0x18));
+        machine.stop();
+        QTest::qWait(180); // Several normal 50ms watchdog evaluations.
+        QCOMPARE(controller.realtime.count(char(0x18)), before + 1);
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!controller.realtime.contains('~'));
+    }
+    void explicitRepeatedHomingMayWaitForAcknowledgementWithoutWatchdogReset() {
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine); // Previously referenced, with private synthetic homing evidence.
+        QVERIFY(machine.positionReferenced());
+        const auto resets = controller.realtime.count(char(0x18));
+        const auto homes = controller.commands.count("$H");
+        controller.status = "Home";
+        controller.autoAck = false;
+        machine.home();
+        QTest::qWait(10);
+        controller.reply("ok\r\n"); // M5, then the explicit $H may be queued.
+        QTest::qWait(230);          // Real homing need not complete within one watchdog tick.
+        QVERIFY2(
+            controller.realtime.count(char(0x18)) == resets &&
+                controller.commands.count("$H") == homes + 1,
+            qPrintable(
+                QString("Explicit homing was reset: resets=%1 (before=%2), homes=%3 (before=%4)")
+                    .arg(controller.realtime.count(char(0x18)))
+                    .arg(resets)
+                    .arg(controller.commands.count("$H"))
+                    .arg(homes)));
+        QVERIFY(!machine.positionReferenced());
+        controller.status = "Idle";
+        controller.autoAck = true;
+        controller.reply("ok\r\n"); // Homing ACK; fresh Idle/WCO follows via the existing query.
+        QTRY_VERIFY(machine.ready() && machine.positionReferenced());
+        QCOMPARE(controller.realtime.count(char(0x18)), resets);
+        QVERIFY(!controller.realtime.contains('~'));
+    }
+    void lostPositionVerificationStopsStreamingBeforeFurtherCredits_data() {
+        QTest::addColumn<bool>("silentStatus");
+        QTest::newRow("invalid-run-position") << false;
+        QTest::newRow("stale-run-status-before-watchdog") << true;
+    }
+    void lostPositionVerificationStopsStreamingBeforeFurtherCredits() {
+        QFETCH(bool, silentStatus);
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        document.setProperty("x", 10.);
+        document.setProperty("y", 10.);
+        document.setLayer(0);
+        document.setLayerSetting(0, "mode", "Gravur");
+        document.setLayerSetting(0, "enabled", true);
+        document.setLayerSetting(0, "interval", .5);
+        document.setProperty("width", 120.);
+        document.setProperty("height", 80.);
+        QVERIFY(document.job().moves.size() > 100);
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        // Independent synthetic airflow evidence. Never a real-device grant.
+        machine.accessory = AccessoryContract(true);
+        QVERIFY(machine.accessory.configure(
+            AccessoryContract::Role::EnclosureExtraction,
+            {"synthetic-stream-extraction", "PTY regression only", true}));
+        const auto request =
+            machine.accessory.request(AccessoryContract::Role::EnclosureExtraction, true);
+        QVERIFY(request);
+        QVERIFY(machine.accessory.acknowledge(*request, true));
+        const auto now = machine.accessoryClock.elapsed();
+        QVERIFY(machine.accessory.observe(AccessoryContract::Role::EnclosureExtraction,
+                                          AccessoryContract::PhysicalState::Flowing,
+                                          "synthetic flow", now, now));
+        QVERIFY(machine.processingSafetyErrors().isEmpty());
+        controller.autoAck = false;
+        controller.status = "Run";
+        const auto first = controller.commands.size();
+        const auto resets = controller.realtime.count(char(0x18));
+        machine.start();
+        QVERIFY(machine.running());
+        QVERIFY(machine.accessoryJobActive);
+        int credits = 0;
+        bool poweredTargetQueued = false;
+        for (int attempt = 0; attempt < 100 && !poweredTargetQueued; ++attempt) {
+            QTest::qWait(5);
+            for (int i = first; i < controller.commands.size(); ++i)
+                poweredTargetQueued |= controller.commands[i].startsWith("G1 ");
+            if (!poweredTargetQueued && controller.commands.size() - first > credits) {
+                controller.reply("ok\r\n");
+                ++credits;
+            }
+        }
+        QVERIFY(poweredTargetQueued);
+        QVERIFY(machine.running());
+        controller.respondToStatus = false;
+        if (silentStatus) {
+            // Deliberately order ControllerSession.changed before watchdog
+            // evaluation. Safety must not depend on which overdue Qt timer or
+            // incoming status callback runs first after a delayed event loop.
+            machine.accessoryWatchdog.stop();
+            QElapsedTimer wait;
+            wait.start();
+            while (wait.elapsed() < 1900 && machine.sessionWasVerified &&
+                   controller.realtime.count(char(0x18)) == resets) {
+                if (controller.commands.size() - first > credits) {
+                    controller.reply("ok\r\n");
+                    ++credits;
+                }
+                QTest::qWait(50); // ACK streaming remains active without status feedback.
+            }
+            QVERIFY(!machine.connectionVerified() ||
+                    controller.realtime.count(char(0x18)) > resets);
+            machine.accessoryWatchdog.start(50);
+        } else {
+            controller.reply("<Run|MPos:nan,0,0|WCO:0,0,0|FS:5000,800>\r\n");
+            QTest::qWait(20);
+        }
+        // Allow the normal 50ms watchdog to act, with no additional credits
+        // that could be confused with commands accepted before the fault.
+        QTest::qWait(90);
+        const auto afterGuard = controller.commands.size();
+        controller.autoAck = true;
+        if (controller.realtime.count(char(0x18)) > resets) {
+            controller.reply("ok\r\n"); // Permit only the new handshake's pending safety-off ACK.
+        } else {
+            const auto outstanding = controller.commands.size() - first - credits;
+            QVERIFY(outstanding > 0);
+            for (qsizetype i = 0; i < outstanding; ++i)
+                controller.reply("ok\r\n");
+        }
+        QTest::qWait(80);
+        QStringList unsafeContinuation;
+        for (int i = afterGuard; i < controller.commands.size(); ++i)
+            if (controller.commands[i].startsWith("G1 ") || controller.commands[i].startsWith("M4"))
+                unsafeContinuation.append(controller.commands[i]);
+        const bool resetRequested = controller.realtime.count(char(0x18)) > resets;
+        QVERIFY2(
+            resetRequested && unsafeContinuation.isEmpty(),
+            qPrintable(
+                QString("After lost position verification: reset=%1; subsequent G1/M4=%2; first=%3")
+                    .arg(resetRequested)
+                    .arg(unsafeContinuation.size())
+                    .arg(unsafeContinuation.isEmpty() ? QString("none")
+                                                      : unsafeContinuation.first())));
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!controller.realtime.contains('~'));
+    }
     void diagnosticDoesNotMislabelNormalizedHandshakeRejectionAsAnAcknowledgement() {
         Controller controller;
         controller.resetState = "Alarm";
