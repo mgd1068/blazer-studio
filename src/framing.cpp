@@ -11,6 +11,8 @@ QVariantMap Document::framingBounds(const QString &scope) const {
             {"reason", reason},
             {"outputFingerprint", QString::fromLatin1(m_deviceProfile.outputFingerprint())}};
     };
+    if (const auto reason = synchronousWorkBlockReason(); !reason.isEmpty())
+        return invalid(reason);
     if (!QStringList{"job", "selection", "tools", "t1", "t2"}.contains(scope))
         return invalid("Unbekanntes Ziel der Rahmenfahrt.");
     bool first = true;

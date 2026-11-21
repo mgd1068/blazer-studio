@@ -2,9 +2,11 @@
 #include "document.h"
 #include <QLockFile>
 #include <QTimer>
+#include <QPointer>
 #include <memory>
 class Recovery : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool deferred READ deferred NOTIFY changed)
     Q_PROPERTY(bool writable READ writable CONSTANT)
     Q_PROPERTY(bool available READ available NOTIFY changed)
     Q_PROPERTY(bool pendingDecision READ pendingDecision NOTIFY changed)
@@ -12,6 +14,7 @@ class Recovery : public QObject {
   public:
     explicit Recovery(Document *document, const QString &directory = {}, QObject *parent = nullptr);
     bool available() const;
+    bool deferred() const { return workDeferred; }
     bool pendingDecision() const { return decisionPending; }
     bool writable() const { return lock && lock->isLocked(); }
     QString location() const { return path; }
@@ -24,9 +27,13 @@ class Recovery : public QObject {
 
   private:
     std::unique_ptr<QLockFile> lock;
-    Document *document;
+    QPointer<Document> document;
+    bool deferWhileBlocked();
+    void retryDeferred();
+    void setDeferred(bool value);
     QString path;
     QTimer timer;
+    bool workDeferred = false, clearPending = false, recoveryExists = false;
     bool written = false, preservePrevious = false, restored = false;
     bool decisionPending = false, sessionClosed = false;
 };

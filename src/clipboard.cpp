@@ -86,6 +86,8 @@ QByteArray vectorSvg(const QList<Artwork> &items, const QVariantList &layers) {
 } // namespace
 
 bool Document::copySelectionToClipboard(bool cut) {
+    if (!permitSynchronousWork())
+        return false;
     auto *board = clipboard();
     if (!board || m_selection.isEmpty()) {
         notify("Zum Kopieren zuerst Objekte auswählen.");
@@ -170,6 +172,8 @@ bool Document::copySelectionToClipboard(bool cut) {
 }
 
 bool Document::pasteFromClipboard(bool inPlace) {
+    if (!permitSynchronousWork())
+        return false;
     auto *board = clipboard();
     const auto *data = board ? board->mimeData() : nullptr;
     if (!data) {

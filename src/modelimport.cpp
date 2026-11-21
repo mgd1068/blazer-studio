@@ -9,6 +9,8 @@
 #include <array>
 #include <cmath>
 bool Document::importModel(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     if (!url.isLocalFile())
         return false;
     QFile file(url.toLocalFile());

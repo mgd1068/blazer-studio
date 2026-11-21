@@ -30,6 +30,8 @@ QVariantMap Document::previewNativeImport(const QUrl &url, bool allowSystemFontS
                            {"geometryValidated",false},{"sourceSha256",QString()},
                            {"issues",QVariantList{}},{"error",std::move(message)}};
     };
+    if (!permitSynchronousWork())
+        return invalid(synchronousWorkBlockReason());
     if (!url.isLocalFile()) return invalid("Eine lokale LightBurn- oder MillMage-Datei auswählen.");
     const QFileInfo info(url.toLocalFile());
     const auto ext = info.suffix().toLower();
@@ -50,6 +52,8 @@ QVariantMap Document::previewNativeImport(const QUrl &url, bool allowSystemFontS
 }
 bool Document::importNativeGeometry(const QUrl &url, const QString &expectedSourceSha256,
                                      bool allowSystemFontSubstitution) {
+    if (!permitSynchronousWork())
+        return false;
     if (!url.isLocalFile() || !QFileInfo(url.toLocalFile()).isFile() ||
         !QStringList{"lbrn","lbrn2","mage"}.contains(QFileInfo(url.toLocalFile()).suffix().toLower())) {
         notify("Eine lokale native Projektdatei auswählen; kein Import."); return false;
@@ -62,6 +66,8 @@ bool Document::importNativeGeometry(const QUrl &url, const QString &expectedSour
 }
 bool Document::importFileInternal(const QUrl &url, const QString &expectedNativeSha256,
                                  bool nativeGeometryOnly, bool allowSystemFontSubstitution) {
+    if (!permitSynchronousWork())
+        return false;
     if (!url.isLocalFile())
         return false;
     auto ext = QFileInfo(url.toLocalFile()).suffix().toLower();
@@ -361,6 +367,8 @@ bool Document::importFileInternal(const QUrl &url, const QString &expectedNative
     return true;
 }
 bool Document::importProject(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     if (!url.isLocalFile())
         return false;
     QFile f(url.toLocalFile());
@@ -411,6 +419,8 @@ bool Document::importProject(const QUrl &url) {
     return true;
 }
 bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &pattern) {
+    if (!permitSynchronousWork())
+        return false;
     if (startMode() != AbsoluteCoordinates || cutSelectedGraphics()) {
         notify("CSV-Stapelexport unterstützt noch keine relativen Startmodi oder Auswahlmasken; "
                "keine absolute Ersatzdatei erzeugt.");
@@ -434,6 +444,8 @@ bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &patt
 
 bool Document::exportImage(const QUrl &url, bool processed, const QString &expectedId,
                            quint64 expectedRevision) {
+    if (!permitSynchronousWork())
+        return false;
     if (m_selection.size()!=1 || m_selected<0 || m_items[m_selected].kind!="image") {
         notify("Für den Bildexport genau ein Rasterbild auswählen.");
         return false;

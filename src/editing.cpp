@@ -91,6 +91,8 @@ bool Document::bakePath(Artwork &a, const QPainterPath &path) const {
 }
 QVariantList Document::nodes() const {
     QVariantList out;
+    if (!synchronousWorkBlockReason().isEmpty())
+        return out;
     if (m_selection.size() != 1)
         return out;
     const auto &a = m_items[m_selected];
@@ -105,6 +107,8 @@ QVariantList Document::nodes() const {
     return out;
 }
 bool Document::setNode(int element, double x, double y) {
+    if (!permitSynchronousWork())
+        return false;
     if (m_selection.size() != 1 || m_items[m_selected].kind != "path" || !std::isfinite(x) ||
         !std::isfinite(y))
         return false;
@@ -174,6 +178,8 @@ bool Document::addPage(const QString &name) {
     return true;
 }
 bool Document::copyPage(int page, const QString &name) {
+    if (!permitSynchronousWork())
+        return false;
     if (page < 0 || page >= m_pages.size() || m_pages.size() >= 100 || !validPageName(name)) {
         notify("Blattkopie benötigt ein vorhandenes Blatt, einen einzeiligen Namen mit 1–200 "
                "Zeichen und Platz für ein weiteres Blatt (maximal 100).");
@@ -240,6 +246,8 @@ bool Document::renamePage(int page, const QString &name) {
     return true;
 }
 bool Document::restoreBytes(const QByteArray &bytes) {
+    if (!permitSynchronousWork())
+        return false;
     auto state = parse(bytes);
     if (!state) {
         notify("Wiederherstellung abgelehnt: ungültiges Projekt.");
@@ -255,6 +263,15 @@ bool Document::restoreBytes(const QByteArray &bytes) {
     return true;
 }
 bool Document::command(const QString &action, const QVariantMap &args) {
+    // Light transforms/alignment remain available for the next design. Conversions,
+    // raster processing and geometric expansion can scale with the entire selection.
+    static const QStringList heavyActions{
+        "barcode", "qr", "calibration", "imageSettings", "trace", "imageMask",
+        "imageRotate", "imageMirror", "imageToRelief", "convert", "simplify", "offset",
+        "closePath", "reverse", "split", "union", "difference", "intersection", "join",
+        "textStyle", "textOnPath", "duplicateGrid", "nest", "copyToPage"};
+    if (heavyActions.contains(action) && !permitSynchronousWork())
+        return false;
     auto fail = [&](const QString &message) {
         notify(message);
         return false;
@@ -949,6 +966,8 @@ bool Document::command(const QString &action, const QVariantMap &args) {
     return true;
 }
 bool Document::exportSvg(const QUrl &url) const {
+    if (!synchronousWorkBlockReason().isEmpty())
+        return false;
     if (!url.isLocalFile())
         return false;
     QByteArray bytes;

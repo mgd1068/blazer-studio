@@ -919,6 +919,8 @@ void Document::finishMove() {
     emit changed();
 }
 bool Document::importSvg(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     QFile file(url.toLocalFile());
     if (!url.isLocalFile() || !file.open(QIODevice::ReadOnly) || file.size() > maxEmbeddedBytes) {
         notify("SVG konnte nicht gelesen werden (max. 8 MB).");
@@ -1395,6 +1397,8 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     return state;
 }
 bool Document::save(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     finishMove();
     const QFileInfo target(url.toLocalFile());
     const auto isTemplate = [](const QFileInfo &file) {
@@ -1427,6 +1431,8 @@ bool Document::save(const QUrl &url) {
     return true;
 }
 bool Document::open(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     QFile file(url.toLocalFile());
     if (!url.isLocalFile() || !file.open(QIODevice::ReadOnly) || file.size() > maxProjectBytes) {
         notify("Projekt konnte nicht gelesen werden.");
@@ -1449,6 +1455,8 @@ bool Document::open(const QUrl &url) {
     return true;
 }
 bool Document::saveTemplate(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     if (!url.isLocalFile() ||
         QFileInfo(url.toLocalFile()).suffix().compare("blazertemplate", Qt::CaseInsensitive) != 0) {
         notify("Bitte eine lokale .blazertemplate-Datei für die Vorlage wählen.");
@@ -1473,6 +1481,8 @@ bool Document::saveTemplate(const QUrl &url) {
     return true;
 }
 bool Document::newFromTemplate(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     QFile file(url.toLocalFile());
     if (!url.isLocalFile() || !file.open(QIODevice::ReadOnly) || file.size() > maxProjectBytes) {
         notify("Vorlage konnte nicht gelesen werden.");
@@ -1558,6 +1568,8 @@ const JobPlan &Document::job() const {
     return *m_job;
 }
 bool Document::exportGcode(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     if (!url.isLocalFile() || !job().valid()) {
         notify(job().errors.join("\n"));
         return false;
@@ -1581,6 +1593,8 @@ bool Document::exportGcode(const QUrl &url) {
     return true;
 }
 bool Document::importImage(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     QImageReader reader(url.toLocalFile());
     reader.setAutoTransform(true);
     auto size = reader.size();
@@ -1633,6 +1647,8 @@ void Document::setObjectSetting(const QString &key, double value) {
 }
 bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPower,
                                   double maxPower, int steps, double moduleW) {
+    if (!permitSynchronousWork())
+        return false;
     const auto plan =
         JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps, m_deviceProfile);
     if (!plan.valid() || !std::isfinite(moduleW) || moduleW < .1 || moduleW > 100) {
@@ -1685,6 +1701,8 @@ bool Document::createMaterialTest(double minSpeed, double maxSpeed, double minPo
 }
 
 bool Document::importRelief(const QUrl &url) {
+    if (!permitSynchronousWork())
+        return false;
     QImageReader reader(url.toLocalFile());
     reader.setAutoTransform(true);
     auto size = reader.size();
@@ -1748,6 +1766,8 @@ void Document::setReliefSetting(const QString &key, const QVariant &value) {
 
 bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
                                   double minPower, double maxPower, int steps) {
+    if (!permitSynchronousWork())
+        return false;
     if (m_placementIntent.mode != JobPlacement::Mode::Absolute || cutSelectedGraphics()) {
         notify("Materialtest-Export unterstützt noch keine relativen Startmodi oder Auswahlmasken; "
                "keine absolute Ersatzdatei erzeugt.");
@@ -1922,4 +1942,32 @@ void Document::retryPlanning() {
 QImage Document::imagePreview(const Artwork &item) const {
     const auto &plan = job();
     return plan.previews.value(item.id, item.reliefAsset ? item.reliefAsset->image : QImage());
+}
+
+void Document::addSynchronousWorkGuard(std::function<QString()> guard) {
+    if (guard)
+        m_synchronousWorkGuards.append(std::move(guard));
+    notifySynchronousWorkGuardChanged();
+}
+QString Document::synchronousWorkBlockReason() const {
+    for (const auto &guard : m_synchronousWorkGuards) {
+        try {
+            const auto reason = guard();
+            if (!reason.isEmpty())
+                return reason;
+        } catch (...) {
+            return QStringLiteral("Aufwendige Verarbeitung gesperrt: Gerätezustand nicht verfügbar.");
+        }
+    }
+    return {};
+}
+void Document::notifySynchronousWorkGuardChanged() {
+    emit synchronousWorkGuardChanged();
+}
+bool Document::permitSynchronousWork() {
+    const auto reason = synchronousWorkBlockReason();
+    if (reason.isEmpty())
+        return true;
+    notify(reason);
+    return false;
 }

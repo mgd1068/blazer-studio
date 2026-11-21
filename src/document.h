@@ -16,6 +16,7 @@
 
 class Document : public QAbstractListModel {
     Q_OBJECT
+    Q_PROPERTY(QString synchronousWorkBlockReason READ synchronousWorkBlockReason NOTIFY synchronousWorkGuardChanged)
     Q_PROPERTY(bool cutSelectedGraphics READ cutSelectedGraphics NOTIFY changed)
     Q_PROPERTY(bool useSelectionOrigin READ useSelectionOrigin NOTIFY changed)
     Q_PROPERTY(StartMode startMode READ startMode NOTIFY changed)
@@ -58,6 +59,11 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QString basicOperationKey READ basicOperationKey NOTIFY changed)
     Q_PROPERTY(bool materialModified READ materialModified NOTIFY changed)
   public:
+    // C++ only. Empty reason permits work. Register a QPointer-backed owner callback.
+    void addSynchronousWorkGuard(std::function<QString()> guard);
+    QString synchronousWorkBlockReason() const;
+    void notifySynchronousWorkGuardChanged();
+    bool permitSynchronousWork();
     enum StartMode { AbsoluteCoordinates, CurrentPosition, UserOrigin };
     Q_ENUM(StartMode)
     enum JobOrigin { LowerLeft, LowerCenter, LowerRight, CenterLeft, Center, CenterRight, UpperLeft, UpperCenter, UpperRight };
@@ -141,7 +147,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE bool removePage(int page);
     bool outputs(const Artwork &item) const;
     Q_INVOKABLE bool renamePage(int page, const QString &name);
-    QByteArray projectBytes() const { return serialize(); }
+    QByteArray projectBytes() const { return synchronousWorkBlockReason().isEmpty() ? serialize() : QByteArray(); }
     bool restoreBytes(const QByteArray &bytes);
     Q_INVOKABLE bool importFile(const QUrl &url);
     Q_INVOKABLE QVariantMap previewNativeImport(const QUrl &url, bool allowSystemFontSubstitution = false);
@@ -231,6 +237,7 @@ class Document : public QAbstractListModel {
     Q_INVOKABLE void finishMove();
     Q_INVOKABLE void notify(const QString &message);
   signals:
+    void synchronousWorkGuardChanged();
     void deviceProfileChanged();
     void changed();
     void selectionChanged();
@@ -239,6 +246,7 @@ class Document : public QAbstractListModel {
     void fileUrlChanged();
 
   private:
+    QList<std::function<QString()>> m_synchronousWorkGuards;
     bool importFileInternal(const QUrl &url, const QString &expectedNativeSha256 = {},
                             bool nativeGeometryOnly = false, bool allowSystemFontSubstitution = false);
     struct Snapshot {

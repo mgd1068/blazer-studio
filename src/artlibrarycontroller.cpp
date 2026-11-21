@@ -63,6 +63,7 @@ ArtLibraryController::ArtLibraryController(Document *d, Machine *m, ArtLibrary *
     };
     if (document) {
         connect(document, &Document::changed, this, sourceChanged);
+        connect(document, &Document::synchronousWorkGuardChanged, this, &ArtLibraryController::changed);
         connect(document, &Document::selectionChanged, this, sourceChanged);
         connect(document, &Document::destroyed, this, [this] { invalidateSource(); });
     }
@@ -94,6 +95,8 @@ QString ArtLibraryController::blockReason() const {
         return "Bibliotheksaktion läuft; bitte warten.";
     if (!document || !machine || !library)
         return "Grafikbibliothek oder Dokument ist nicht verfügbar.";
+    if (const auto reason = document->synchronousWorkBlockReason(); !reason.isEmpty())
+        return reason;
     if (!library->writable())
         return library->message();
     if (machine->busy() || machine->firing())

@@ -6,6 +6,8 @@
 #include <cmath>
 
 bool Document::insertArtGeometry(const QByteArray &geometry, double xMm, double yMm) {
+    if (!permitSynchronousWork())
+        return false;
     static thread_local QSet<const Document *> activeInsertions;
     if (activeInsertions.contains(this))
         return false;
