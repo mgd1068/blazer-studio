@@ -75,7 +75,7 @@ Ein Testname belegt nur seinen beschriebenen Fall. **Teilumfang** bedeutet vorha
 | F50 | Keine Höhen-/LiDAR-/Autofokus-Messhardware eingerichtet | Manuell eingestellter Fokus ist kein Ersatz für Messung oder automatische Nachführung |
 | F51 | Kein belegter PCB-Datenimport | Gerber-/Bohrdaten mit klar definierten unterstützten Varianten und atomarem Fehlerverhalten implementieren |
 | F52 | Keine lokale Projekt-/Parameter-API | Lokale Schnittstelle einschließlich Zugriffsschutz, Zustandsregeln und Werkzeugtests implementieren |
-| F53 | Lokaler Diagnoseexport mit fester Feldliste: `release` | Einstellungsimport/-export und überprüfter Wiederherstellungsablauf vervollständigen |
+| F53 | Lokaler Diagnoseexport mit fester Feldliste: `release`; [portabler Oberflächenexport/-import](SETTINGS_BUNDLE.md) für Maßeinheit, Design und Einfachmodus mit Vorschau, Digestbindung und atomarer Übernahme: `settingsbundle` | Weitere Einstellungen, Bibliotheken und Maschinenkonfigurationssicherungen bleiben offen; keine Übernahme von Anschlussdaten, Zustand oder physischen Freigaben |
 
 ## Weiterarbeit und 1.0
 

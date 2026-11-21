@@ -6,6 +6,8 @@
 class ApplicationServices : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString lengthUnit READ lengthUnit NOTIFY changed)
+    Q_PROPERTY(bool darkTheme READ darkTheme NOTIFY changed)
+    Q_PROPERTY(bool beginnerMode READ beginnerMode NOTIFY changed)
     Q_PROPERTY(bool firstRun READ firstRun NOTIFY changed)
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(QString revision READ revision CONSTANT)
@@ -16,6 +18,13 @@ class ApplicationServices : public QObject {
                         QObject *parent = nullptr);
     QString lengthUnit() const { return m_lengthUnit; }
     Q_INVOKABLE bool setLengthUnit(const QString &unit);
+    bool darkTheme() const { return m_darkTheme; }
+    bool beginnerMode() const { return m_beginnerMode; }
+    Q_INVOKABLE bool setDarkTheme(bool enabled);
+    Q_INVOKABLE bool setBeginnerMode(bool enabled);
+    Q_INVOKABLE bool exportSettings(const QUrl &file);
+    Q_INVOKABLE QVariantMap previewSettingsImport(const QUrl &file);
+    Q_INVOKABLE bool importSettings(const QUrl &file, const QString &expectedDigest);
     bool firstRun() const { return !m_complete; }
     QString version() const;
     QString revision() const;
@@ -36,6 +45,11 @@ class ApplicationServices : public QObject {
     Simulator *m_machine;
     std::unique_ptr<QSettings> m_settings;
     bool m_complete = false;
+    bool m_darkTheme = false;
+    bool m_beginnerMode = true;
+    QVariantMap portablePreferences() const;
+    bool applyPortablePreferences(const QVariantMap &preferences);
+    bool settingsFailure(const QString &message);
     QString m_message;
     QString m_lengthUnit="mm";
     QStringList m_recent;

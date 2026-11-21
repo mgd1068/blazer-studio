@@ -25,6 +25,7 @@ qt_add_library(blazer-core STATIC
     src/materialtestledger.cpp src/materialtestledger.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/joboutput.cpp
     src/nativedesign.cpp src/nativedesign.h src/imageexport.cpp src/imageexport.h
+    src/settingsbundle.cpp src/settingsbundle.h
     src/applicationservices.cpp src/applicationservices.h
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
     src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imagelimits.h src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
@@ -74,6 +75,9 @@ if(BUILD_TESTING)
     target_include_directories(blazer-accessory-tests PRIVATE src)
     target_link_libraries(blazer-accessory-tests PRIVATE Qt6::Core Qt6::Test)
     add_test(NAME accessorycontract COMMAND blazer-accessory-tests)
+    qt_add_executable(blazer-settingsbundle-tests tests/settingsbundle_test.cpp)
+    target_link_libraries(blazer-settingsbundle-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME settingsbundle COMMAND blazer-settingsbundle-tests -platform offscreen)
     qt_add_executable(blazer-barcode-tests tests/barcode_test.cpp)
     target_link_libraries(blazer-barcode-tests PRIVATE blazer-core Qt6::Test)
     target_compile_definitions(blazer-barcode-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

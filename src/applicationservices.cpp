@@ -1,5 +1,11 @@
 #include "applicationservices.h"
 #include "atomicfile.h"
+#include "settingsbundle.h"
+#include <QCryptographicHash>
+#include <QFile>
+#ifdef Q_OS_UNIX
+#include <sys/stat.h>
+#endif
 #include "blazer_version.h"
 #include <QDateTime>
 #include <QDir>
@@ -10,6 +16,8 @@
 #include <algorithm>
 namespace {
 constexpr auto lengthUnitKey = "editor/v1/lengthUnit";
+constexpr auto darkThemeKey = "ui/v1/darkTheme";
+constexpr auto beginnerModeKey = "ui/v1/beginnerMode";
 constexpr auto recentKey = "projects/v1/recent";
 QString localProjectKey(const QUrl &url) {
     if (!url.isValid() || !url.isLocalFile() ||
@@ -35,6 +43,48 @@ QStringList recentList(const QVariant &value) {
     }
     return result;
 }
+QString bundlePath(const QUrl &url, const QString &settingsFile, QString &error) {
+    if (!url.isValid() || !url.isLocalFile() ||
+        (!url.host().isEmpty() && url.host() != "localhost") || url.hasQuery() ||
+        url.hasFragment() || url.toString().size() > 32768 ||
+        !QDir::isAbsolutePath(url.toLocalFile())) {
+        error = "Bitte eine lokale absolute JSON-Datei für die Einstellungen wählen.";
+        return {};
+    }
+    const QFileInfo file(url.toLocalFile()), settings(settingsFile);
+    if (file.suffix().compare("json", Qt::CaseInsensitive) != 0 || file.isSymLink() ||
+        (file.exists() && !file.isFile())) {
+        error = "Bitte eine reguläre JSON-Datei ohne symbolische Verknüpfung wählen.";
+        return {};
+    }
+    bool same = file.absoluteFilePath() == settings.absoluteFilePath() ||
+                (!file.canonicalFilePath().isEmpty() &&
+                 file.canonicalFilePath() == settings.canonicalFilePath());
+#ifdef Q_OS_UNIX
+    struct stat target{}, current{};
+    if (::stat(QFile::encodeName(file.absoluteFilePath()).constData(), &target) == 0 &&
+        ::stat(QFile::encodeName(settings.absoluteFilePath()).constData(), &current) == 0)
+        same = same || (target.st_dev == current.st_dev && target.st_ino == current.st_ino);
+#endif
+    if (same) {
+        error = "Die laufende Einstellungsdatei darf nicht als Austauschdatei verwendet werden.";
+        return {};
+    }
+    return file.absoluteFilePath();
+}
+QByteArray readBundleFile(const QString &path, QString &error) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        error = "Einstellungsdatei konnte nicht gelesen werden.";
+        return {};
+    }
+    const auto bytes = file.read(SettingsBundle::maximumBytes + 1);
+    if (file.error() != QFile::NoError || bytes.size() > SettingsBundle::maximumBytes) {
+        error = "Einstellungsdatei ist nicht lesbar oder größer als 16 KiB.";
+        return {};
+    }
+    return bytes;
+}
 } // namespace
 ApplicationServices::ApplicationServices(Document *document, Simulator *machine,
                                          const QString &settingsFile, QObject *parent)
@@ -43,6 +93,8 @@ ApplicationServices::ApplicationServices(Document *document, Simulator *machine,
                      ? std::make_unique<QSettings>()
                      : std::make_unique<QSettings>(settingsFile, QSettings::IniFormat)) {
     m_lengthUnit = m_settings->value(lengthUnitKey,"mm").toString()=="in" ? "in" : "mm";
+    m_darkTheme = m_settings->value(darkThemeKey, false).toString() == "true";
+    m_beginnerMode = m_settings->value(beginnerModeKey, true).toString() != "false";
     m_complete = m_settings->value("onboarding/v1/complete", false).toBool();
     if (m_settings->status() == QSettings::NoError)
         m_recent = recentList(m_settings->value(recentKey));
@@ -250,4 +302,118 @@ bool ApplicationServices::setLengthUnit(const QString &unit) {
         "Die Maßeinheit konnte nicht gespeichert werden; bisherige Einheit bleibt erhalten.";
     emit changed();
     return false;
+}
+
+QVariantMap ApplicationServices::portablePreferences() const {
+    return {{"lengthUnit", m_lengthUnit}, {"darkTheme", m_darkTheme},
+            {"beginnerMode", m_beginnerMode}};
+}
+bool ApplicationServices::settingsFailure(const QString &message) {
+    m_message = message;
+    emit changed();
+    return false;
+}
+bool ApplicationServices::applyPortablePreferences(const QVariantMap &preferences) {
+    const auto validated = SettingsBundle::validate(preferences);
+    if (!validated.valid())
+        return settingsFailure(validated.error);
+    // Reopening a format-error QSettings handle can rewrite its partial cache.
+    // A malformed existing file must remain byte-for-byte untouched.
+    if (m_settings->status() == QSettings::FormatError)
+        return settingsFailure("Lokale Einstellungen sind beschädigt; Import nicht übernommen.");
+    if (m_settings->status() != QSettings::NoError) {
+        const auto path = m_settings->fileName();
+        const auto format = m_settings->format();
+        m_settings.reset();
+        m_settings = std::make_unique<QSettings>(path, format);
+    }
+    // QSettings merges other untouched keys and commits its INI file atomically.
+    // Never permit its direct-write fallback for a multi-preference transaction.
+    m_settings->setAtomicSyncRequired(true);
+    m_settings->sync();
+    if (m_settings->status() != QSettings::NoError ||
+        QFileInfo(m_settings->fileName()).isSymLink())
+        return settingsFailure("Einstellungen nicht beschreibbar oder beschädigt; bisheriger Stand bleibt erhalten.");
+    const QVariantMap updates{{lengthUnitKey, preferences.value("lengthUnit")},
+                              {darkThemeKey, preferences.value("darkTheme")},
+                              {beginnerModeKey, preferences.value("beginnerMode")}};
+    QVariantMap previous;
+    for (auto it = updates.begin(); it != updates.end(); ++it) {
+        previous.insert(it.key(), m_settings->value(it.key()));
+        m_settings->setValue(it.key(), it.value());
+    }
+    m_settings->sync();
+    if (m_settings->status() != QSettings::NoError) {
+        // Roll pending values back too: a later QSettings destructor/retry must
+        // not apply the rejected import after the filesystem becomes writable.
+        for (auto it = previous.begin(); it != previous.end(); ++it)
+            if (it.value().isValid())
+                m_settings->setValue(it.key(), it.value());
+            else
+                m_settings->remove(it.key());
+        m_settings->sync();
+        return settingsFailure("Einstellungen konnten nicht atomar gespeichert werden; bisheriger Stand bleibt erhalten.");
+    }
+    m_lengthUnit = preferences.value("lengthUnit").toString();
+    m_darkTheme = preferences.value("darkTheme").toBool();
+    m_beginnerMode = preferences.value("beginnerMode").toBool();
+    m_message = "Oberflächeneinstellungen gespeichert.";
+    emit changed();
+    return true;
+}
+bool ApplicationServices::setDarkTheme(bool enabled) {
+    auto preferences = portablePreferences();
+    preferences["darkTheme"] = enabled;
+    return applyPortablePreferences(preferences);
+}
+bool ApplicationServices::setBeginnerMode(bool enabled) {
+    auto preferences = portablePreferences();
+    preferences["beginnerMode"] = enabled;
+    return applyPortablePreferences(preferences);
+}
+bool ApplicationServices::exportSettings(const QUrl &file) {
+    QString error;
+    const auto path = bundlePath(file, m_settings->fileName(), error);
+    if (path.isEmpty())
+        return settingsFailure(error);
+    const auto bytes = SettingsBundle::write(portablePreferences());
+    if (bytes.isEmpty() || !AtomicFile::write(path, bytes, error, ".bak"))
+        return settingsFailure(error.isEmpty() ? "Einstellungen konnten nicht exportiert werden." : error);
+    m_message = "Oberflächeneinstellungen exportiert: Maßeinheit, Design und Einfachmodus.";
+    emit changed();
+    return true;
+}
+QVariantMap ApplicationServices::previewSettingsImport(const QUrl &file) {
+    QString error;
+    const auto path = bundlePath(file, m_settings->fileName(), error);
+    const auto bytes = path.isEmpty() ? QByteArray() : readBundleFile(path, error);
+    const auto parsed = error.isEmpty() ? SettingsBundle::read(bytes)
+                                       : SettingsBundle::Result{{}, error};
+    if (!parsed.valid()) {
+        settingsFailure(parsed.error);
+        return {{"valid", false}, {"error", parsed.error}};
+    }
+    QVariantList changes;
+    const auto current = portablePreferences();
+    const QMap<QString, QString> labels{{"lengthUnit", "Maßeinheit"},
+                                        {"darkTheme", "Dunkles Design"},
+                                        {"beginnerMode", "Einfachmodus"}};
+    for (auto it = parsed.preferences.begin(); it != parsed.preferences.end(); ++it)
+        if (current.value(it.key()) != it.value())
+            changes.append(QVariantMap{{"key", it.key()}, {"label", labels.value(it.key())},
+                                         {"current", current.value(it.key())}, {"incoming", it.value()}});
+    return {{"valid", true}, {"error", ""},
+            {"digest", QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex())},
+            {"preferences", parsed.preferences}, {"changes", changes}};
+}
+bool ApplicationServices::importSettings(const QUrl &file, const QString &expectedDigest) {
+    if (expectedDigest.size() != 64)
+        return settingsFailure("Bitte die Einstellungsdatei zuerst prüfen und die Übernahme bestätigen.");
+    const auto preview = previewSettingsImport(file);
+    if (!preview.value("valid").toBool())
+        return false;
+    if (preview.value("digest").toString() != expectedDigest)
+        return settingsFailure("Einstellungsdatei wurde seit der Vorschau verändert; bitte erneut prüfen.");
+    // Apply exactly the re-read, validated bytes associated with this digest.
+    return applyPortablePreferences(preview.value("preferences").toMap());
 }
