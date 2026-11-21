@@ -266,6 +266,258 @@ class F39ReviewTest : public QObject {
         QVERIFY(machine.simulation());
         QVERIFY(machine.ports().isEmpty());
     }
+    void workspaceActuallyRendersOnlySelectedOutput() {
+        Document document;
+        document.newProject();
+        for (int i = 0; i < 2; ++i) {
+            document.addShape("rect");
+            document.setLayer(1);
+            document.setProperty("x", i ? 90. : 10.);
+            document.setProperty("y", i ? 80. : 20.);
+            document.setProperty("width", 20.);
+            document.setProperty("height", 10.);
+        }
+        Machine machine(&document, nullptr, Machine::HardwareAccess::Disabled);
+        Workspace workspace;
+        workspace.setWidth(800);
+        workspace.setHeight(650);
+        workspace.setDocument(&document);
+        workspace.setPreview(true);
+        auto render = [&] {
+            QImage image(800, 650, QImage::Format_RGB32);
+            image.fill(Qt::white);
+            QPainter painter(&image);
+            workspace.paint(&painter);
+            painter.end();
+            return image;
+        };
+        auto blue = [](const QImage &image) {
+            QRect rectangle;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    const auto color = image.pixelColor(x, y);
+                    if (color.blue() - color.red() > 60 && color.blue() - color.green() > 25)
+                        rectangle = rectangle.isNull() ? QRect(x, y, 1, 1)
+                                                       : rectangle.united(QRect(x, y, 1, 1));
+                }
+            return rectangle;
+        };
+        const auto all = render();
+        const auto allBlue = blue(all);
+        document.setCutSelectedGraphics(true);
+        const auto selected = render();
+        const auto selectedBlue = blue(selected);
+        QVERIFY(!allBlue.isEmpty());
+        QVERIFY(!selectedBlue.isEmpty());
+        QVERIFY(selectedBlue.left() > allBlue.left() + 100);
+        QCOMPARE(selectedBlue.right(), allBlue.right());
+        QVERIFY(selectedBlue.width() < allBlue.width() / 3);
+        QVERIFY(selectedBlue.height() < allBlue.height() / 3);
+        QCOMPARE(document.items().first().bounds, QRectF(10, 20, 20, 10));
+        const auto folder = qEnvironmentVariable("BLAZER_F39_REVIEW_EVIDENCE");
+        if (!folder.isEmpty()) {
+            QVERIFY(QDir().mkpath(folder));
+            QVERIFY(all.save(folder + "/preview-all-output.png"));
+            QVERIFY(selected.save(folder + "/preview-selected-output.png"));
+        }
+    }
+    void selectedOutputThroughRealMain_data() {
+        QTest::addColumn<bool>("compactDark");
+        QTest::addColumn<bool>("background");
+        QTest::newRow("selection-light-sync") << false << false;
+        QTest::newRow("selection-compact-dark-sync") << true << false;
+        QTest::newRow("selection-light-async") << false << true;
+        QTest::newRow("selection-compact-dark-async") << true << true;
+    }
+    void selectedOutputThroughRealMain() {
+        QFETCH(bool, compactDark);
+        QFETCH(bool, background);
+        QTemporaryDir storage;
+        Document project;
+        project.newProject();
+        for (int i = 0; i < 2; ++i) {
+            project.addShape("rect");
+            project.setLayer(1);
+            project.setProperty("x", i ? 50. : 10.);
+            project.setProperty("y", i ? 40. : 20.);
+            project.setProperty("width", 20.);
+            project.setProperty("height", 10.);
+            project.setObjectSetting("power", i ? 61. : 23.);
+            project.setObjectSetting("speed", i ? 1423. : 731.);
+        }
+        Machine machine(&project, nullptr, Machine::HardwareAccess::Disabled);
+        DeviceManager devices(&project, &machine, storage.filePath("devices.json"));
+        QVERIFY(devices.activate(devices.addCurrent("Offline review", "")));
+        project.setBackgroundPlanning(background);
+        MaterialLibrary materials(storage.filePath("materials.json"));
+        MaterialTestLedger ledger(storage.filePath("ledger.json"));
+        Registration registration;
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        QVERIFY(services.finishOnboarding());
+        QVERIFY(services.setDarkTheme(compactDark));
+        QQmlApplicationEngine engine;
+        auto *context = engine.rootContext();
+        context->setContextProperty("project", &project);
+        context->setContextProperty("machine", &machine);
+        context->setContextProperty("deviceManager", &devices);
+        context->setContextProperty("materialLibrary", &materials);
+        context->setContextProperty("materialTestLedger", &ledger);
+        context->setContextProperty("cameraRegistration", &registration);
+        context->setContextProperty("appServices", &services);
+        engine.load(QUrl::fromLocalFile(QString(BLAZER_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->resize(compactDark ? 1180 : 1480, compactDark ? 760 : 920);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto item = [&](const QString &name) { return find(window->contentItem(), name); };
+        auto object = [&](const char *name) { return window->findChild<QObject *>(name); };
+        QTRY_VERIFY(object("startupSafetyDialog")->property("visible").toBool());
+        QVERIFY(click(window, item("acknowledgeStartupSafety")));
+        QTRY_VERIFY(!object("startupSafetyDialog")->property("visible").toBool());
+        QTRY_VERIFY(project.job().valid());
+        QVERIFY(click(window, item("jobPlacementButton")));
+        QTRY_VERIFY(object("jobPlacementDialog")->property("visible").toBool());
+        auto *mask = item("cutSelectedGraphicsChoice");
+        auto *origin = item("useSelectionOriginChoice");
+        QVERIFY(mask);
+        QVERIFY(origin);
+        QVERIFY(!origin->isEnabled());
+        QVERIFY(click(window, mask));
+        QTRY_VERIFY(project.cutSelectedGraphics());
+        QTRY_VERIFY(project.job().valid());
+        QVERIFY(!origin->isEnabled()); // Absolute ignores nine-dot selection origin.
+        QVERIFY(item("outputSelectionExplanation")
+                    ->property("text")
+                    .toString()
+                    .contains("keine Wirkung"));
+        QCOMPARE(bounds(project.placementSummary()["graphicsBounds"].toMap()),
+                 QRectF(50, 40, 20, 10));
+        QVERIFY(QMetaObject::invokeMethod(object("jobPlacementDialog"), "close"));
+        QVERIFY(click(window, item("basicProof")));
+        QTRY_VERIFY(window->property("proofConfirmed").toBool());
+        const auto secondHash = devices.parameterHash();
+        const auto secondKey = window->property("parameterKey").toString();
+        QVERIFY(click(window, item("objectRow0")));
+        QTRY_COMPARE(project.selected(), 0);
+        QTRY_VERIFY(!window->property("proofConfirmed").toBool());
+        QVERIFY(devices.parameterHash() != secondHash);
+        QVERIFY(window->property("parameterKey").toString() != secondKey);
+        QTRY_VERIFY(project.job().valid());
+        for (const auto &move : project.job().moves)
+            if (!move.rapid && move.power > 0) {
+                QCOMPARE(move.power, 23.);
+                QCOMPARE(move.speed, 731.);
+            }
+        // Same recipe still requires a fresh explicit confirmation for different selected identity.
+        project.setObjectSetting("power", 61.);
+        project.setObjectSetting("speed", 1423.);
+        QTRY_VERIFY(project.job().valid());
+        const auto sameHash = devices.parameterHash();
+        QVERIFY(click(window, item("basicProof")));
+        QTRY_VERIFY(window->property("proofConfirmed").toBool());
+        const auto sameKey = window->property("parameterKey").toString();
+        QVERIFY(click(window, item("objectRow1")));
+        QTRY_COMPARE(project.selected(), 1);
+        QCOMPARE(devices.parameterHash(), sameHash);
+        QTRY_VERIFY(window->property("parameterKey").toString() != sameKey);
+        QTRY_VERIFY(!window->property("proofConfirmed").toBool());
+        QVERIFY(click(window, item("jobPlacementButton")));
+        QTRY_VERIFY(object("jobPlacementDialog")->property("visible").toBool());
+        auto *choice = item("startModeChoice");
+        QVERIFY(choice);
+        auto mode = [&](int value) {
+            if (!click(window, choice))
+                return false;
+            QTest::keyClick(window, Qt::Key_Home);
+            for (int i = 0; i < value; ++i)
+                QTest::keyClick(window, Qt::Key_Down);
+            QTest::keyClick(window, Qt::Key_Return);
+            return true;
+        };
+        for (int startMode : {1, 2}) {
+            QVERIFY(mode(startMode));
+            QTRY_COMPARE(int(project.startMode()), startMode);
+            if (startMode == 2) {
+                QVERIFY(click(window, item("captureJobUserOrigin")));
+                QTRY_VERIFY(project.placementSummary()["originConfirmed"].toBool());
+                machine.jog(5, 5); // Actual approach and stored User target now differ.
+            }
+            QTRY_VERIFY(project.job().valid());
+            QTRY_VERIFY(origin->isEnabled());
+            for (bool selectionOrigin : {false, true}) {
+                if (origin->property("checked").toBool() != selectionOrigin)
+                    QVERIFY(click(window, origin));
+                QTRY_COMPARE(project.useSelectionOrigin(), selectionOrigin);
+                const QRectF reference =
+                    selectionOrigin ? QRectF(50, 40, 20, 10) : QRectF(10, 20, 60, 30);
+                const QPointF target(
+                    100, 75); // Known initial head; User target remains here after jogging.
+                for (int anchor = 0; anchor < 9; ++anchor) {
+                    QVERIFY(click(window, item("jobOrigin" + QString::number(anchor))));
+                    QTRY_COMPARE(int(project.jobOrigin()), anchor);
+                    QTRY_VERIFY(project.job().valid());
+                    const QPointF delta =
+                        target - QPointF(reference.x() + (anchor % 3) * reference.width() / 2,
+                                         reference.y() + (anchor / 3) * reference.height() / 2);
+                    const auto expected = QRectF(50, 40, 20, 10).translated(delta);
+                    QCOMPARE(bounds(project.placementSummary()["graphicsBounds"].toMap()),
+                             expected);
+                    QCOMPARE(project.placementSummary()["originScope"].toString(),
+                             selectionOrigin ? QString("selection") : QString("design"));
+                    QCOMPARE(project.job().moves.first().from,
+                             startMode == 1 ? QPointF(100, 75) : QPointF(105, 80));
+                    int working = 0;
+                    for (const auto &move : project.job().moves)
+                        if (!move.rapid && move.power > 0) {
+                            ++working;
+                            QCOMPARE(move.power, 61.);
+                            QCOMPARE(move.speed, 1423.);
+                            QVERIFY(
+                                expected.adjusted(-1e-8, -1e-8, 1e-8, 1e-8).contains(move.from));
+                            QVERIFY(expected.adjusted(-1e-8, -1e-8, 1e-8, 1e-8).contains(move.to));
+                        }
+                    QCOMPARE(working, 4);
+                }
+                const auto output = QUrl::fromLocalFile(storage.filePath(
+                    QString("placed-%1-%2.gcode").arg(startMode).arg(selectionOrigin)));
+                QVERIFY(project.exportGcode(output));
+                QFile encoded(output.toLocalFile());
+                QVERIFY(encoded.open(QIODevice::ReadOnly));
+                QCOMPARE(encoded.readAll(), project.job().encodedProgram().payload());
+            }
+        }
+        QVERIFY(mode(0));
+        QTRY_COMPARE(project.startMode(), Document::AbsoluteCoordinates);
+        QVERIFY(!origin->isEnabled());
+        QVERIFY(origin->property("checked")
+                    .toBool()); // Inactive preference is retained, not silently cleared.
+        const auto evidence = qEnvironmentVariable("BLAZER_F39_REVIEW_EVIDENCE");
+        if (!evidence.isEmpty()) {
+            QVERIFY(QDir().mkpath(evidence));
+            QTest::qWait(60);
+            QVERIFY(window->grabWindow().save(evidence + "/selected-output-" +
+                                              QTest::currentDataTag() + ".png"));
+        }
+        QVERIFY(QMetaObject::invokeMethod(object("jobPlacementDialog"), "close"));
+        QVERIFY(click(window, item("objectCheck1")));
+        QTRY_VERIFY(project.selectedRows().isEmpty());
+        QTRY_VERIFY(!project.planningBusy());
+        QVERIFY(!project.job().valid());
+        const auto empty = QUrl::fromLocalFile(storage.filePath("empty-selection.gcode"));
+        QVERIFY(!project.exportGcode(empty));
+        QVERIFY(!QFile::exists(empty.toLocalFile()));
+        QVERIFY(click(window, item("startJobButton"))); // Editor start opens preview, never fires.
+        QTRY_VERIFY(qobject_cast<Workspace *>(item("workspace"))->preview());
+        QVERIFY(!machine.busy());
+        QVERIFY(!window->property("startBlockReason").toString().isEmpty());
+        machine.start(); // Disabled-hardware simulator also rejects the invalid selected plan.
+        QVERIFY(!machine.busy());
+        QVERIFY(machine.simulation());
+        QVERIFY(machine.ports().isEmpty());
+        window->setProperty("discardCloseApproved", true);
+        window->close();
+    }
     void realMainOpensPlacementAndChangesActualPipeline_data() {
         QTest::addColumn<bool>("compactDark");
         QTest::addColumn<bool>("background");
