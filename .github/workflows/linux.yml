@@ -19,5 +19,11 @@ jobs:
       BLAZER_BUILD_JOBS: '2'
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Build and run all software tests
-        run: bash tools/ci-linux.sh "$GITHUB_WORKSPACE" /tmp/blazer-build
+      - name: Install build and test dependencies as root
+        run: BLAZER_DEPS_ONLY=1 bash tools/ci-linux.sh "$GITHUB_WORKSPACE" /tmp/blazer-build
+      - name: Build and test as an unprivileged desktop user
+        run: |
+          useradd --create-home --shell /bin/bash blazer-ci
+          chown -R blazer-ci:blazer-ci "$GITHUB_WORKSPACE"
+          runuser -u blazer-ci -- env BLAZER_INSTALL_DEPS=0 BLAZER_DEPS_ONLY=0 \
+            bash "$GITHUB_WORKSPACE/tools/ci-linux.sh" "$GITHUB_WORKSPACE" /tmp/blazer-build
