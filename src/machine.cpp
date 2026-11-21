@@ -222,7 +222,7 @@ void Machine::home() {
 }
 void Machine::focus(bool on) {
     if (!live) { Simulator::focus(on); return; }
-    if (!on) session->focus(false);
+    if (!on) nativeInput->revoke(); // Revoke collector AND worker; a later begin cannot reseal it.
     else beginFocus(); // Legacy true has no input authority and cannot bypass the native gate.
 }
 void Machine::frame(const QVariantMap &b) {
