@@ -24,6 +24,29 @@ using RuntimeTestSupport::RuntimePeer;
 // runs in the worker. No public/QML grant or synchronous runtime mode is added.
 class ControllerRuntimeTestAccess {
   public:
+    inline static quint64 syntheticInteraction=0;
+    static ControllerRuntimeInputStamp proof(ControllerRuntimeSession &r,ControllerNativeAction action,
+            double x=0,double y=0,const QVariantMap &bounds={},PreparedControllerJob::Ptr prepared={},int feed=100,int power=100) {
+        const auto status=r.status();const auto now=RuntimePeer::monotonicNs()/1000000;
+        const auto source=prepared?prepared->sourceFingerprint()+prepared->profileFingerprint():QByteArray();
+        return r.sealNativeAction(action,++syntheticInteraction,now,now+250,
+            ControllerNativeDigest::request(action,action==ControllerNativeAction::Override?feed:x,
+                action==ControllerNativeAction::Override?power:y,bounds,source),
+            std::make_shared<NativeInputContextToken>(),status.connectionEpoch,status.coordinateEpoch);
+    }
+    static ControllerSubmission start(ControllerRuntimeSession &r,PreparedControllerJob::Ptr prepared) {
+        const auto stamp=proof(r,ControllerNativeAction::StartJob,0,0,{},prepared);
+        const bool enqueued=r.submitNativeAction(ControllerNativeAction::StartJob,stamp,0,0,{},std::move(prepared));
+        return {enqueued?r.m_nextRequest:0,enqueued,{}};
+    }
+    static bool jog(ControllerRuntimeSession &r,double x,double y) {
+        const auto stamp=proof(r,ControllerNativeAction::Jog,x,y);
+        return r.submitNativeAction(ControllerNativeAction::Jog,stamp,x,y);
+    }
+    static bool overrides(ControllerRuntimeSession &r,int feed,int power) {
+        const auto stamp=proof(r,ControllerNativeAction::Override,0,0,{}, {},feed,power);
+        return r.submitNativeAction(ControllerNativeAction::Override,stamp,0,0,{}, {},feed,power);
+    }
     struct Probe {
         bool initialized = false, affinity = false, lease = false, releaseRequired = false;
         bool job = false, focus = false, awaitingAck = false;
@@ -153,8 +176,10 @@ class ControllerRuntimeTestAccess {
         return guard;
     }
     static bool injectStampedJog(ControllerRuntimeSession &runtime, quint64 generation, quint64 connectionEpoch) {
-        return run(runtime, [generation, connectionEpoch](ControllerRuntimeWorker &worker) {
+        const auto stamp=proof(runtime,ControllerNativeAction::Jog,.75,0);
+        return run(runtime, [generation, connectionEpoch,stamp](ControllerRuntimeWorker &worker) {
             ControllerRuntimeRequest request{ControllerRuntimeRequestKind::Jog};
+            request.input=stamp;
             request.generation = generation;
             request.connectionEpoch = connectionEpoch;
             request.issuedAt = RuntimePeer::monotonicNs() / 1000000;
@@ -294,11 +319,11 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
         const auto candidate = edge();
         QVERIFY(candidate->valid());
-        runtime.requestStart(candidate); // Admission may reject immediately or in worker.
+        ControllerRuntimeTestAccess::start(runtime,candidate); // Admission may reject immediately or in worker.
         QTest::qWait(100);
         QCOMPARE(countCommand(events(peer), "M4 S1000"), 0);
         QVERIFY(ControllerRuntimeTestAccess::commission(runtime));
-        const auto submitted = runtime.requestStart(candidate);
+        const auto submitted = ControllerRuntimeTestAccess::start(runtime,candidate);
         QVERIFY2(submitted.enqueued, qPrintable(submitted.reason));
         QTRY_COMPARE_WITH_TIMEOUT(countCommand(events(peer), "M4 S1000"), 1, 3000);
         const auto probe = ControllerRuntimeTestAccess::probe(runtime);
@@ -321,7 +346,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QVERIFY(ControllerRuntimeTestAccess::refreshFlow(runtime));
         const auto candidate = streamingJob();
         QVERIFY(candidate->valid());
-        QVERIFY(runtime.requestStart(candidate).enqueued);
+        QVERIFY(ControllerRuntimeTestAccess::start(runtime,candidate).enqueued);
         QTRY_VERIFY_WITH_TIMEOUT(totalCommands(peer) >= 20, 3000);
         const auto before = peer.snapshot();
         QVERIFY(before.ok);
@@ -359,7 +384,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QVERIFY(open(runtime, peer));
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
         QVERIFY(ControllerRuntimeTestAccess::commission(runtime));
-        QVERIFY(runtime.requestStart(edge()).enqueued);
+        QVERIFY(ControllerRuntimeTestAccess::start(runtime,edge()).enqueued);
         QTRY_COMPARE_WITH_TIMEOUT(countCommand(events(peer), "M4 S1000"), 1, 3000);
         auto faultAt = std::make_shared<std::atomic<qint64>>(-1);
         QVERIFY(ControllerRuntimeTestAccess::scheduleFlow(runtime, 75,
@@ -393,7 +418,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
         auto flowAt = std::make_shared<std::atomic<qint64>>(-1);
         QVERIFY(ControllerRuntimeTestAccess::commission(runtime, flowAt));
-        QVERIFY(runtime.requestStart(edge()).enqueued);
+        QVERIFY(ControllerRuntimeTestAccess::start(runtime,edge()).enqueued);
         QTRY_COMPARE_WITH_TIMEOUT(countCommand(events(peer), "M4 S1000"), 1, 3000);
         auto probe = ControllerRuntimeTestAccess::probe(runtime);
         QVERIFY(probe);
@@ -420,7 +445,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
         QVERIFY(ControllerRuntimeTestAccess::commission(runtime));
         QVERIFY(ControllerRuntimeTestAccess::refreshFlow(runtime));
-        QVERIFY(runtime.requestStart(edge()).enqueued);
+        QVERIFY(ControllerRuntimeTestAccess::start(runtime,edge()).enqueued);
         QTRY_COMPARE_WITH_TIMEOUT(countCommand(events(peer), "M4 S1000"), 1, 3000);
         QVERIFY(peer.control({{"action", "set"}, {"values", QJsonObject{{"statusEnabled", false}}}}).ok);
         const auto probe = ControllerRuntimeTestAccess::probe(runtime);
@@ -445,7 +470,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
         QVERIFY(ControllerRuntimeTestAccess::commission(runtime));
         QVERIFY(ControllerRuntimeTestAccess::refreshFlow(runtime));
-        QVERIFY(runtime.requestStart(streamingJob()).enqueued);
+        QVERIFY(ControllerRuntimeTestAccess::start(runtime,streamingJob()).enqueued);
         QTRY_VERIFY_WITH_TIMEOUT(totalCommands(peer) >= 20, 3000);
         QVERIFY(peer.control({{"action", "set"}, {"values", QJsonObject{{"ackEnabled", false}}}}).ok);
         const auto before = events(peer);
@@ -491,7 +516,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         auto barrier = ControllerRuntimeTestAccess::hold(runtime);
         QVERIFY(barrier);
         const auto begin = RuntimePeer::monotonicNs();
-        QVERIFY(runtime.requestStart(edge()).enqueued);
+        QVERIFY(ControllerRuntimeTestAccess::start(runtime,edge()).enqueued);
         QElapsedTimer response;
         response.start();
         runtime.stop();
@@ -516,13 +541,13 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
         auto barrier = ControllerRuntimeTestAccess::hold(runtime);
         QVERIFY(barrier);
-        for (int i = 0; i < 16; ++i) runtime.jog(.1, 0);
-        const bool overflowAccepted = runtime.overrides(100, 100);
+        for (int i = 0; i < 16; ++i) ControllerRuntimeTestAccess::jog(runtime,.1, 0);
+        const bool overflowAccepted = ControllerRuntimeTestAccess::overrides(runtime,100, 100);
         runtime.stop(); // Clear all queued motion before letting the worker proceed.
         barrier->release();
         QVERIFY2(!overflowAccepted, "A full mailbox must reject admission rather than report accepted execution");
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready && !runtime.status().requestPending, 3000);
-        QVERIFY(runtime.overrides(100, 100)); // Enqueued only; no synthetic override/flow grant exists.
+        QVERIFY(ControllerRuntimeTestAccess::overrides(runtime,100, 100)); // Enqueued only; no synthetic override/flow grant exists.
         QVERIFY(ControllerRuntimeTestAccess::probe(runtime)); // Worker FIFO fence.
         QTRY_VERIFY_WITH_TIMEOUT(!runtime.status().requestPending, 1000);
         const auto after = peer.snapshot();
@@ -538,13 +563,13 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QVERIFY(open(runtime, peer));
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
         QVERIFY(ControllerRuntimeTestAccess::commission(runtime));
-        runtime.jog(.25, 0);
+        ControllerRuntimeTestAccess::jog(runtime,.25, 0);
         QTRY_VERIFY_WITH_TIMEOUT(countCommand(events(peer), "$J=G91 G21 X0.250 Y0.000 F600") == 1, 3000);
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 3000);
         auto barrier = ControllerRuntimeTestAccess::hold(runtime);
         QVERIFY(barrier);
         const auto begin = RuntimePeer::monotonicNs();
-        runtime.jog(.75, 0);
+        ControllerRuntimeTestAccess::jog(runtime,.75, 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(400)); // Deliberately past 250-ms request TTL.
         barrier->release();
         QVERIFY(ControllerRuntimeTestAccess::probe(runtime)); // Worker FIFO fence after drain.
@@ -578,7 +603,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QVERIFY(ControllerRuntimeTestAccess::probe(runtime));
         QTRY_VERIFY_WITH_TIMEOUT(!runtime.status().requestPending && runtime.status().ready, 1000);
         QVERIFY(noUnsafeCommandAfter(events(second), begin));
-        runtime.jog(.5, 0); // Fresh intent with new generation remains possible.
+        ControllerRuntimeTestAccess::jog(runtime,.5, 0); // Fresh intent with new generation remains possible.
         QTRY_COMPARE_WITH_TIMEOUT(countCommand(events(second), "$J=G91 G21 X0.500 Y0.000 F600"), 1, 3000);
     }
     void destructionRevokesActiveLeaseAndStopsItsWorker() {
@@ -590,7 +615,7 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(runtime->status().ready, 5000);
         QVERIFY(ControllerRuntimeTestAccess::commission(*runtime));
         QVERIFY(ControllerRuntimeTestAccess::refreshFlow(*runtime));
-        QVERIFY(runtime->requestStart(edge()).enqueued);
+        QVERIFY(ControllerRuntimeTestAccess::start(*runtime,edge()).enqueued);
         QTRY_COMPARE_WITH_TIMEOUT(countCommand(events(peer), "M4 S1000"), 1, 3000);
         auto destroyed = ControllerRuntimeTestAccess::observeWorkerDestruction(*runtime);
         QVERIFY(destroyed);
