@@ -137,4 +137,7 @@ python3 tests/package_runtime_oracle_test.py
 The Python tests execute only the pure extracted GCode-oracle function and the
 script's earliest refusal guard. They do not invoke apt/dpkg installation,
 launch Blazer Studio, create containers, or access physical endpoints. Actual
-fresh/upgrade/reinstall/removal acceptance is still pending a newly frozen DEB.
+fresh/upgrade/reinstall/removal acceptance must be repeated for each frozen DEB.
+The completed run for revision `4b73fb4` is recorded in
+[beta.6 software acceptance](BETA6_SOFTWARE_ACCEPTANCE.md); it does not cover
+later source changes or physical operation.
