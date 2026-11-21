@@ -324,6 +324,71 @@ class ManualRegistrationTest : public QObject {
             QVERIFY(!ManualRegistration::apply(input, plan, intent, frame).valid());
         }
     }
+    void encoderFailureCannotPublishAValidRegistration() {
+        auto data = DeviceProfile::m3Reference().toJson();
+        auto driver = data["driver"].toObject();
+        auto settings = driver["settings"].toObject();
+        settings["powerScale"] =
+            .5; // Geometry remains meaningful; actual GRBL encoder cannot encode it.
+        driver["settings"] = settings;
+        data["driver"] = driver;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(data).toJson(), error);
+        QVERIFY2(profile, qPrintable(error));
+        JobInput input;
+        input.deviceProfile = *profile;
+        JobPlan plan(*profile);
+        plan.moves = {{{0, 0}, {10, 20}, 3000, 0, 1, true},
+                      {{10, 20}, {30, 20}, 600, 40, 1, false}};
+        QVERIFY(plan.valid());
+        QVERIFY(!plan.encodedProgram().valid());
+        const QByteArray frame(64, 'a');
+        ManualRegistration::Intent intent{
+            ManualRegistration::SourceSnapshot::capture(input, plan, frame),
+            {{10, 20}, {30, 20}, {80, 40}, {80, 60}, ManualRegistration::Scaling::Rigid, .5}};
+        QVERIFY(intent.source.valid());
+        const auto rejected = ManualRegistration::apply(input, plan, intent, frame);
+        QVERIFY(!rejected.valid());
+        QVERIFY(!rejected.plan.valid());
+        QVERIFY(rejected.plan.moves.isEmpty());
+        QVERIFY(!rejected.summary["valid"].toBool());
+        QVERIFY(!rejected.summary["reason"].toString().isEmpty());
+    }
+    void serviceReviewRejectsOutwardWireRounding_data() {
+        QTest::addColumn<double>("right");
+        QTest::addColumn<bool>("accepted");
+        QTest::newRow("wire-stays-inside") << 200.0004 << true;
+        QTest::newRow("wire-rounds-outside") << 200.0006 << false;
+    }
+    void serviceReviewRejectsOutwardWireRounding() {
+        QFETCH(double, right);
+        QFETCH(bool, accepted);
+        auto data = DeviceProfile::m3Reference().toJson();
+        auto area = data["workspace"].toObject();
+        area["width"] = 200.0006;
+        data["workspace"] = area;
+        QString error;
+        const auto profile = DeviceProfile::parse(QJsonDocument(data).toJson(), error);
+        QVERIFY2(profile, qPrintable(error));
+        Document document;
+        document.newProject();
+        QVERIFY(document.setDeviceProfile(*profile));
+        rectangle(document);
+        Machine machine(&document, nullptr, Machine::HardwareAccess::Disabled);
+        ManualRegistrationController service(&document, &machine);
+        const auto review =
+            service.reviewPoints({10., 20., right - 20, 20., 30., 20., right, 20.}, false, .5);
+        QCOMPARE(review["valid"].toBool(), accepted);
+        QCOMPARE(!review["token"].toString().isEmpty(), accepted);
+        if (accepted) {
+            QVERIFY(service.applyReview(review["token"].toString()));
+            QVERIFY(document.job().valid());
+            QVERIFY(document.job().encodedProgram().payload().contains("X200.000"));
+        } else {
+            QVERIFY(!service.applyReview(review["token"].toString()));
+            QVERIFY(!document.manualRegistrationEnabled());
+        }
+    }
     void exactGeometryProfileAndKnownApproachBindings() {
         JobInput input;
         Artwork marker;

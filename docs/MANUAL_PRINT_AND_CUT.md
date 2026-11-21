@@ -20,7 +20,7 @@ Die lokale Mindestbasis beträgt 10 mm an beiden Punktpaaren. Der Nutzer begrenz
 
 Ein ausdrücklich bekannter Vorschaukopf wird separat mit Leistung 0 an den ersten registrierten Ausgabepunkt geführt. Ohne Kopfstand bleibt die Anfahrt als unbekannt gekennzeichnet; der bestehende Encoder erreicht den ersten Ausgabepunkt mit abgeschalteter Leistung. Es wird kein bekanntes 0/0 erzeugt. Offline-Export benötigt keine Simulatorverbindung. Die explizite Punktprüfung und Übernahme berechnen einen begrenzten Quellplan derzeit synchron und sind bei Geräteaktion, laufender Simulation, Berechnung/Export oder aktivem SynchronousWork-Guard gesperrt. Die normale Ausgabeplanung verwendet anschließend die vorhandene Hintergrundpipeline. Es wird keine blockierende Controllerabfrage eingeführt.
 
-Die Profilfläche wird für alle registrierten Endpunkte einschließlich leistungsfreiem Rasterüberlauf und bekannten Anfahrten geprüft. Geschwindigkeit, Leistung, Layer und Slice bleiben erhalten; Verbindungsgravuren werden abgewiesen.
+Die Profilfläche wird für alle registrierten Endpunkte einschließlich leistungsfreiem Rasterüberlauf und bekannten Anfahrten geprüft. Geschwindigkeit, Leistung, Layer und Slice bleiben erhalten; Verbindungsgravuren werden abgewiesen. Vor einem gültigen Review oder Plan prüft die Registrierung zusätzlich den tatsächlichen ControllerProgram des Ausgabeadapters. Codierungsfehler einschließlich nach außen gerundeter Wire-Koordinaten sperren damit schon Review/Übernahme, nicht erst Dateischreiben oder Start. Der allgemeine Adapter definiert sein Ausgaberaster; eine nicht ausgegebene erste rapid.from-Koordinate wird dadurch nicht zum falschen Ablehnungsgrund.
 
 ## Bindung, Änderungen und Dateigrenzen
 

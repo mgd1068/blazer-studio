@@ -258,6 +258,15 @@ ManualRegistration::apply(const JobInput &input, const JobPlan &canonical, const
             include(move.to);
         }
     }
+    // A geometrically contained point can round outside a fractional profile edge
+    // on the final wire grid. Only the adapter defines that grid and encoding
+    // contract: fail the review/plan here rather than showing a false ready state.
+    result.plan.cacheCommands(cancel);
+    const auto program = result.plan.encodedProgram(cancel);
+    if (!program.valid())
+        return fail(program.errors().isEmpty()
+                        ? QString("Registrierter Ausgabeplan kann nicht codiert werden.")
+                        : program.errors().join("; "));
     result.summary["valid"] = true;
     result.summary["reason"] = "Manuelle Offline-Ausgaberegistrierung geprüft; keine physische "
                                "Messung oder Gerätefreigabe.";
@@ -273,7 +282,7 @@ ManualRegistration::apply(const JobInput &input, const JobPlan &canonical, const
     result.summary["targetDistanceMm"] = targetLength;
     result.summary["motionBounds"] = rectangle(QRectF(QPointF(x0, y0), QPointF(x1, y1)));
     result.summary["outputMotionFingerprint"] =
-        QString::fromLatin1(result.plan.motionFingerprint(cancel).toHex());
+        QString::fromLatin1(program.sourceFingerprint().toHex());
     result.summary["approachKnown"] = approach.has_value();
     return result;
 }
