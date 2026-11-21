@@ -23,6 +23,8 @@ class Machine : public Simulator {
     QStringList ports() const;
     bool connectionVerified() const { return live && session && session->status().verified; }
     QVariantList capabilities() const;
+    void setPreviewDeviceBinding(const QByteArray &binding);
+    Q_INVOKABLE void refreshPreviewPosition();
     QString motionSafetyError() const {
         return live && session ? session->status().motionSafetyError : QString();
     }
@@ -99,4 +101,8 @@ class Machine : public Simulator {
     QTimer accessoryWatchdog;
     QStringList lastProcessingSafetyErrors;
     bool sessionWasVerified = false, sessionWasReferenced = false;
+    QByteArray previewDeviceBinding, simulatorFrameNonce, previewFrame;
+    QPointF previewPoint;
+    quint64 previewPositionRevision = 0;
+    bool updatingPreview = false;
 };

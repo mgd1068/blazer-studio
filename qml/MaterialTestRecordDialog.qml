@@ -51,7 +51,7 @@ Dialog {
                 DialogField { dark: dialog.dark; id: batchInput; objectName: "materialObservationBatch"; Layout.fillWidth: true; Layout.minimumWidth: 70; maximumLength: 200; color: dialog.ink }
             }
             NumberField { id: thickness; objectName: "materialObservationThickness"; Layout.fillWidth: true; label: "Dicke"; value: dialog.thicknessMm; unit: "mm"; dark: dialog.dark; onEdited: newValue => dialog.thicknessMm = newValue }
-            ComboBox { id: resultChoice; objectName: "materialObservationResult"; Layout.fillWidth: true; model: ["Brauchbares Ergebnis", "Versuch fehlgeschlagen", "Nicht eindeutig / nicht bewertet"] }
+            ToolCombo { dark: dialog.dark; id: resultChoice; objectName: "materialObservationResult"; Layout.fillWidth: true; model: ["Brauchbares Ergebnis", "Versuch fehlgeschlagen", "Nicht eindeutig / nicht bewertet"] }
             Label { text: "Beobachtung und Ergebnis"; color: dialog.ink }
             ScrollView {
                 id: notesScroll; Layout.fillWidth: true; Layout.preferredHeight: 100; clip: true; contentWidth: availableWidth

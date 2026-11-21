@@ -1,9 +1,13 @@
 #include "machine.h"
 #include "document.h"
 #include <QPointer>
+#include <QCryptographicHash>
+#include <QScopedValueRollback>
+#include <QUuid>
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
     accessoryClock.start();
+    simulatorFrameNonce = QUuid::createUuid().toRfc4122();
     accessoryWatchdog.setInterval(50);
     connect(&accessoryWatchdog, &QTimer::timeout, this, [this] {
         const auto errors = processingSafetyErrors();
@@ -23,6 +27,40 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     });
     syncDeviceProfile();
     connect(d, &Document::deviceProfileChanged, this, &Machine::syncDeviceProfile);
+    connect(this, &Simulator::changed, this, &Machine::refreshPreviewPosition);
+    connect(d, &Document::changed, this, &Machine::refreshPreviewPosition);
+    refreshPreviewPosition();
+}
+void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
+    if (previewDeviceBinding == binding) return;
+    previewDeviceBinding = binding; // Publish before STOPP notifications can reenter the manager.
+    if (live && connected()) {
+        document->notify("Gerätebindung geändert. Verbindung vor weiterer Bearbeitung erneut prüfen.");
+        stop();
+    }
+    refreshPreviewPosition();
+}
+void Machine::refreshPreviewPosition() {
+    if (updatingPreview) return;
+    QScopedValueRollback<bool> guard(updatingPreview, true);
+    if (live) {
+        document->clearPreviewPosition(); // Never reuse simulated coordinates for hardware.
+        return;
+    }
+    // Freeze the job's start snapshot during simulation or a focus indication.
+    if (busy() || firing()) return;
+    if (!Simulator::ready()) { document->clearPreviewPosition(); return; }
+    const auto profile = document->deviceProfile().outputFingerprint();
+    const auto frame = QCryptographicHash::hash(
+        QByteArray("blazer-simulator-frame-v1:") + simulatorFrameNonce + profile + previewDeviceBinding,
+        QCryptographicHash::Sha256).toHex();
+    const QPointF point(Simulator::x(),Simulator::y());
+    if (previewPositionRevision == 0 || frame != previewFrame ||
+        point.x() != previewPoint.x() || point.y() != previewPoint.y()) {
+        ++previewPositionRevision;
+        previewFrame = frame; previewPoint = point;
+    }
+    document->setPreviewPosition({point,true,profile,frame,previewPositionRevision});
 }
 void Machine::syncDeviceProfile() {
     if (session && session->deviceProfile().outputFingerprint() ==
@@ -89,6 +127,7 @@ bool Machine::connectHardware(const QString &port) {
     accessoryJobActive = false;
     accessoryFocusActive = false;
     live = true;
+    document->clearPreviewPosition();
     bool result = session->open(port);
     emit changed();
     return result;
@@ -100,6 +139,7 @@ void Machine::useSimulator() {
     if (session)
         session->close();
     live = false;
+    simulatorFrameNonce = QUuid::createUuid().toRfc4122();
     emit changed();
 }
 void Machine::toggleConnection() {
@@ -155,6 +195,10 @@ void Machine::start() {
     }
     if (busy() || firing())
         return;
+    if (live && document->startMode() != Document::AbsoluteCoordinates) {
+        document->notify("Relative Startmodi sind derzeit nur im Simulator eingerichtet. Reale Positions- und Koordinatenbindung ist noch nicht abgenommen.");
+        return;
+    }
     if (live && !processingSafetyErrors().isEmpty()) {
         document->notify(processingSafetyErrors().join("\n"));
         return;

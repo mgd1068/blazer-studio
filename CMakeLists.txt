@@ -54,7 +54,7 @@ if(BLAZER_COVERAGE)
 endif()
 
 set(blazer_qml
-    qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
+    qml/JobPlacementDialog.qml qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
     qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml qml/ProjectDialog.qml qml/RecentProjectsDialog.qml qml/HistoryDialog.qml)
 qt_add_executable(blazer-studio src/main.cpp)
@@ -170,6 +170,9 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-ui-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-ui-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME ui COMMAND blazer-ui-tests -platform offscreen)
+    qt_add_executable(blazer-machineplacement-tests tests/machineplacement_test.cpp)
+    target_link_libraries(blazer-machineplacement-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME machineplacement COMMAND blazer-machineplacement-tests -platform offscreen)
     qt_add_executable(blazer-featureworkflow-tests tests/featureworkflow_test.cpp)
     qt_add_resources(blazer-featureworkflow-tests feature_workflow_qml PREFIX /qt/qml/BlazerStudio FILES ${blazer_qml})
     target_compile_definitions(blazer-featureworkflow-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -180,7 +183,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-workflow-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(blazer-workflow-tests PRIVATE blazer-core Qt6::QuickControls2 Qt6::Test)
     add_test(NAME workflow COMMAND blazer-workflow-tests -platform offscreen)
-    set_tests_properties(release stability core ui workflow featureworkflow job grbl relief expansion nativeimport imageexport clipboard raster toolshape deviceprofile deviceworkspace controlleradapter devicelibrary devicemanager devicemanager_adversarial barcode settingsbundle PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    set_tests_properties(release stability core ui workflow featureworkflow machineplacement job grbl relief expansion nativeimport imageexport clipboard raster toolshape deviceprofile deviceworkspace controlleradapter devicelibrary devicemanager devicemanager_adversarial barcode settingsbundle PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME material_catalog COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/catalog_test.py)

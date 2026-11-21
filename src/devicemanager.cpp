@@ -14,6 +14,9 @@ DeviceManager::DeviceManager(Document *d, Machine *m, QString path, QObject *par
     connect(&library, &DeviceLibrary::changed, this, &DeviceManager::changed);
     connect(machine, &Simulator::changed, this, &DeviceManager::changed);
     connect(document, &Document::changed, this, &DeviceManager::changed);
+    connect(this, &DeviceManager::changed, this, [this] {
+        machine->setPreviewDeviceBinding(bindingKey().toUtf8());
+    });
     connect(document, &Document::deviceProfileChanged, this, [this] {
         if (activating || selectedId.isEmpty()) return;
         const auto selected = library.profile(selectedId);

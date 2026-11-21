@@ -60,7 +60,7 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible
+    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
@@ -139,6 +139,7 @@ ApplicationWindow {
         if(project.fileUrl.toString().length>0)saveDialog.selectedFile=project.fileUrl
         saveDialog.open()
     }
+    JobPlacementDialog { id: jobPlacementDialog; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false) }
     DeviceManagerDialog { id: deviceDialog; manager: win.deviceService; dark: win.night; onAboutToShow: machine.focus(false) }
     BarcodeDialog { id: barcodeDialog; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
     MaterialTestRecordDialog { id: materialRecordDialog; manager: win.deviceService; ledger: win.testLedger; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
@@ -617,6 +618,7 @@ ApplicationWindow {
                         }
                     }
                     ActionButton { objectName: "manageDevicesButton"; text: "Geräte verwalten …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.deviceService; enabled: win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
+                    ActionButton { objectName: "jobPlacementButton"; text: "Startposition & Ursprung …"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: !machine.busy && !machine.firing; onClicked: jobPlacementDialog.open() }
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true
                         Text { text: "Laseraufsatz / Toolkopf"; color: win.muted; font.pixelSize: 11 }

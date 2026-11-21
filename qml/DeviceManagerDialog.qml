@@ -63,7 +63,7 @@ Dialog {
         DialogField { dark: dialog.dark; id: endpointInput; objectName: "deviceInstanceEndpoint"; Layout.fillWidth: true; maximumLength: 512; selectByMouse: true; placeholderText: "z. B. /dev/serial/by-id/…" }
         RowLayout {
             Layout.fillWidth: true
-            ComboBox { objectName: "discoveredDeviceEndpoints"; Layout.fillWidth: true; model: dialog.manager ? dialog.manager.endpoints : []; displayText: currentIndex >= 0 ? currentText : "Kein Anschluss erkannt"; onActivated: index => endpointInput.text = currentText }
+            ToolCombo { dark: dialog.dark; objectName: "discoveredDeviceEndpoints"; Layout.fillWidth: true; model: dialog.manager ? dialog.manager.endpoints : []; displayText: currentIndex >= 0 ? currentText : "Kein Anschluss erkannt"; onActivated: index => endpointInput.text = currentText }
             ActionButton { text: "Suchen"; dark: dialog.dark; enabled: !!dialog.manager; onClicked: dialog.manager.refreshEndpoints() }
         }
         RowLayout {
