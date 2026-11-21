@@ -76,6 +76,12 @@ if(BUILD_TESTING)
     add_test(NAME controllerjobpreparation COMMAND blazer-controllerjobpreparation-tests)
     set_tests_properties(controllerjobpreparation PROPERTIES TIMEOUT 30)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        qt_add_executable(blazer-runtime-adversarial-tests tests/controllerruntime_adversarial_test.cpp)
+        target_link_libraries(blazer-runtime-adversarial-tests PRIVATE blazer-core Qt6::Test)
+        target_compile_definitions(blazer-runtime-adversarial-tests PRIVATE
+            BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        add_test(NAME runtime_adversarial COMMAND blazer-runtime-adversarial-tests -platform offscreen)
+        set_tests_properties(runtime_adversarial PROPERTIES TIMEOUT 90)
         qt_add_executable(blazer-runtimepeer-cpp-tests tests/runtimepeer_cpp_test.cpp)
         target_link_libraries(blazer-runtimepeer-cpp-tests PRIVATE Qt6::Gui Qt6::Test)
         target_compile_definitions(blazer-runtimepeer-cpp-tests PRIVATE
