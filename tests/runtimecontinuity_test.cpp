@@ -3,6 +3,7 @@
 #include "controllerruntimeworker.h"
 #include "support/runtimepeer.h"
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QSemaphore>
 #include <QSignalSpy>
 #include <QScopeGuard>
@@ -102,7 +103,12 @@ class RuntimeContinuityTest : public QObject {
     static qint64 resetAfter(const QJsonArray &journal,qint64 after) {
         for(const auto &v:journal){auto e=v.toObject();if(e["kind"]=="realtime"&&e["value"].toInt()==0x18&&e["atNs"].toInteger()>=after)return e["atNs"].toInteger();}return -1;
     }
-    static int powered(const QJsonArray &journal) { int count=0;for(const auto &v:journal)if(v.toObject()["value"]=="M4 S1000")++count;return count; }
+    static int poweredRequests(RuntimePeer &peer) {
+        const auto snapshot=peer.snapshot();
+        // The bounded event journal may evict the initial M4 before the GUI
+        // observes a fast stream. This independent scalar counter is retained.
+        return snapshot.ok?snapshot.object.value("counts").toObject().value("syntheticRunOnOutputRequest").toInt():-1;
+    }
     static bool noUnsafeAfter(const QJsonArray &journal,qint64 after) {
         for(const auto &v:journal) {const auto e=v.toObject();if(e["atNs"].toInteger()<after)continue;
             if(e["kind"]=="realtime"&&e["value"].toInt()=='~')return false;
@@ -156,15 +162,22 @@ class RuntimeContinuityTest : public QObject {
         auto barrier=ControllerRuntimeTestAccess::hold(r);QVERIFY(barrier);const auto before=RuntimePeer::monotonicNs();
         const auto release=qScopeGuard([barrier]{barrier->release.release();});
         QVERIFY(ControllerRuntimeTestAccess::start(r,job()));shift->store(1000000000LL);barrier->release.release();
-        QTRY_VERIFY(!r.status().connected);QCOMPARE(powered(events(peer)),0);QVERIFY(noUnsafeAfter(events(peer),before));
+        QTRY_VERIFY(!r.status().connected);QCOMPARE(poweredRequests(peer),0);QVERIFY(noUnsafeAfter(events(peer),before));
         QVERIFY(!barrier->timedOut);
     }
-    void activeAndHeldJobStopDuringGuiBlock_data(){QTest::addColumn<bool>("hold");QTest::newRow("Run")<<false;QTest::newRow("Hold")<<true;}
+    void activeAndHeldJobStopDuringGuiBlock_data(){
+        QTest::addColumn<bool>("hold");QTest::addColumn<int>("observationDelayMs");
+        QTest::newRow("Run")<<false<<0;QTest::newRow("Hold")<<true<<0;
+        QTest::newRow("Run-delayed-observer")<<false<<150;
+        QTest::newRow("Hold-delayed-observer")<<true<<150;
+    }
     void activeAndHeldJobStopDuringGuiBlock() {
-        QFETCH(bool,hold);RuntimePeer peer;QVERIFY(start(peer));RuntimeOwner owner;auto &r=*owner.runtime;
+        QFETCH(bool,hold);QFETCH(int,observationDelayMs);RuntimePeer peer;QVERIFY(start(peer));RuntimeOwner owner;auto &r=*owner.runtime;
         QVERIFY(r.requestOpen(peer.port(),QByteArray(64,'d')).enqueued);QTRY_VERIFY(r.status().ready);
         QVERIFY(ControllerRuntimeTestAccess::commission(r));auto shift=ControllerRuntimeTestAccess::syntheticClock(r);QVERIFY(shift);
-        QVERIFY(ControllerRuntimeTestAccess::start(r,job()));QTRY_VERIFY(powered(events(peer))>0);
+        QVERIFY(ControllerRuntimeTestAccess::start(r,job()));
+        if(observationDelayMs)std::this_thread::sleep_for(std::chrono::milliseconds(observationDelayMs));
+        QTRY_VERIFY2(poweredRequests(peer)>0,qPrintable(QString::fromUtf8(QJsonDocument(peer.snapshot().object.value("counts").toObject()).toJson(QJsonDocument::Compact))));
         if(hold){r.pause();QTRY_VERIFY(r.status().paused);}
         const auto before=RuntimePeer::monotonicNs();shift->store(1000000000LL);
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
