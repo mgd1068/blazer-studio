@@ -3610,7 +3610,9 @@ class GrblTest : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(machine.jobPrepared(), 5000); // Same admission condition as the real UI.
         const int first = c.commands.size();
         const auto expected = d.job().gcode();
+        ControllerRuntimeTestAccess::armMachine(machine,"start");
         QVERIFY(QMetaObject::invokeMethod(&machine, "start"));
+        ControllerRuntimeTestAccess::call(runtime(machine),[](Context &){return true;}); // Actual worker dispatch before completion assertion.
         QTRY_VERIFY_WITH_TIMEOUT(!machine.busy(), 4000);
         QCOMPARE(c.commands.mid(first), expected);
         machine.useSimulator();
