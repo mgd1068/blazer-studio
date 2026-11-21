@@ -2,7 +2,11 @@
 
 Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Status:** 0.9.0-beta.5 als lokal geprüfter Software-Testkandidat für Ubuntu 26.04 / x86_64. Neu: Debian-Paket mit passendem Quellarchiv, Erststartführung, Hilfe / Beta und freiwilliger lokaler Diagnoseexport. Geräte-/Materialabnahme und externe Einsteigertests sind offen. C++20 / Qt Quick: abbrechbare Hintergrundberechnung für Jobs und CSV-Stapel, abgesicherte Dateispeicherung und Wiederherstellung; Basic/Advanced mit geführtem Einstieg und Tooltips, Originalbilder bis 4096 × 4096 sowie speichersparendere Rasterverarbeitung; weiterhin Editor mit Pfadwerkzeugen, freie zusätzliche Operationen und Arbeitsblätter, Autosave/Wiederherstellung, Bild-/Vektorimporte, Schnitt-/Scanoptionen, Serienexport und Relief mit 16-Bit-/3D-/lokaler Foto-Tiefenschätzung. Verbindung, Referenzfahrt und erste reale Kraftpapier-Kontur-/Rasterversuche am M3 sind bestätigt; vollständige Betriebs-, Schnitt- und Reliefabnahme stehen aus.
+**Entwicklungsstand:** `0.9.0-beta.6-dev` für Ubuntu 26.04 / x86_64. Blazer Studio erfüllt noch nicht den vollständigen Funktionsumfang von LightBurn 2.2.01. Die [Abnahmematrix](docs/FUNCTION_ACCEPTANCE.md) trennt vorhandene Softwarefunktionen, unabhängige Tests und verbleibende Lücken.
+
+Nach der gemeldeten Kollision und dem ausgebliebenen Gehäuselüfter ist der reale Gerätebetrieb gesperrt: Bewegung, Referenzfahrt und Laserfreigabe benötigen getrennte, tatsächlich nachgewiesene Geräteverträge. Ein Profilimport, eine Quittierung oder eine angezeigte Position erteilt diese Freigabe nicht. Der notwendige Inbetriebnahmeworkflow ist noch offen. Simulator, Planung und Datei-Export sind verfügbar; ein Export bestätigt keine Maschinenkalibrierung.
+
+Neu im Entwicklungszweig sind [Startmodi und neun Ursprungspunkte](docs/JOB_PLACEMENT.md), getrennte Geräteinstanzen, [Materialtest-Historie](docs/MATERIAL_TEST_LEDGER.md), Code128-B-Geometrie, [Vektorprüfung](docs/VECTOR_INSPECTION.md), [ausdrücklich geprüfter nativer Grafikimport](docs/NATIVE_COMPATIBILITY.md), portable UI-Einstellungen und [lokale Diagnosevorschau](docs/TECHNICAL_DIAGNOSTICS_PREVIEW.md). Diese Änderungen sind zunächst Quellcode und Softwaretests; sie werden nicht rückwirkend den älteren Paketen oder deren Hardwarebefunden zugerechnet.
 
 **Neu seit beta.2:** `0.9.0-beta.3` ergänzt [Projektname, Notizen, Vorlagen und Dateiverlauf](docs/PROJECTS.md) mit Projektformat 8. Der [geprüfte beta.3-Kandidat](docs/beta/CANDIDATE_BETA3.md) stammt aus Revision `4da2e97`. Der unveränderte beta.2-Kandidat bleibt auf Revision `18ce2e6`. Geräte-/Materialabnahme und externe Bedienung bleiben offen.
 
@@ -28,7 +32,7 @@ Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX
 
 ![Blazer Studio – Basic](assets/basic.png)
 
-Auf Mathias’ Rechner ist der Startmenüeintrag **Blazer Studio** eingerichtet. Die Anwendung startet im Simulator. Im Gerätebereich kann ausdrücklich eine echte GRBL-Verbindung geöffnet werden; dort können die Aktionen reale Bewegung und Laserfreigabe auslösen. Siehe [Gerätebetrieb und Prüfumfang](docs/GRBL_WORKFLOW.md).
+Der vorhandene Startmenüeintrag startet die lokal installierte Fassung. Sie wurde durch diesen Entwicklungszweig nicht automatisch ersetzt; die gemeldeten Hardwarefehler der beta.5.2-local bleiben dokumentiert. Der Entwicklungsstand startet im Simulator und erlaubt eine ausdrücklich gewählte Diagnoseverbindung, gibt reale Bewegung und Laserbetrieb aber noch nicht frei. Siehe [Gerätebetrieb und Prüfumfang](docs/GRBL_WORKFLOW.md).
 
 ## Ziel
 
@@ -39,7 +43,7 @@ Ein angenehmer, moderner Arbeitsablauf für Gravieren und Schneiden: Werkstücke
 - Arbeitsbereiche **Vorbereiten · Vorschau · Gerät · Relief · Werkzeuge**.
 - Große maßstäbliche 2D-Arbeitsfläche mit Raster, Zoom und direkter Objektbearbeitung.
 - Geräte- und Materialprofile sowie Objektliste links; Bearbeitungsparameter rechts.
-- Geführter **Basic-Modus** und vollständiger **Advanced-Modus**.
+- Geführter **Basic-Modus** und erweiterter **Advanced-Modus**.
 - Schnitt- und Gravurebenen mit Leistung, Geschwindigkeit und Durchgängen.
 - Vorschau mit Bearbeitungsreihenfolge, Fahrbewegungen und geometrisch geschätzter Laufzeit.
 - Helles und dunkles Design, skalierbare Darstellung und Tastenkürzel.
@@ -64,9 +68,9 @@ Editor, Jobmodell, Werkzeugwegerzeugung und Geräteadapter sind getrennt. Ein si
 
 ## BlazerX-Unterstützung
 
-Die installierte LightBurn-Konfiguration enthält das Profil **M3 / GRBL**, **200 × 150 mm**, seriell **115200 Baud**, S-Max **1000** und **2 %** für den Fokuspunkt; Z-Steuerung ist deaktiviert. Vorhandene Projekthinweise nennen das Gerät **Blaze X M3 / 5-W-Modul**. Siehe [Profilherkunft](docs/DEVICE_PROFILE.md). Controllerkommunikation, Bewegung und erste Materialwirkung auf Kraftpapier wurden geprüft. Der kurze Fokus-Puls sowie vollständige Betriebs- und Materialfreigaben bleiben separat abzunehmen.
+Die installierte LightBurn-Konfiguration enthält das Profil **M3 / GRBL**, **200 × 150 mm**, seriell **115200 Baud**, S-Max **1000** und **2 %** für den Fokuspunkt; Z-Steuerung ist deaktiviert. Vorhandene Projekthinweise nennen das Gerät **Blaze X M3 / 5-W-Modul**. Siehe [Profilherkunft](docs/DEVICE_PROFILE.md). Historische Kommunikations-, Bewegungs- und Kraftpapierbefunde sind dokumentiert. Nach den später gemeldeten Fehlern bestätigen sie keine sichere aktuelle Koordinaten-/Lüfterzuordnung. Der kurze Fokus-Puls und vollständige Betriebs- und Materialfreigaben bleiben separat abzunehmen.
 
-Weitere Laser sind als langfristiges Produktziel vorgesehen. Der [Mehrgeräteplan](docs/MULTI_DEVICE_PLAN.md) trennt Profil, Laserkopf, Controlleradapter und reale Geräteabnahme. Bekannte abweichende GRBL-XY-Projektprofile sind mit Format 11 offline bearbeitbar, simulierbar und exportierbar. Editor, Planung, Registrierung und Ausgabe verwenden dieselben Profildaten. Die [Controlleradapter](docs/CONTROLLER_ADAPTERS.md) trennen neutrale Bewegungspläne und Geräteausgabe ohne Ersatztreiber für unbekannte Controller. Aktuell bleibt ausschließlich der bisherige M3-Ausgabevertrag für echte Verbindungen verfügbar; weitere Controlleradapter, Profilverwaltung und Geräteabnahmen sind offen. Der beta.5-Kandidat ergänzt die gemeinsame Verbindungsschnittstelle; diese Änderung gehört nicht rückwirkend zum beta.4-Paket.
+Weitere Laser sind als langfristiges Produktziel vorgesehen. Der [Mehrgeräteplan](docs/MULTI_DEVICE_PLAN.md) trennt Profil, Laserkopf, Controlleradapter und reale Geräteabnahme. Bekannte abweichende GRBL-XY-Projektprofile sind mit Format 11 offline bearbeitbar, simulierbar und exportierbar. Editor, Planung, Registrierung und Ausgabe verwenden dieselben Profildaten. Die [Controlleradapter](docs/CONTROLLER_ADAPTERS.md) trennen neutrale Bewegungspläne und Geräteausgabe ohne Ersatztreiber für unbekannte Controller. Aktuell existiert der M3-Diagnoseadapter; reale Ausgabe bleibt bis zur Inbetriebnahme gesperrt. Weitere Controlleradapter und Geräteabnahmen sind offen. Der beta.5-Kandidat ergänzt die gemeinsame Verbindungsschnittstelle; diese Änderung gehört nicht rückwirkend zum beta.4-Paket.
 
 ## Direkte Gerätefunktionen
 

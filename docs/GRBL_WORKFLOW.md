@@ -1,6 +1,6 @@
 # Berechnete Jobs und GRBL
 
-Blazer Studio startet im **Simulator**. Eine echte Verbindung entsteht erst im Bereich **Gerät** durch Auswahl des seriellen Anschlusses und **GRBL verbinden**. Es gibt keine automatische Verbindung, Referenzfahrt oder Jobausführung beim Start.
+Blazer Studio startet im **Simulator**. Eine echte Diagnoseverbindung entsteht erst durch ausdrückliche Auswahl einer gespeicherten Geräteinstanz mit ihrem zugeordneten Anschluss. Es gibt keine automatische Verbindung, Referenzfahrt oder Jobausführung beim Start.
 
 ## Gehäuselüfter am vorhandenen M3
 
@@ -42,14 +42,14 @@ Inbetriebnahmevertrag. Kein neuer Hardwareversuch wurde ausgeführt.
 - Rechtecke, Ellipsen, Textkonturen und unterstützte SVG-Vektoren werden in geometrische Pfade umgewandelt. Text verwendet die gespeicherte Schriftwahl und dieselbe Pfadgeometrie wie der Editor.
 - **Gravieren:** gerichtete Fülllinien mit dem eingestellten Intervall; Winkel, Kreuzschraffur und Überlauf werden im Pfadsatz berücksichtigt. Innenräume bleiben nach der Füllregel frei.
 - **Schneiden:** linearisierte Konturen mit eingestellten Durchgängen. Kleinere Begrenzungen werden vor größeren ausgegeben; dies ist noch keine vollständige Schnittreihenfolgenoptimierung.
-- Die Vorschau zeichnet die berechneten Arbeits- und Leerfahrten. GCode und Live-Übertragung verwenden denselben eingefrorenen Pfadsatz. Die erste Leerfahrt wird ab Arbeitsnull dargestellt; beim realen Start kann die aktuelle Maschinenposition davon abweichen.
+- Die Vorschau zeichnet die berechneten Arbeits- und Leerfahrten. GCode und Live-Übertragung verwenden denselben eingefrorenen Pfadsatz. Eine ausdrücklich bekannte Simulatorposition liefert den laserfreien Anfahrtsstart. Ohne solchen Positionsstand wird der Anfahrtsstart als unbekannt behandelt; es wird kein verlässlicher Arbeitsnullpunkt erfunden. Reale relative Ausgabe bleibt gesperrt.
 - Die Zeitangabe ist eine geometrische Schätzung aus Strecken und Vorschüben, mit angenommenen 3000 mm/min für Leerfahrten. Die angezeigte Dauer ergänzt einen konservativen Start-/Stopp-Ansatz mit 240 mm/s²; die reine Vorschubzeit bleibt als Untergrenze verfügbar. Tatsächliche Eilganggeschwindigkeit, Lookahead und Kommunikationspausen sind nicht gemessen.
 - **GCode** exportiert einen GRBL-Job mit Millimetern, absoluten Koordinaten, G54, M4, der Leistungsskala des Projektprofils (beim M3 S-Max 1000) und abschließend M5/S0. Die Datei enthält diese Voraussetzungen als Kommentar. Sie darf nicht ungeprüft auf anders konfigurierten Controllern ausgeführt werden.
 - Die Simulation spielt die berechneten Bewegungen in 16 Sekunden ab. Ihr Zeitraffer ist keine Messung der tatsächlichen Jobdauer.
 
 Aktive Objekte außerhalb der Fläche des Projektprofils (beim M3 200 × 150 mm), nicht auswertbare Inhalte oder zu komplexe Jobs verhindern die gesamte Ausgabe. Es werden keine stillschweigend unvollständigen Jobs exportiert. Grenzen: 500000 Bewegungssegmente, begrenzte SVG-/Bildgröße. Ein globaler SVG-Clip in Benutzerkoordinaten ist unterstützt. Mehrere/gemischte Clips, Bounding-Box-/CSS-Clips und eingebettete Rasterinhalte werden noch abgelehnt. SVG-Dateien bleiben im Editor zusammenhängende Objekte. Farben werden nicht automatisch zu getrennten Laseroperationen.
 
-Die XY-Bewegungsplanung ist von der Controller-Kodierung getrennt. Ein berechneter Pfad allein bedeutet weder einen vorhandenen Ausgabeadapter noch eine geprüfte Geräteverbindung. GCode-Export verlangt einen vollständigen passenden Textpuffer; fehlende Adapter, ungültige Werte und Abbruch erzeugen keine teilweise oder nur aus einem Zeilenumbruch bestehende Datei. Der bestehende M3-GCode bleibt dabei unverändert.
+Die XY-Bewegungsplanung ist von der Controller-Kodierung getrennt. Ein berechneter Pfad allein bedeutet weder einen vorhandenen Ausgabeadapter noch eine geprüfte Geräteverbindung. GCode-Export verlangt einen vollständigen passenden Textpuffer; fehlende Adapter, ungültige Werte und Abbruch erzeugen keine teilweise oder nur aus einem Zeilenumbruch bestehende Datei. Ungeprüfte automatische M8/M9-Ausgaben wurden entfernt; daraus entsteht keine bestätigte Lüftersteuerung.
 
 ## Bilder und Materialtests
 
@@ -65,7 +65,7 @@ Der Entwicklungsstand nach beta.2 speichert **Projektformat 8** mit [Projektnoti
 
 Jeder berechnete Auftrag enthält sein eingefrorenes Geräteprofil. Vor der Übertragung muss dessen Ausgabe-Fingerprint zur geprüften Verbindung passen. Änderungen an Arbeitsraum, Leistungsskala, Kopf, Controllerparametern oder erklärten Fähigkeiten verhindern die Übertragung eines alten Auftrags vor dem ersten Befehl. Anzeigename und Herkunftsnotizen sind davon ausgenommen. Vorberechnete Befehle werden ausschließlich aus dem eigenen Auftragsprofil erzeugt; ein Hintergrund-Ergebnis für ein anderes Profil wird verworfen. Aktuell bleibt das M3 das einzige an die Oberfläche und reale Verbindung angebundene Profil.
 
-Die aktuelle echte M3-Anbindung prüft GRBL 1.1 beziehungsweise den am Blaze X gefundenen Grbl-ESP32-Fork 1.3a, `$30=1000`, `$31=0`, `$32=1`, Statusausgabe in mm (`$13=0`), G54 und die hinterlegten 200 × 150 mm (`$130/$131`). Sie schreibt diese Firmwareeinstellungen nicht automatisch um. Erst ein passender Leerlauf mit gültiger Arbeitsposition, bestätigter Nullleistung und ohne aktive gemeldete Eingänge erlaubt einen Job. Ein Status mit fehlender oder ungültiger Position/Leistung übernimmt keine frühere Freigabe.
+Die aktuelle echte M3-Anbindung prüft GRBL 1.1 beziehungsweise den am Blaze X gefundenen Grbl-ESP32-Fork 1.3a, `$30=1000`, `$31=0`, `$32=1`, Statusausgabe in mm (`$13=0`), G54 und die hinterlegten 200 × 150 mm (`$130/$131`). Sie schreibt diese Firmwareeinstellungen nicht automatisch um. Ein passender Leerlauf mit gültiger Arbeitsposition, bestätigter Nullleistung und ohne aktive gemeldete Eingänge ist nur eine Voraussetzung. Zusätzlich fehlen derzeit die tatsächlichen Koordinaten-/Homing- und Zubehörverträge; ohne diese erlaubt die Anwendung keinen realen Job. Ein Status mit fehlender oder ungültiger Position/Leistung übernimmt keine frühere Freigabe.
 
 Jobübertragung verwendet Zeichenkredite: höchstens 100 Bytes stehen gleichzeitig ohne `ok` im RX-Puffer. Jede Zeile bleibt ihrer Bestätigung zugeordnet; einzelne manuelle Aktionen und die Konfigurationsabfrage bleiben sequenziell. Zusätzliche Status- und Meldungszeilen gelten nicht als Bestätigung. Nach der letzten Bestätigung wartet der Auftrag noch auf eine neue **Idle**-Meldung. Pause benutzt Feed Hold, Fortsetzen Cycle Start; Stop benutzt Feed Hold und Soft-Reset und setzt keinen Auftrag automatisch fort. Fehler, Alarm oder Kommunikationsausfall brechen die Host-Übertragung ab.
 

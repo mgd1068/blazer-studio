@@ -1,5 +1,7 @@
 # Blazer Studio – Software-Testkandidat
 
+**Entwicklungszweig beta.6-dev:** Reale Bewegung einschließlich Referenzfahrt und Laserfreigabe bleibt nach der gemeldeten Kollision bis zur nachgewiesenen Geräteeinrichtung gesperrt. Die folgenden Simulatorfunktionen sind nutzbar. Ältere Paketberichte und Materialversuche sind keine Freigabe dieses neuen Stands. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md) und [Koordinatenvertrag](../MOTION_SAFETY.md).
+
 Getestete Paketplattform: **Ubuntu 26.04, x86_64**. Andere Linux-Versionen sind noch nicht als Paketplattform bestätigt. Es handelt sich um einen Software-Testkandidaten; Geräte-/Materialabnahme und externe Bedienungstests sind offen.
 
 Bei jedem normalen Programmstart erscheint ein zweisprachiger Sicherheitshinweis, auch nach abgeschlossener Einführung und vor einer Wiederherstellungsentscheidung. **Laser niemals unbeaufsichtigt betreiben / Never operate the laser unattended.** Ein Verbindungsabbruch oder hängender Controller kann den Laser eingeschaltet lassen; Software kann dann kein Laser-Aus garantieren. Während der gesamten Bearbeitung am Gerät bleiben und bereit sein, die Stromversorgung direkt am Gerät zu unterbrechen. Mit **Verstanden / I understand** bestätigen; eine dauerhafte Abschaltung dieses Hinweises gibt es nicht. Diese Ergänzung gehört zum beta.5-Kandidaten und noch nicht zum unveränderten beta.4-Paket.
@@ -29,7 +31,7 @@ Der Hintergrundauftrag lässt sich abbrechen und neu berechnen. **Berechnung abb
 
 ## Hilfe und Fehlerberichte
 
-Unter **Hilfe / Beta** findest du Versionsdaten, Einschränkungen und die Einführung. **Diagnosebericht speichern** erstellt lokal eine JSON-Datei mit ausgewählten technischen Daten. Projekte, Bilder, Dateipfade, Materialnotizen und rohe Geräteprotokolle sind nicht enthalten. Du kannst die Datei ansehen und selbst an einen GitHub-Fehlerbericht anhängen. Es erfolgt kein automatischer Versand.
+Unter **Hilfe / Beta** findest du Versionsdaten, Einschränkungen und die Einführung. **Diagnosebericht speichern** zeigt den vollständigen Inhalt vor dem lokalen Speichern. Die Standarddiagnose enthält keine Projekte, Bilder, Dateipfade, Materialnotizen oder rohe Geräteprotokolle. Nur nach ausdrücklicher Auswahl kommen begrenzte numerische Controllerdaten und eine typisierte Chronologie hinzu. Gespeichert wird genau die angezeigte Momentaufnahme. Du entscheidest anschließend selbst über eine Weitergabe; es erfolgt kein automatischer Versand.
 
 Für einen hilfreichen Bericht: genaue Version, Schritte, erwartetes und tatsächliches Ergebnis sowie eine kleine unkritische Beispieldatei angeben. Das [Testprotokoll](TEST_PROTOCOL.md) hilft beim strukturierten Test.
 
