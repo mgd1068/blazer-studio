@@ -127,6 +127,7 @@ ControllerStatus ControllerRuntimeSession::status() const {
                          result.runtimeHeartbeatAgeMs >= 0 && result.runtimeHeartbeatAgeMs <= 1000;
     if (!result.statusFresh) {
         result.ready = result.verified = result.overridesReady = false;
+        result.holdConfirmed=false;
         if (result.motionSafetyError.isEmpty())
             result.motionSafetyError = "Aktueller Runtime-/Controllerstatus fehlt.";
     }
@@ -524,7 +525,7 @@ void ControllerRuntimeWorker::drain() {
             if(!m_core->paused)m_core->pause(); // Never toggle a delayed hold into resume.
             break;
         case Kind::Resume:
-            if(!m_core->paused)break;
+            if(!m_core->paused||m_core->controllerState!="Hold"||m_core->firing||m_focusActive)break;
             if (!m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty())
                 m_core->stop();
             else
@@ -717,6 +718,8 @@ void ControllerRuntimeWorker::publish(bool finishDispatch) {
     const auto now = nowMs();
     status.connectionEpoch = m_connectionEpoch;
     status.coordinateEpoch=m_coordinateEpoch;
+    status.holdConfirmed=m_core->paused&&m_core->controllerState=="Hold"&&!m_core->firing&&
+        !m_core->homingPending&&!m_core->awaitingReset&&!m_core->handshaking;
     status.sequence = ++m_sequence;
     status.opening = m_core->awaitingReset || m_core->handshaking;
     status.accessoryLeaseActive = m_accessory.activeLease();

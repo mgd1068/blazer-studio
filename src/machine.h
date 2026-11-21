@@ -29,6 +29,7 @@ class Machine : public Simulator {
     Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
     Q_PROPERTY(QString prepareReason READ prepareReason NOTIFY changed)
     Q_PROPERTY(QString nativeInputSafetyError READ nativeInputSafetyError NOTIFY changed)
+    Q_PROPERTY(bool holdConfirmed READ holdConfirmed NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
     explicit Machine(Document *document, QObject *parent = nullptr,
@@ -84,6 +85,9 @@ class Machine : public Simulator {
     bool jobPrepared() const;
     QString prepareReason() const;
     QString nativeInputSafetyError() const;
+    bool holdConfirmed() const {
+        return !live ? Simulator::paused() : session && session->status().holdConfirmed;
+    }
     Q_INVOKABLE void registerFocusControl(QObject *control);
     // Registration/eligibility only. Intents come exclusively from native events.
     Q_INVOKABLE void registerNativeActionControl(QObject *control,const QString &action,

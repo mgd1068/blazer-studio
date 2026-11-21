@@ -225,7 +225,7 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
             std::trunc(p.toDouble())!=p.toDouble()||f.toDouble()<10||f.toDouble()>200||p.toDouble()<10||p.toDouble()>100||!overridesReady())return {};
     } else if(!arguments.isEmpty())return {};
     if(action=="home") {if(status.busy||!status.homingSafetyError.isEmpty())return {};}
-    else if(action=="resume") {if(!status.paused||!processingSafetyErrors().isEmpty())return {};}
+    else if(action=="resume") {if(!status.paused||!status.holdConfirmed||status.firing||status.accessoryFocusActive||!processingSafetyErrors().isEmpty())return {};}
     else if(action!="override") {
         if(!status.ready||status.busy||status.firing||!status.verified||!status.positionReferenced||!status.motionSafetyError.isEmpty())return {};
         if((action=="start"||action=="focus")&&!processingSafetyErrors().isEmpty())return {};
