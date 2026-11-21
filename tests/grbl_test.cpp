@@ -2,6 +2,10 @@
 #include "grbl.h"
 #include "machine.h"
 #include <QJsonDocument>
+#include <QClipboard>
+#include <QFile>
+#include <QGuiApplication>
+#include <QTemporaryDir>
 #include <QSocketNotifier>
 #include <QtTest>
 #include <fcntl.h>
@@ -229,6 +233,231 @@ class GrblTest : public QObject {
             QTRY_VERIFY(session.workZero && session.workZero->modalReadback);
     }
   private slots:
+    void actualMachineRegistrationBlocksHeavyDocumentSideEffects_data() {
+        QTest::addColumn<QString>("activity");
+        for (const auto &activity : {"job", "paused-job", "jog", "focus", "frame", "home", "zero",
+                                     "reset", "handshake", "lease-with-lost-flags"})
+            QTest::newRow(activity) << QString(activity);
+    }
+    void actualMachineRegistrationBlocksHeavyDocumentSideEffects() {
+        QFETCH(QString, activity);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto target = QUrl::fromLocalFile(dir.filePath("sentinel.blazer"));
+        QFile output(target.toLocalFile());
+        QVERIFY(output.open(QIODevice::WriteOnly));
+        QCOMPARE(output.write("unchanged"), qint64(9));
+        output.close();
+        const auto svg = QUrl::fromLocalFile(dir.filePath("import.svg"));
+        QFile input(svg.toLocalFile());
+        QVERIFY(input.open(QIODevice::WriteOnly));
+        QVERIFY(input.write("<svg xmlns='http://www.w3.org/2000/svg' width='20mm' height='20mm' "
+                            "viewBox='0 0 20 20'><rect x='1' y='2' width='3' height='4'/></svg>") >
+                0);
+        input.close();
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+        const auto before = document.projectBytes();
+        QVERIFY(!before.isEmpty());
+        const auto history = document.historyPosition();
+        const auto count = document.items().size();
+        const auto fileUrl = document.fileUrl();
+        QSignalSpy guardChanges(&document, &Document::synchronousWorkGuardChanged);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        const auto cut = controller.commands.size();
+        const auto initialResets = controller.realtime.count(char(0x18));
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        if (activity == "job" || activity == "paused-job" || activity == "lease-with-lost-flags")
+            machine.start();
+        else if (activity == "jog")
+            machine.jog(1, 0);
+        else if (activity == "focus")
+            machine.focus(true);
+        else if (activity == "frame")
+            machine.frame(document.framingBounds("job"));
+        else if (activity == "home")
+            machine.home();
+        else if (activity == "zero")
+            machine.setWorkZero();
+        else if (activity == "reset" || activity == "handshake") {
+            machine.stop();
+            QTRY_COMPARE(controller.realtime.count(char(0x18)), initialResets + 1);
+            if (activity == "handshake") {
+                controller.reply("Grbl 1.3a ['$' for help]\r\n");
+                QTRY_VERIFY(grbl->handshaking);
+            }
+        }
+        if (activity == "paused-job")
+            machine.pause();
+        if (activity == "lease-with-lost-flags") {
+            QVERIFY(machine.accessory.activeLease());
+            machine.accessoryJobActive = machine.accessoryFocusActive = false;
+            for (int i = 0; i < 80 && machine.busy(); ++i) {
+                if (grbl->waitingAck)
+                    controller.reply("ok\r\n");
+                if (grbl->waitingIdle)
+                    controller.report();
+                QTest::qWait(2);
+            }
+            QTRY_VERIFY(machine.ready());
+            QVERIFY(machine.accessory.activeLease());
+            QVERIFY(!machine.accessoryJobActive && !machine.accessoryFocusActive);
+        }
+        QVERIFY(!document.save(target));
+        // Observe the actual Machine signal registration; no fake guard was supplied.
+        QVERIFY(!guardChanges.isEmpty());
+        QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
+        QVERIFY(output.open(QIODevice::ReadOnly));
+        QCOMPARE(output.readAll(), QByteArray("unchanged"));
+        output.close();
+        QVERIFY(!document.importFile(svg));
+        auto clipboard = QGuiApplication::clipboard();
+        clipboard->setText("offline-machine-guard-sentinel");
+        QVERIFY(!document.copySelectionToClipboard());
+        QCOMPARE(clipboard->text(), QString("offline-machine-guard-sentinel"));
+        const QString pasteSvg =
+            "<svg xmlns='http://www.w3.org/2000/svg' width='10mm' height='10mm' viewBox='0 0 10 "
+            "10'><rect width='3' height='4'/></svg>";
+        clipboard->setText(pasteSvg);
+        QVERIFY(!document.pasteFromClipboard());
+        QCOMPARE(clipboard->text(), pasteSvg);
+        QVERIFY(document.projectBytes().isEmpty());
+        QCOMPARE(document.items().size(), count);
+        QCOMPARE(document.historyPosition(), history);
+        QCOMPARE(document.fileUrl(), fileUrl);
+        const auto blockedSignals = guardChanges.size();
+        if (activity == "zero") {
+            acknowledgeWorkZero(controller, *grbl, cut);
+            controller.report();
+            QTRY_VERIFY(machine.ready());
+            QCOMPARE(controller.realtime.count(char(0x18)), initialResets);
+        } else {
+            if (activity != "reset")
+                machine.stop(); // Reset row already requested its stop before these guarded calls.
+            QVERIFY(
+                !document.synchronousWorkBlockReason().isEmpty()); // Reset-pending is still active.
+            const int expectedResets = initialResets + ((activity == "handshake") ? 2 : 1);
+            QTRY_COMPARE(controller.realtime.count(char(0x18)), expectedResets);
+            controller.autoAck = controller.respondToStatus = true;
+            controller.reply("Grbl 1.3a ['$' for help]\r\n");
+            QTRY_VERIFY(machine.ready());
+        }
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+        QVERIFY(guardChanges.size() > blockedSignals);
+        QCOMPARE(document.projectBytes(), before);
+        QVERIFY(document.save(target));
+        QVERIFY(
+            document.importFile(svg)); // The same valid fixture is admitted after physical idle.
+        QVERIFY(document.pasteFromClipboard());
+        clipboard->clear();
+    }
+    void lightNextDesignEditsDoNotChangeTheAlreadyStreamingJob() {
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        const auto expected = document.job().gcode();
+        QVERIFY(!expected.isEmpty());
+        controller.autoAck = controller.respondToStatus = false;
+        const auto cut = controller.commands.size();
+        QSignalSpy guardChanges(&document, &Document::synchronousWorkGuardChanged);
+        machine.start();
+        QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
+        document.setProperty("x", 42.);
+        document.setProperty("width", 25.);
+        document.setProperty("name", QString("next design"));
+        QCOMPARE(document.items().front().bounds.x(), 42.);
+        QCOMPARE(document.items().front().bounds.width(), 25.);
+        QCOMPARE(document.items().front().name, QString("next design"));
+        QVERIFY(document.job().gcode() != expected);
+        QVERIFY(machine.busy() && machine.accessory.activeLease());
+        QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        for (int i = 0; i < 80 && machine.busy(); ++i) {
+            if (grbl->waitingAck)
+                controller.reply("ok\r\n");
+            if (grbl->waitingIdle)
+                controller.report();
+            QTest::qWait(2);
+        }
+        QTRY_VERIFY(machine.ready());
+        QCOMPARE(controller.commands.mid(cut), expected);
+        QVERIFY(!machine.accessory.activeLease());
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+        QVERIFY(!document.projectBytes().isEmpty());
+        QVERIFY(guardChanges.size() > 1);
+    }
+    void simulatorActivityNeverActivatesThePhysicalSynchronousGuard_data() {
+        QTest::addColumn<QString>("activity");
+        QTest::newRow("job") << QString("job");
+        QTest::newRow("focus") << QString("focus");
+        QTest::newRow("frame") << QString("frame");
+    }
+    void simulatorActivityNeverActivatesThePhysicalSynchronousGuard() {
+        QFETCH(QString, activity);
+        QTemporaryDir dir;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.simulation() && machine.ready());
+        if (activity == "job")
+            machine.start();
+        else if (activity == "focus")
+            machine.focus(true);
+        else
+            machine.frame(document.framingBounds("job"));
+        QVERIFY(machine.busy() || machine.firing());
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+        QVERIFY(!document.projectBytes().isEmpty());
+        QVERIFY(document.save(QUrl::fromLocalFile(dir.filePath("simulator.blazer"))));
+        machine.stop();
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+    }
+    void destroyedPhysicalMachineReleasesTheActualDocumentGuardAndNotifications() {
+        QTemporaryDir dir;
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        auto machine = std::make_unique<Machine>(&document);
+        QPointer<Machine> owner = machine.get();
+        QVERIFY(machine->connectHardware(controller.port));
+        QTRY_VERIFY(machine->ready());
+        requireReference(*machine);
+        controller.autoAck = controller.respondToStatus = controller.respondToReset = false;
+        machine->start();
+        QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
+        QSignalSpy guardChanges(&document, &Document::synchronousWorkGuardChanged);
+        machine.reset();
+        QVERIFY(owner.isNull());
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+        QVERIFY(!guardChanges.isEmpty());
+        bool lateQuery = false;
+        QTimer::singleShot(80, &document,
+                           [&] { lateQuery = document.synchronousWorkBlockReason().isEmpty(); });
+        QTest::qWait(250); // Cross old watchdog/poll callbacks after owner teardown.
+        QVERIFY(lateQuery);
+        QVERIFY(document.synchronousWorkBlockReason().isEmpty());
+        QVERIFY(!document.projectBytes().isEmpty());
+        QVERIFY(document.save(QUrl::fromLocalFile(dir.filePath("after-owner.blazer"))));
+    }
     void machineWorkZeroSurvivesDelayedAcknowledgementsWithoutFaultingFlow_data() {
         QTest::addColumn<QPointF>("machinePoint");
         QTest::addColumn<QPointF>("oldOffset");
