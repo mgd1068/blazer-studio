@@ -1,4 +1,5 @@
 #pragma once
+#include "controllerdiagnostics.h"
 #include "controllersession.h"
 #include "job.h"
 #include <QElapsedTimer>
@@ -32,6 +33,7 @@ class GrblSession : public ControllerSession {
                 homingSafetyError()};
     }
     QStringList logEntries() const override { return log; }
+    QVariantMap diagnosticSnapshot() const override;
     const DeviceProfile &deviceProfile() const override { return m_deviceProfile; }
     void close() override;
     bool connected() const { return serial.isOpen(); }
@@ -70,6 +72,13 @@ class GrblSession : public ControllerSession {
     friend class GrblTest; // Offline PTY fixtures may supply a synthetic machine contract.
     bool commands(const QStringList &lines, bool buffered = false);
     bool statusFresh() const;
+    ControllerDiagnostics::LiveState diagnosticState() const;
+    ControllerDiagnostics::Denial diagnosticMotionDenial() const;
+    void auditDispatch(const QByteArray &block);
+    ControllerDiagnostics diagnostic;
+    bool diagnosticNormalizedAck = false;
+    int diagnosticSpindle = 0;
+    double diagnosticPower = 0;
     // Deliberately absent on real sessions: neither a profile nor a homing ACK
     // proves signed travel limits or the active WCO/G54 modal contract. A future
     // commissioning workflow must bind these to a verified controller identity.
@@ -82,7 +91,9 @@ class GrblSession : public ControllerSession {
     void receive();
     void line(const QByteArray &line);
     void pump();
-    void fail(const QString &message);
+    void
+    fail(const QString &message,
+         ControllerDiagnostics::FaultCause cause = ControllerDiagnostics::FaultCause::Unspecified);
     void append(const QString &message);
     void handshake();
     bool insideMachineBed(const QPointF &workPoint) const;

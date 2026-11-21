@@ -156,6 +156,80 @@ class GrblTest : public QObject {
         QVERIFY(session.motionSafetyError().isEmpty());
     }
   private slots:
+    void diagnosticChronologyRetainsOnlyFirstApproachAndPoweredTargetWithProtocolAcks() {
+        PlantPort port;
+        GrblSession session;
+        QVERIFY(session.open(port.endpoint));
+        QTRY_VERIFY(session.ready());
+        homeAndSupplySyntheticContract(session, {0, 0, 200, 150});
+        session.jog(71, 47);
+        QTRY_VERIFY(session.ready());
+        QCOMPARE(port.plant.physical, QPointF(73, 49));
+        session.start(rectangle(200, 150));
+        QTRY_VERIFY(!session.busy());
+        const auto snapshot = session.diagnosticSnapshot();
+        const auto context = snapshot["streamStartContext"].toMap();
+        QVERIFY(context["homingProtocolReferenced"].toBool());
+        QVERIFY(context["homingContract"].toBool());
+        QVERIFY(context["machineEnvelopeContract"].toBool());
+        QVERIFY(context["modalContract"].toBool());
+        QCOMPARE(context["readback"].toMap()["$30"].toMap()["value"].toInt(), 1000);
+        QCOMPARE(context["modalReadback"].toMap()["workCoordinateCode"].toMap()["value"].toInt(),
+                 54);
+        QCOMPARE(context["modalReadback"].toMap()["unitsCode"].toMap()["value"].toInt(), 21);
+        QCOMPARE(context["workXY"].toMap()["xMm"].toDouble(), 73.);
+        QCOMPARE(context["machineXY"].toMap()["yMm"].toDouble(), 49.);
+        QVERIFY(context["wcoXY"].toMap()["known"].toBool());
+        QVERIFY(context["workXY"].toMap()["ageAtStartMs"].toLongLong() >= 0);
+        const auto events = snapshot["events"].toList();
+        QVariantMap approach, target;
+        int coordinateEvents = 0;
+        quint64 lastSequence = 0;
+        qint64 lastTime = -1;
+        for (const auto &item : events) {
+            const auto event = item.toMap();
+            QVERIFY(event["sequence"].toULongLong() > lastSequence);
+            QVERIFY(event["elapsedMs"].toLongLong() >= lastTime);
+            lastSequence = event["sequence"].toULongLong();
+            lastTime = event["elapsedMs"].toLongLong();
+            if (event.contains("xMm"))
+                ++coordinateEvents;
+            if (event["event"] != "commandQueued")
+                continue;
+            if (event["command"] == "firstApproachRequested")
+                approach = event;
+            if (event["command"] == "firstPoweredTargetRequested")
+                target = event;
+        }
+        QCOMPARE(coordinateEvents, 2); // No remaining rectangle vertices/toolpath retained.
+        QCOMPARE(approach["acknowledgement"].toString(), QString("acknowledged"));
+        QCOMPARE(target["acknowledgement"].toString(), QString("acknowledged"));
+        QCOMPARE(approach["xMm"].toDouble(), 0.);
+        QCOMPARE(approach["yMm"].toDouble(), 0.);
+        QCOMPARE(target["xMm"].toDouble(), 200.);
+        QCOMPARE(target["yMm"].toDouble(), 0.);
+        QCOMPARE(target["requestedS"].toDouble(), 200.);
+        QVERIFY(approach["sequence"].toULongLong() < target["sequence"].toULongLong());
+        for (const auto &dispatch : {approach, target}) {
+            bool ackFound = false;
+            for (const auto &item : events) {
+                const auto ack = item.toMap();
+                if (ack["event"] == "commandAcknowledged" &&
+                    ack["dispatchSequence"] == dispatch["sequence"]) {
+                    QVERIFY(ack["sequence"].toULongLong() > dispatch["sequence"].toULongLong());
+                    ackFound = true;
+                }
+            }
+            QVERIFY(ackFound);
+        }
+        const auto serialized =
+            QJsonDocument(QJsonObject::fromVariantMap(snapshot)).toJson(QJsonDocument::Compact);
+        QVERIFY(serialized.size() <= ControllerDiagnostics::maximumSnapshotBytes);
+        QVERIFY(!serialized.contains(port.endpoint.toUtf8()));
+        QVERIFY(!serialized.contains("G1 X"));
+        QVERIFY(!serialized.contains("G0 X"));
+        QCOMPARE(port.plant.limits, 0); // Separate plant evidence, never an audit claim.
+    }
     void reportedZeroCanHideANonoriginPhysicalHeadAndCauseACollision() {
         VirtualGrblPlant plant({0, 0, 200, 150}, {80, 60}, {}, {2, 2});
         QCOMPARE(plant.counter(), QPointF(0, 0));

@@ -5,6 +5,7 @@
 #include <QSocketNotifier>
 #include <QtTest>
 #include <fcntl.h>
+#include <limits>
 #include <pty.h>
 #include <termios.h>
 #include <unistd.h>
@@ -19,7 +20,7 @@ class Controller : public QObject {
     bool respondToStatus = true, interleaveSettingsOnce = false;
     bool interleaveSettingsAlways = false;
     QByteArray minimumPower = "0";
-    bool respondToReset = true, holdBlocksCommands = false;
+    bool respondToReset = true, holdBlocksCommands = false, rejectHandshakeSafetyOff = false;
     QString resetState = "Idle";
     int settingsRequests = 0;
     QSocketNotifier *notifier = nullptr;
@@ -137,7 +138,8 @@ class Controller : public QObject {
                                   "$130=200\r\n$131=150\r\n");
                         }
                         if (autoAck)
-                            reply("ok\r\n");
+                            reply(rejectHandshakeSafetyOff && line == "M5 S0" ? "error:9\r\n"
+                                                                              : "ok\r\n");
                     } else
                         buffer += c;
                 }
@@ -282,6 +284,219 @@ class GrblTest : public QObject {
         QVERIFY(!controller.commands.contains("M9"));
         QVERIFY(!machine.accessoryJobActive);
     }
+    void diagnosticDoesNotMislabelNormalizedHandshakeRejectionAsAnAcknowledgement() {
+        Controller controller;
+        controller.resetState = "Alarm";
+        controller.rejectHandshakeSafetyOff = true;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_COMPARE(session.state, QString("Alarm"));
+        const auto snapshot = session.diagnosticSnapshot();
+        const auto events = snapshot["events"].toList();
+        quint64 dispatch = 0;
+        bool rejection = false;
+        for (const auto &item : events) {
+            const auto event = item.toMap();
+            if (event["event"] == "commandQueued" && event["command"] == "safetyOffRequested") {
+                QCOMPARE(event["acknowledgement"].toString(), QString("rejectedByController"));
+                dispatch = event["sequence"].toULongLong();
+            }
+        }
+        QVERIFY(dispatch > 0);
+        for (const auto &item : events) {
+            const auto event = item.toMap();
+            if (event["dispatchSequence"].toULongLong() != dispatch)
+                continue;
+            QVERIFY(event["event"] != "commandAcknowledged");
+            if (event["event"] == "commandRejected") {
+                QCOMPARE(event["code"].toInt(), 9);
+                rejection = true;
+            }
+        }
+        QVERIFY(rejection);
+        QCOMPARE(snapshot["counters"].toMap()["commandRejectionsReceived"].toInt(), 1);
+    }
+    void diagnosticFaultPreservesLastNumericReadbackWithoutClaimingCurrentFreshness() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        controller.respondToStatus = false;
+        controller.reply("<Idle|MPos:12,34,0|WCO:5,6,0|FS:0,20>\r\n");
+        QTRY_VERIFY(!session.connected());
+        const auto snapshot = session.diagnosticSnapshot();
+        const auto machine = snapshot["positions"].toMap()["machineXY"].toMap();
+        QVERIFY(machine["known"].toBool());
+        QVERIFY(!machine["fresh"].toBool());
+        QCOMPARE(machine["xMm"].toDouble(), 12.);
+        QCOMPARE(machine["yMm"].toDouble(), 34.);
+        const auto output = snapshot["controllerOutputReadback"].toMap();
+        QVERIFY(output["known"].toBool());
+        QVERIFY(!output["fresh"].toBool());
+        QCOMPARE(output["value"].toDouble(), 20.);
+        QVERIFY(!snapshot["state"].toMap()["statusFresh"].toBool());
+        QVERIFY(!snapshot["state"].toMap()["positionKnown"].toBool());
+        bool cause = false;
+        for (const auto &item : snapshot["events"].toList()) {
+            const auto event = item.toMap();
+            cause |= event["event"] == "fault" && event["reason"] == "idleOutputReported";
+        }
+        QVERIFY(cause);
+    }
+    void diagnosticRingIsBoundedAndNeverManufacturesInvalidNumericValues() {
+        using D = ControllerDiagnostics;
+        D audit;
+        D::LiveState live;
+        for (int i = 0; i < 10000; ++i) {
+            audit.request(D::Action::Start);
+            audit.deny(D::Action::Start, D::Denial::MotionContract);
+        }
+        audit.setting(3, 5.);
+        audit.setting(24, std::numeric_limits<double>::quiet_NaN());
+        audit.setting(999, 123456.);
+        audit.coordinate(D::Coordinate::Machine,
+                         QPointF(std::numeric_limits<double>::infinity(), 0));
+        auto snapshot = audit.snapshot(live);
+        const auto encoded =
+            QJsonDocument(QJsonObject::fromVariantMap(snapshot)).toJson(QJsonDocument::Compact);
+        QVERIFY(encoded.size() <= D::maximumSnapshotBytes);
+        const auto events = snapshot["events"].toList();
+        QCOMPARE(events.size(), D::maximumEvents);
+        QVERIFY(snapshot["droppedEvents"].toULongLong() >= 19936);
+        quint64 previousSequence = 0;
+        qint64 previousTime = -1;
+        for (const auto &item : events) {
+            const auto event = item.toMap();
+            QVERIFY(event["sequence"].toULongLong() > previousSequence);
+            QVERIFY(event["elapsedMs"].toLongLong() >= previousTime);
+            previousSequence = event["sequence"].toULongLong();
+            previousTime = event["elapsedMs"].toLongLong();
+        }
+        const auto readback = snapshot["readback"].toMap();
+        QCOMPARE(readback["$3"].toMap()["value"].toDouble(), 5.);
+        QVERIFY(!readback["$24"].toMap()["known"].toBool());
+        QVERIFY(!readback["$24"].toMap().contains("value"));
+        QVERIFY(!readback.contains("$999"));
+        const auto machine = snapshot["positions"].toMap()["machineXY"].toMap();
+        QVERIFY(!machine["known"].toBool());
+        QVERIFY(!machine.contains("xMm"));
+
+        D shape;
+        for (auto key : D::settingKeys)
+            shape.setting(key, 1e9);
+        shape.coordinate(D::Coordinate::Work, QPointF(1e9, -1e9));
+        shape.beginStream(true, live);
+        for (int i = 0; i < 100; ++i) {
+            shape.queued(D::Command::FirstApproachRequested, QPointF(i, i));
+            shape.queued(D::Command::FirstPoweredTargetRequested, QPointF(i, i), 1e9);
+            shape.queued(D::Command::SafetyOff, QPointF(i, i)); // Must not smuggle coordinates.
+        }
+        auto bounded = shape.snapshot(live);
+        int coordinateEvents = 0;
+        for (const auto &item : bounded["events"].toList())
+            if (item.toMap().contains("xMm"))
+                ++coordinateEvents;
+        QCOMPARE(coordinateEvents, 2);
+        QVERIFY(QJsonDocument(QJsonObject::fromVariantMap(bounded))
+                    .toJson(QJsonDocument::Compact)
+                    .size() <= D::maximumSnapshotBytes);
+
+        // If an instrumentation caller ever exceeds the bounded pending window,
+        // old ACKs must not be misattributed to retained newer dispatches.
+        D pending;
+        for (int i = 0; i < 100; ++i)
+            pending.queued(D::Command::SafetyOff);
+        for (int i = 0; i < 36; ++i)
+            pending.acknowledged();
+        auto retained = pending.snapshot(live)["events"].toList();
+        QCOMPARE(retained.last().toMap()["acknowledgement"].toString(), QString("pending"));
+        for (int i = 0; i < 64; ++i)
+            pending.acknowledged();
+        const auto counts = pending.snapshot(live)["counters"].toMap();
+        QCOMPARE(counts["acknowledgementsReceived"].toInt(), 100);
+        QCOMPARE(counts["pendingTrackingOverflows"].toInt(), 36);
+        QCOMPARE(counts["unmatchedAcknowledgements"].toInt(), 0);
+    }
+    void diagnosticSnapshotRedactsEndpointPayloadsAndInvalidReadback() {
+        Controller controller;
+        GrblSession session;
+        QCOMPARE(session.ControllerSession::diagnosticSnapshot(),
+                 QVariantMap({{"supported", false}}));
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        controller.respondToStatus = false;
+        const QByteArray secret("PRIVATE_ENDPOINT_CONTROLLER_PROJECT_TOKEN_730198");
+        controller.reply("[VER:1.3a." + secret + ":]\r\n[MSG:" + secret + "]\r\n" + secret +
+                         "\r\n");
+        controller.reply("$3=5\r\n$5=1\r\n$20=1\r\n$21=1\r\n$23=3\r\n$24=100\r\n$25=500\r\n$26="
+                         "250\r\n$27=2\r\n$999=123\r\n$24=" +
+                         secret + "\r\n");
+        controller.reply("<" + secret + "|MPos:nan,0,0|WCO:nan,0,0|FS:0,0>\r\n");
+        QTRY_VERIFY(!session.ready());
+        const auto snapshot = session.diagnosticSnapshot();
+        const auto bytes =
+            QJsonDocument(QJsonObject::fromVariantMap(snapshot)).toJson(QJsonDocument::Compact);
+        QVERIFY(!bytes.contains(secret));
+        QVERIFY(!bytes.contains(controller.port.toUtf8()));
+        QVERIFY(!bytes.contains("Grbl 1.3a"));
+        QVERIFY(!bytes.contains("[MSG:"));
+        QVERIFY(bytes.size() <= ControllerDiagnostics::maximumSnapshotBytes);
+        const auto readback = snapshot["readback"].toMap();
+        QCOMPARE(readback["$23"].toMap()["value"].toInt(), 3);
+        QCOMPARE(readback["$27"].toMap()["value"].toDouble(), 2.);
+        QVERIFY(!readback["$24"].toMap()["known"].toBool());
+        QVERIFY(!readback["$24"].toMap().contains("value"));
+        QVERIFY(!readback.contains("$999"));
+        QCOMPARE(snapshot["state"].toMap()["controllerState"].toString(), QString("unknown"));
+        const auto modal = snapshot["modalReadback"].toMap();
+        QCOMPARE(modal["distanceCode"].toMap()["value"].toInt(), 90);
+        const auto positions = snapshot["positions"].toMap();
+        QVERIFY(!positions["machineXY"].toMap()["known"].toBool());
+        QVERIFY(!positions["workXY"].toMap()["known"].toBool());
+        QVERIFY(!positions["wcoXY"].toMap()["known"].toBool());
+        controller.reply("$13=1\r\n<Idle|MPos:1,2,0|WCO:0,0,0|FS:0,0>\r\n");
+        QTRY_VERIFY(!session.reportMm);
+        const auto inchSnapshot = session.diagnosticSnapshot();
+        QVERIFY(!inchSnapshot["positions"].toMap()["workXY"].toMap()["known"].toBool());
+        QVERIFY(!inchSnapshot["positions"].toMap()["workXY"].toMap().contains("xMm"));
+        QCOMPARE(inchSnapshot["readback"].toMap()["$13"].toMap()["value"].toInt(), 1);
+    }
+    void diagnosticsDistinguishResetRequestsHomingAndUnacknowledgedCommands() {
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        session.home(); // A denied request is not a dispatched homing command.
+        auto snapshot = session.diagnosticSnapshot();
+        QCOMPARE(snapshot["counters"].toMap()["resetRequests"].toInt(), 1);
+        QCOMPARE(snapshot["counters"].toMap()["startupBannersObserved"].toInt(), 1);
+        for (const auto &item : snapshot["events"].toList())
+            QVERIFY(item.toMap()["command"].toString() != "homingRequested");
+        requireReference(session);
+        controller.autoAck = false;
+        QVERIFY(session.commands({"M5", "G21"}));
+        QTest::qWait(30);
+        auto events = session.diagnosticSnapshot()["events"].toList();
+        QCOMPARE(events.last().toMap()["acknowledgement"].toString(), QString("pending"));
+        controller.autoAck = true;
+        session.stop();
+        QTRY_VERIFY(session.ready());
+        snapshot = session.diagnosticSnapshot();
+        QCOMPARE(snapshot["counters"].toMap()["resetRequests"].toInt(), 2);
+        QVERIFY(!snapshot["state"].toMap()["homingProtocolReferenced"].toBool());
+        bool boundary = false, stop = false;
+        int homingCommands = 0;
+        for (const auto &item : snapshot["events"].toList()) {
+            const auto event = item.toMap();
+            if (event["event"] == "commandQueued" && event["command"] == "homingRequested")
+                ++homingCommands;
+            boundary |= event["acknowledgement"] == "notAcknowledgedBeforeBoundary";
+            stop |= event["event"] == "resetRequested" && event["reason"] == "stop";
+        }
+        QCOMPARE(homingCommands, 1);
+        QVERIFY(boundary);
+        QVERIFY(stop);
+    }
     void enabledHomingSettingAndIdleOrAlarmDoNotAuthorizeHoming_data() {
         QTest::addColumn<QString>("controllerState");
         QTest::newRow("Idle") << QString("Idle");
@@ -406,6 +621,12 @@ class GrblTest : public QObject {
         QVERIFY(!s.ready());
         QVERIFY(!s.verified());
         QVERIFY(!s.motionSafetyError().isEmpty());
+        const auto diagnosticState = s.diagnosticSnapshot()["state"].toMap();
+        QVERIFY(!diagnosticState["statusFresh"].toBool());
+        QVERIFY(diagnosticState["validStatusAgeMs"].toLongLong() >= 1500);
+        QVERIFY(
+            s.diagnosticSnapshot()["positions"].toMap()["workXY"].toMap()["ageMs"].toLongLong() >=
+            1500);
         const auto before = c.commands;
         s.jog(1, 0);
         s.focus(true);
@@ -458,6 +679,10 @@ class GrblTest : public QObject {
         c.reply("<Idle|MPos:100,75,0|WPos:0,0,0|WCO:0,0,0|FS:0,0>\r\n");
         QTRY_VERIFY(!s.connected());
         QVERIFY(!s.status().positionReferenced);
+        const auto positions = s.diagnosticSnapshot()["positions"].toMap();
+        QVERIFY(!positions["machineXY"].toMap()["known"].toBool());
+        QVERIFY(!positions["workXY"].toMap()["known"].toBool());
+        QVERIFY(!positions["wcoXY"].toMap()["known"].toBool());
     }
     void unexpectedOffsetChangeInvalidatesReferenceAndBufferedQueue() {
         Controller c;

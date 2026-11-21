@@ -27,6 +27,7 @@ class ControllerSession : public QObject {
     virtual const DeviceProfile &deviceProfile() const = 0;
     virtual ControllerStatus status() const = 0;
     virtual QStringList logEntries() const = 0;
+    virtual QVariantMap diagnosticSnapshot() const { return {{"supported", false}}; }
     virtual bool open(const QString &endpoint) = 0;
     virtual void close() = 0;
     virtual void start(const JobPlan &plan) = 0;

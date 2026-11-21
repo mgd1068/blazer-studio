@@ -31,18 +31,21 @@ GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
     connect(&serial, &QSerialPort::readyRead, this, &GrblSession::receive);
     connect(&serial, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError e) {
         if (e != QSerialPort::NoError && e != QSerialPort::NotOpenError)
-            fail("Serieller Fehler: " + serial.errorString());
+            fail("Serieller Fehler: " + serial.errorString(),
+                 ControllerDiagnostics::FaultCause::Transport);
     });
     connect(&poll, &QTimer::timeout, this, [this] {
         if (connected()) {
-            serial.write("?");
+            diagnostic.statusQuery(serial.write("?") == 1);
             // Expiry must also update the UI when a controller goes silent.
             if (!statusFresh())
                 emit changed();
         }
     });
-    connect(&timeout, &QTimer::timeout, this,
-            [this] { fail("GRBL antwortet nicht rechtzeitig; Übertragung abgebrochen."); });
+    connect(&timeout, &QTimer::timeout, this, [this] {
+        fail("GRBL antwortet nicht rechtzeitig; Übertragung abgebrochen.",
+             ControllerDiagnostics::FaultCause::Timeout);
+    });
     connect(&focusTimer, &QTimer::timeout, this, [this] { focus(false); });
 }
 GrblSession::~GrblSession() {
@@ -58,6 +61,121 @@ void GrblSession::append(const QString &s) {
     while (log.size() > 30)
         log.removeLast();
     emit changed();
+}
+ControllerDiagnostics::LiveState GrblSession::diagnosticState() const {
+    return {connected(),
+            ready(),
+            verified(),
+            knownPosition,
+            knownOffset,
+            knownOutput,
+            positionReferenced,
+            commissionedHomingContract,
+            commissionedEnvelope.has_value(),
+            commissionedModalContract,
+            connected() && knownPosition && knownOffset && knownOutput && reportMm &&
+                !awaitingReset && !handshaking && statusFresh(),
+            lastStatus.isValid() ? lastStatus.elapsed() : -1,
+            knownOutput ? std::optional<double>(reportedOutput) : std::nullopt};
+}
+QVariantMap GrblSession::diagnosticSnapshot() const {
+    return diagnostic.snapshot(diagnosticState());
+}
+ControllerDiagnostics::Denial GrblSession::diagnosticMotionDenial() const {
+    if (!commissionedEnvelope || !commissionedModalContract)
+        return ControllerDiagnostics::Denial::MotionContract;
+    if (!positionReferenced)
+        return ControllerDiagnostics::Denial::ReferenceMissing;
+    return ControllerDiagnostics::Denial::StaleStatus;
+}
+void GrblSession::auditDispatch(const QByteArray &bytes) {
+    using C = ControllerDiagnostics::Command;
+    for (auto block : bytes.split('\n')) {
+        block = block.trimmed();
+        if (block.isEmpty())
+            continue;
+        C kind = C::Unretained;
+        std::optional<QPointF> target;
+        std::optional<double> requestedPower;
+        if (!block.startsWith('(')) {
+            // Classify only known outgoing words. Neither the raw command nor
+            // arbitrary comment/payload bytes enter the typed audit buffer.
+            static const QRegularExpression word(
+                "(?:^| )([GMSXY])([+-]?[0-9]+(?:\\.[0-9]+)?)(?= |$)");
+            auto matches = word.globalMatch(QString::fromLatin1(block));
+            std::optional<double> x, y;
+            bool rapid = false, feed = false;
+            while (matches.hasNext()) {
+                const auto match = matches.next();
+                bool valid;
+                const auto number = match.captured(2).toDouble(&valid);
+                if (!valid || !std::isfinite(number))
+                    continue;
+                const auto letter = match.captured(1);
+                if (letter == "M") {
+                    if (number == 5)
+                        diagnosticSpindle = 0;
+                    else if (number == 3 || number == 4)
+                        diagnosticSpindle = int(number);
+                } else if (letter == "S")
+                    diagnosticPower = number;
+                else if (letter == "X")
+                    x = number;
+                else if (letter == "Y")
+                    y = number;
+                else if (letter == "G") {
+                    rapid |= number == 0;
+                    feed |= number == 1;
+                }
+            }
+            if (x && y)
+                target = QPointF(*x, *y);
+            if (block == "M5" || block == "M5 S0")
+                kind =
+                    diagnostic.jobActive() && block == "M5 S0" ? C::FinalSafetyOff : C::SafetyOff;
+            else if (block == "$I")
+                kind = C::Identify;
+            else if (block == "$$")
+                kind = C::ReadSettings;
+            else if (block == "$G")
+                kind = C::ReadModal;
+            else if (block == "$H")
+                kind = C::Home;
+            else if (block.startsWith("$J="))
+                kind = C::Jog;
+            else if (block.startsWith("G10 L20 P1"))
+                kind = C::WorkZero;
+            else if (block == "G21")
+                kind = C::UnitsMm;
+            else if (block == "G90")
+                kind = C::Absolute;
+            else if (block == "G54")
+                kind = C::G54;
+            else if (block == "G17")
+                kind = C::PlaneXY;
+            else if (block == "G94")
+                kind = C::FeedMode;
+            else if (block == "S0")
+                kind = C::PowerZero;
+            else if (block.startsWith("M4 ")) {
+                kind = C::DynamicPowerRequested;
+                requestedPower = diagnosticPower;
+            } else if (block.contains("M3 S")) {
+                kind = C::ConstantPowerRequested;
+                requestedPower = diagnosticPower;
+            } else if (block.startsWith("G4 "))
+                kind = C::Dwell;
+            if (rapid && target && diagnostic.wantsApproach())
+                kind = C::FirstApproachRequested;
+            else if (feed && target && diagnosticSpindle != 0 && diagnosticPower > 0 &&
+                     diagnostic.wantsPoweredTarget()) {
+                kind = C::FirstPoweredTargetRequested;
+                requestedPower = diagnosticPower;
+            } else if (kind != C::FirstApproachRequested)
+                target.reset();
+        }
+        diagnostic.queued(kind, target, requestedPower);
+    }
 }
 bool GrblSession::statusFresh() const {
     return lastStatus.isValid() && lastStatus.elapsed() <= 1500;
@@ -112,10 +230,15 @@ bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
            machinePoint.y() <= commissionedEnvelope->bottom() + epsilon;
 }
 bool GrblSession::open(const QString &port) {
-    if (port.isEmpty() || connected())
+    if (port.isEmpty() || connected()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
+                        ControllerDiagnostics::Denial::ControllerNotReady);
         return false;
+    }
     const auto profileError = DeviceBackends::runtimeSupportError(m_deviceProfile);
     if (!profileError.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
+                        ControllerDiagnostics::Denial::OutputContract);
         append(profileError);
         return false;
     }
@@ -126,6 +249,8 @@ bool GrblSession::open(const QString &port) {
     serial.setStopBits(QSerialPort::OneStop);
     serial.setFlowControl(QSerialPort::NoFlowControl);
     if (!serial.open(QIODevice::ReadWrite)) {
+        diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
+                        ControllerDiagnostics::Denial::ControllerNotReady);
         append(serial.errorString());
         return false;
     }
@@ -147,8 +272,12 @@ bool GrblSession::open(const QString &port) {
     timeout.start(10000);
     // Realtime hold/reset discards a previous controller queue, never resumes it.
     // No normal command or old acknowledgement may authorize this connection.
-    if (serial.write("!\x18", 2) != 2) {
-        fail("Controller-Reset konnte nicht gesendet werden.");
+    diagnostic.resetRequested(ControllerDiagnostics::ResetReason::Connect);
+    const bool resetQueued = serial.write("!\x18", 2) == 2;
+    diagnostic.resetWriteAccepted(resetQueued);
+    if (!resetQueued) {
+        fail("Controller-Reset konnte nicht gesendet werden.",
+             ControllerDiagnostics::FaultCause::WriteFailure);
         return false;
     }
     append(
@@ -207,17 +336,21 @@ void GrblSession::close() {
     if (serial.isOpen()) {
         if (active) {
             serial.clear(QSerialPort::Output);
-            serial.write("!\x18", 2);
-        } else
-            serial.write("M5 S0\n");
+            diagnostic.resetRequested(ControllerDiagnostics::ResetReason::Disconnect);
+            diagnostic.resetWriteAccepted(serial.write("!\x18", 2) == 2);
+        } else {
+            if (serial.write("M5 S0\n") == 6)
+                auditDispatch("M5 S0\n");
+        }
         serial.flush();
         serial.close();
     }
+    diagnostic.disconnected();
     state = "Getrennt";
     append("Verbindung geschlossen; nach Kommunikationsverlust ist der Ausgangszustand nicht "
            "bestätigt.");
 }
-void GrblSession::fail(const QString &message) {
+void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause cause) {
     commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     // A write/flush on a lost USB port can synchronously emit another serial
@@ -225,6 +358,7 @@ void GrblSession::fail(const QString &message) {
     if (handlingFailure)
         return;
     QScopedValueRollback<bool> failureGuard(handlingFailure, true);
+    diagnostic.fault(cause);
     poll.stop();
     timeout.stop();
     focusTimer.stop();
@@ -241,7 +375,8 @@ void GrblSession::fail(const QString &message) {
     version = laserMode = powerScale = knownPosition = false;
     if (serial.isOpen()) {
         serial.clear(QSerialPort::Output);
-        serial.write("!\x18", 2);
+        diagnostic.resetRequested(ControllerDiagnostics::ResetReason::Fault);
+        diagnostic.resetWriteAccepted(serial.write("!\x18", 2) == 2);
         serial.flush();
         serial.close();
     }
@@ -251,7 +386,7 @@ void GrblSession::fail(const QString &message) {
 void GrblSession::receive() {
     input += serial.readAll();
     if (input.size() > 65536) {
-        fail("Ungültig lange GRBL-Antwort.");
+        fail("Ungültig lange GRBL-Antwort.", ControllerDiagnostics::FaultCause::InvalidReply);
         return;
     }
     int end;
@@ -297,15 +432,27 @@ void GrblSession::line(const QByteArray &s) {
     if (awaitingReset && !s.startsWith("Grbl "))
         return;
     if (s.startsWith("Grbl ")) {
+        diagnostic.startupObserved();
         version = s.startsWith("Grbl 1.1") || s.startsWith("Grbl 1.3a");
         if (!version) {
-            fail("Nur GRBL 1.1 und der Blaze-X-ESP32-Fork 1.3a sind unterstützt.");
+            fail("Nur GRBL 1.1 und der Blaze-X-ESP32-Fork 1.3a sind unterstützt.",
+                 ControllerDiagnostics::FaultCause::UnsupportedController);
             return;
         }
         laserMode = powerScale = knownPosition = knownOffset = false;
         configurationRetries = 0;
         handshake();
         return;
+    }
+    if (s.startsWith('$')) {
+        const int equal = s.indexOf('=');
+        if (equal > 1) {
+            bool validKey, validValue;
+            const auto key = s.mid(1, equal - 1).toInt(&validKey);
+            const auto value = s.mid(equal + 1).trimmed().toDouble(&validValue);
+            if (validKey)
+                diagnostic.setting(key, validValue ? std::optional<double>(value) : std::nullopt);
+        }
     }
     if (s.startsWith("[VER:"))
         version = s.startsWith("[VER:1.1") || s.startsWith("[VER:1.3a");
@@ -316,6 +463,33 @@ void GrblSession::line(const QByteArray &s) {
     if (s.startsWith("$131="))
         bedHeight = std::abs(s.mid(5).toDouble() - m_deviceProfile.workArea().height()) < .0001;
     if (s.startsWith("[GC:")) {
+        int coordinateCode = -1, unitsCode = -1, distanceCode = -1;
+        int coordinateCount = 0, unitsCount = 0, distanceCount = 0;
+        if (s.endsWith(']')) {
+            const auto tokens =
+                QString::fromLatin1(s.mid(4, s.size() - 5)).split(' ', Qt::SkipEmptyParts);
+            for (const auto &token : tokens) {
+                if (!token.startsWith('G'))
+                    continue;
+                bool valid;
+                const int code = token.mid(1).toInt(&valid);
+                if (!valid)
+                    continue;
+                if (code >= 54 && code <= 59) {
+                    coordinateCode = code;
+                    ++coordinateCount;
+                } else if (code == 20 || code == 21) {
+                    unitsCode = code;
+                    ++unitsCount;
+                } else if (code == 90 || code == 91) {
+                    distanceCode = code;
+                    ++distanceCount;
+                }
+            }
+        }
+        diagnostic.reportedModal(coordinateCount == 1 ? coordinateCode : -1,
+                                 unitsCount == 1 ? unitsCode : -1,
+                                 distanceCount == 1 ? distanceCode : -1);
         coordinateSystem = QRegularExpression("(?:^| )G54(?: |$)")
                                .match(QString::fromLatin1(s.mid(4, s.size() - 5)))
                                .hasMatch();
@@ -324,7 +498,8 @@ void GrblSession::line(const QByteArray &s) {
             // before an unexpected coordinate-system change.
             commissionedModalContract = false;
             if (executing() || firing) {
-                fail("Aktives Arbeitskoordinatensystem verändert; Auftrag verworfen.");
+                fail("Aktives Arbeitskoordinatensystem verändert; Auftrag verworfen.",
+                     ControllerDiagnostics::FaultCause::CoordinateMismatch);
                 return;
             }
         }
@@ -342,6 +517,9 @@ void GrblSession::line(const QByteArray &s) {
     if (s.startsWith("$22="))
         homing = s.mid(4).trimmed() == "1";
     if (s == "error:9" && handshaking && !queue.isEmpty() && queue.first().startsWith("M5")) {
+        diagnostic.protocolFault(false, 9);
+        diagnostic.rejected(9);
+        QScopedValueRollback<bool> auditNormalization(diagnosticNormalizedAck, true);
         line("ok");
         return;
     }
@@ -359,9 +537,15 @@ void GrblSession::line(const QByteArray &s) {
                                                {8, "Referenzschalter wurde nicht freigegeben"},
                                                {9, "Referenzschalter wurde nicht gefunden"}};
         int code = s.mid(s.indexOf(':') + 1).toInt();
+        bool diagnosticCodeValid;
+        s.mid(s.indexOf(':') + 1).toInt(&diagnosticCodeValid);
+        diagnostic.protocolFault(s.startsWith("ALARM:"), diagnosticCodeValid ? code : -1);
+        if (s.startsWith("error:") && waitingAck)
+            diagnostic.rejected(diagnosticCodeValid ? code : -1);
         auto message = s.startsWith("ALARM:") ? alarms.value(code, "Controlleralarm")
                                               : errors.value(code, "Controllerfehler");
-        fail(QString::fromLatin1(s) + " · " + message);
+        fail(QString::fromLatin1(s) + " · " + message,
+             ControllerDiagnostics::FaultCause::ControllerError);
         return;
     }
     if (s.startsWith('<') && s.endsWith('>')) {
@@ -370,7 +554,8 @@ void GrblSession::line(const QByteArray &s) {
         const auto previousOffset = offset;
         const bool hadOffset = knownOffset;
         QPointF machine, work;
-        bool hasMachine = false, hasWork = false;
+        bool hasMachine = false, hasWork = false, machineField = false, workField = false,
+             offsetField = false;
         knownPosition = knownOutput = activeInputs = false;
         for (const auto &field : fields) {
             if (field.startsWith("FS:")) {
@@ -394,22 +579,54 @@ void GrblSession::line(const QByteArray &s) {
                                        powerOverride >= 10 && powerOverride <= 200;
                 }
             }
-            if (field.startsWith("WCO:"))
+            if (field.startsWith("WCO:")) {
+                offsetField = true;
                 knownOffset = point(field.mid(4), offset);
-            if (field.startsWith("MPos:"))
+            }
+            if (field.startsWith("MPos:")) {
+                machineField = true;
                 hasMachine = point(field.mid(5), machine);
-            if (field.startsWith("WPos:"))
+            }
+            if (field.startsWith("WPos:")) {
+                workField = true;
                 hasWork = point(field.mid(5), work);
+            }
         }
+        diagnostic.reportedOutput(knownOutput ? std::optional<double>(reportedOutput)
+                                              : std::nullopt);
+        using DS = ControllerDiagnostics::ControllerState;
+        static const QMap<QString, DS> diagnosticStates{
+            {"Idle", DS::Idle}, {"Run", DS::Run},     {"Home", DS::Home},
+            {"Hold", DS::Hold}, {"Alarm", DS::Alarm}, {"Door", DS::Door},
+            {"Jog", DS::Jog},   {"Check", DS::Check}, {"Sleep", DS::Sleep}};
+        diagnostic.reportedState(diagnosticStates.value(controllerState, DS::Unknown));
+        if (machineField)
+            diagnostic.coordinate(ControllerDiagnostics::Coordinate::Machine,
+                                  hasMachine && reportMm ? std::optional<QPointF>(machine)
+                                                         : std::nullopt);
+        if (workField)
+            diagnostic.coordinate(ControllerDiagnostics::Coordinate::Work,
+                                  hasWork && reportMm ? std::optional<QPointF>(work)
+                                                      : std::nullopt);
+        if (offsetField)
+            diagnostic.coordinate(ControllerDiagnostics::Coordinate::Offset,
+                                  knownOffset && reportMm ? std::optional<QPointF>(offset)
+                                                          : std::nullopt);
         if (hasMachine && hasWork && knownOffset &&
             (std::abs(machine.x() - work.x() - offset.x()) > .002 ||
              std::abs(machine.y() - work.y() - offset.y()) > .002)) {
-            fail("Widersprüchliche Maschinen-/Arbeitskoordinaten; Referenz verworfen.");
+            diagnostic.coordinate(ControllerDiagnostics::Coordinate::Work, std::nullopt);
+            diagnostic.coordinate(ControllerDiagnostics::Coordinate::Machine, std::nullopt);
+            diagnostic.coordinate(ControllerDiagnostics::Coordinate::Offset, std::nullopt);
+            fail("Widersprüchliche Maschinen-/Arbeitskoordinaten; Referenz verworfen.",
+                 ControllerDiagnostics::FaultCause::CoordinateMismatch);
             return;
         }
         if (positionReferenced && hadOffset && knownOffset && previousOffset != offset &&
             !zeroPending && !homingPending) {
-            fail("Arbeitskoordinaten unerwartet verändert; Referenz und Auftrag verworfen.");
+            diagnostic.coordinate(ControllerDiagnostics::Coordinate::Work, std::nullopt);
+            fail("Arbeitskoordinaten unerwartet verändert; Referenz und Auftrag verworfen.",
+                 ControllerDiagnostics::FaultCause::OffsetChanged);
             return;
         }
         if (hasWork) {
@@ -419,6 +636,9 @@ void GrblSession::line(const QByteArray &s) {
             position = machine - offset;
             knownPosition = true;
         }
+        diagnostic.coordinate(ControllerDiagnostics::Coordinate::Work,
+                              knownPosition && reportMm ? std::optional<QPointF>(position)
+                                                        : std::nullopt);
         if (knownPosition && knownOffset && knownOutput)
             lastStatus.restart();
         else
@@ -445,16 +665,19 @@ void GrblSession::line(const QByteArray &s) {
             return;
         }
         if (controllerState == "Idle" && knownOutput && reportedOutput != 0 && !firing) {
-            fail("Controller meldet Leistung im Leerlauf; Auftrag verworfen, Ausgang prüfen.");
+            fail("Controller meldet Leistung im Leerlauf; Auftrag verworfen, Ausgang prüfen.",
+                 ControllerDiagnostics::FaultCause::IdleOutputReported);
             return;
         }
         if (executing() && overrideFeedback && powerOverride > 100) {
-            fail("Leistungs-Override über 100 %; Auftrag verworfen, Ausgang prüfen.");
+            fail("Leistungs-Override über 100 %; Auftrag verworfen, Ausgang prüfen.",
+                 ControllerDiagnostics::FaultCause::ExcessOverride);
             return;
         }
         if (waitingIdle && controllerState == "Idle" && knownPosition && knownOffset &&
             knownOutput && reportedOutput == 0 && !activeInputs) {
             waitingIdle = false;
+            diagnostic.beginStream(false, diagnosticState());
             timeout.stop();
             progress = 1;
             if (homingPending) {
@@ -497,10 +720,19 @@ void GrblSession::line(const QByteArray &s) {
         emit changed();
         return;
     }
+    if (s == "ok" && !waitingAck)
+        diagnostic.unmatchedAcknowledgement();
     if (s == "ok" && waitingAck) {
+        if (!diagnosticNormalizedAck) {
+            if (buffering && inFlight.isEmpty())
+                diagnostic.unmatchedAcknowledgement();
+            else
+                diagnostic.acknowledged();
+        }
         if (buffering) {
             if (inFlight.isEmpty()) {
-                fail("Unerwartete GRBL-Quittierung.");
+                fail("Unerwartete GRBL-Quittierung.",
+                     ControllerDiagnostics::FaultCause::UnexpectedAck);
                 return;
             }
             rxBytes -= inFlight.takeFirst();
@@ -520,13 +752,14 @@ void GrblSession::line(const QByteArray &s) {
                         append("Verschachtelte Konfigurationsantwort; lese Einstellungen erneut.");
                         handshake();
                     } else
-                        fail("Konfiguration nicht eindeutig lesbar; Verbindung geschlossen.");
+                        fail("Konfiguration nicht eindeutig lesbar; Verbindung geschlossen.",
+                             ControllerDiagnostics::FaultCause::ConfigurationReadback);
                     return;
                 }
                 handshaking = false;
                 state = configurationValid() ? "Warte auf Position"
                                              : "GRBL-Konfiguration nicht freigegeben";
-                serial.write("?");
+                diagnostic.statusQuery(serial.write("?") == 1);
                 poll.start();
             } else {
                 if (zeroPending || homingPending) {
@@ -536,7 +769,7 @@ void GrblSession::line(const QByteArray &s) {
                     zeroPending = false;
                 }
                 waitingIdle = true;
-                serial.write("?");
+                diagnostic.statusQuery(serial.write("?") == 1);
                 if (!paused)
                     timeout.start(30000);
                 else
@@ -559,13 +792,14 @@ void GrblSession::pump() {
             break;
         auto bytes = queue[index].toLatin1() + "\n";
         if (bytes.size() > 79) {
-            fail("GCode-Zeile länger als GRBL-Zeilenpuffer.");
+            fail("GCode-Zeile länger als GRBL-Zeilenpuffer.",
+                 ControllerDiagnostics::FaultCause::InvalidReply);
             return;
         }
         if (buffering && rxBytes + bytes.size() > 100)
             break;
         if (serial.write(bytes) != bytes.size()) {
-            fail("Serieller Schreibfehler.");
+            fail("Serieller Schreibfehler.", ControllerDiagnostics::FaultCause::WriteFailure);
             return;
         }
         if (buffering) {
@@ -574,15 +808,19 @@ void GrblSession::pump() {
             ++sent;
         } else
             pendingAcks = bytes.count('\n');
+        auditDispatch(bytes);
         waitingAck = true;
         timeout.start();
     } while (buffering);
 }
 bool GrblSession::commands(const QStringList &lines, bool buffered) {
     if (!ready() || lines.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
+                        ControllerDiagnostics::Denial::ControllerNotReady);
         append("Aktion abgelehnt: GRBL nicht im geprüften Leerlauf.");
         return false;
     }
+    diagnostic.beginStream(buffered, diagnosticState());
     inFlight.clear();
     sent = rxBytes = 0;
     buffering = buffered;
@@ -596,7 +834,9 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     return connected() && busy();
 }
 void GrblSession::start(const JobPlan &job) {
+    diagnostic.request(ControllerDiagnostics::Action::Start);
     if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Start, diagnosticMotionDenial());
         append(error);
         return;
     }
@@ -606,14 +846,20 @@ void GrblSession::start(const JobPlan &job) {
         return;
     }
     if (job.deviceProfile().outputFingerprint() != m_deviceProfile.outputFingerprint()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Start,
+                        ControllerDiagnostics::Denial::ProfileMismatch);
         append("Geräteprofil des Auftrags passt nicht zur geprüften Verbindung.");
         return;
     }
     if (!insideMachineBed(position)) {
+        diagnostic.deny(ControllerDiagnostics::Action::Start,
+                        ControllerDiagnostics::Denial::PhysicalBounds);
         append("Aktuelle Maschinenposition oder Arbeitsnullpunkt nicht freigegeben.");
         return;
     }
     if (!job.valid()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Start,
+                        ControllerDiagnostics::Denial::InvalidPlan);
         append(job.errors.join("; "));
         return;
     }
@@ -622,6 +868,8 @@ void GrblSession::start(const JobPlan &job) {
     // position. A rapid.from is a preview origin and is never emitted.
     for (const auto &move : job.moves)
         if ((!move.rapid && !insideMachineBed(move.from)) || !insideMachineBed(move.to)) {
+            diagnostic.deny(ControllerDiagnostics::Action::Start,
+                            ControllerDiagnostics::Denial::PhysicalBounds);
             append("Auftrag mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
             return;
         }
@@ -630,6 +878,8 @@ void GrblSession::start(const JobPlan &job) {
         program.transport() != m_deviceProfile.transport() ||
         program.mediaType() != "text/x-gcode" ||
         program.profileFingerprint() != m_deviceProfile.outputFingerprint()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Start,
+                        ControllerDiagnostics::Denial::OutputContract);
         append(program.errors().isEmpty() ? QString("Kein passender GRBL-Ausgabevertrag.")
                                           : program.errors().join("; "));
         return;
@@ -642,11 +892,11 @@ void GrblSession::pause() {
     paused = !paused;
     pauseRequested = paused;
     if (paused) {
-        serial.write("!");
+        diagnostic.realtime(ControllerDiagnostics::Command::FeedHold, serial.write("!") == 1);
         timeout.stop();
         state = "Pausiert";
     } else {
-        serial.write("~");
+        diagnostic.realtime(ControllerDiagnostics::Command::CycleResume, serial.write("~") == 1);
         state = "Läuft";
         if (waitingAck || waitingIdle)
             timeout.start(waitingIdle ? 30000 : 10000);
@@ -675,14 +925,17 @@ void GrblSession::stop() {
     awaitingReset = true;
     state = "Abbruch · warte auf GRBL-Neustart";
     serial.clear(QSerialPort::Output);
-    serial.write("!\x18", 2);
+    diagnostic.resetRequested(ControllerDiagnostics::ResetReason::Stop);
+    diagnostic.resetWriteAccepted(serial.write("!\x18", 2) == 2);
     if (!connected())
         return;
     timeout.start(10000);
     append("Feed Hold und Soft-Reset gesendet; keine automatische Fortsetzung.");
 }
 void GrblSession::jog(double dx, double dy) {
+    diagnostic.request(ControllerDiagnostics::Action::Jog);
     if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Jog, diagnosticMotionDenial());
         append(error);
         return;
     }
@@ -693,18 +946,26 @@ void GrblSession::jog(double dx, double dy) {
     const auto target = position + QPointF(n(dx).toDouble(), n(dy).toDouble());
     if (!std::isfinite(dx) || !std::isfinite(dy) || !insideMachineBed(position) ||
         !insideMachineBed(target)) {
+        diagnostic.deny(ControllerDiagnostics::Action::Jog,
+                        ControllerDiagnostics::Denial::PhysicalBounds);
         append("Bewegung außerhalb des Arbeitsraums abgelehnt.");
         return;
     }
     commands({"M5", "$J=G91 G21 X" + n(dx) + " Y" + n(dy) + " F600"});
 }
 void GrblSession::home() {
+    diagnostic.request(ControllerDiagnostics::Action::Home);
     if (const auto error = homingSafetyError(); !error.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Home,
+                        commissionedHomingContract
+                            ? ControllerDiagnostics::Denial::HomingPrerequisite
+                            : ControllerDiagnostics::Denial::HomingContract);
         append(error);
         return;
     }
     if (connected() && controllerState == "Alarm" && !busy() && version && laserMode &&
         powerScale && reportMm && bedWidth && bedHeight) {
+        diagnostic.beginStream(false, diagnosticState());
         queue = {"$H"};
         total = 1;
         acked = 0;
@@ -723,7 +984,9 @@ void GrblSession::home() {
     }
 }
 void GrblSession::zero() {
+    diagnostic.request(ControllerDiagnostics::Action::Zero);
     if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Zero, diagnosticMotionDenial());
         append(error);
         return;
     }
@@ -738,7 +1001,9 @@ void GrblSession::zero() {
     }
 }
 void GrblSession::frame(const QVariantMap &b) {
+    diagnostic.request(ControllerDiagnostics::Action::Frame);
     if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Frame, diagnosticMotionDenial());
         append(error);
         return;
     }
@@ -749,12 +1014,16 @@ void GrblSession::frame(const QVariantMap &b) {
     QRectF r(b.value("x").toDouble(), b.value("y").toDouble(), b.value("width").toDouble(),
              b.value("height").toDouble());
     if (!b.value("valid").toBool() || !Geometry::insideBed(r, m_deviceProfile.workArea())) {
+        diagnostic.deny(ControllerDiagnostics::Action::Frame,
+                        ControllerDiagnostics::Denial::InvalidRegion);
         append("Ungültige Rahmenfahrt.");
         return;
     }
     if (!insideMachineBed(position) || !insideMachineBed(r.topLeft()) ||
         !insideMachineBed(r.topRight()) || !insideMachineBed(r.bottomRight()) ||
         !insideMachineBed(r.bottomLeft())) {
+        diagnostic.deny(ControllerDiagnostics::Action::Frame,
+                        ControllerDiagnostics::Denial::PhysicalBounds);
         append("Rahmenfahrt mit G54-Arbeitsnullpunkt außerhalb des Maschinenraums abgelehnt.");
         return;
     }
@@ -769,12 +1038,17 @@ void GrblSession::focus(bool on) {
             stop();
         return;
     }
+    diagnostic.request(ControllerDiagnostics::Action::Focus);
     if (const auto error = motionSafetyError(); !error.isEmpty()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Focus, diagnosticMotionDenial());
         append(error);
         return;
     }
-    if (!ready())
+    if (!ready()) {
+        diagnostic.deny(ControllerDiagnostics::Action::Focus,
+                        ControllerDiagnostics::Denial::ControllerNotReady);
         return;
+    }
     // A stationary GRBL M3 output has no independent watchdog. Host deadline and
     // release reset it; communication loss cannot guarantee output shutdown.
     if (!insideMachineBed(position))
@@ -813,7 +1087,8 @@ bool GrblSession::overrides(int feed, int power) {
     };
     change(feedOverride, feed, 0x90, 0x91, 0x92, 0x93, 0x94);
     change(powerOverride, power, 0x99, 0x9a, 0x9b, 0x9c, 0x9d);
-    serial.write(bytes);
-    serial.write("?");
+    diagnostic.realtime(ControllerDiagnostics::Command::Override,
+                        serial.write(bytes) == bytes.size());
+    diagnostic.statusQuery(serial.write("?") == 1);
     return true;
 }

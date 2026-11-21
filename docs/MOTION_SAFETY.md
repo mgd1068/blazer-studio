@@ -148,3 +148,12 @@ cleared before deciding whether STOPP is required. Nested session notifications
 observe the new evidence boundary first. The watchdog also checks an executing
 session's motion evidence independently of accessory flags. This is software
 fail-closed behavior, not proof of physical shutdown.
+
+## Begrenzter Vorfallkontext
+
+Der read-only [technische Controllerkontext](CONTROLLER_INCIDENT_DIAGNOSTICS.md)
+zeichnet angeforderte Präambel/Erstanfahrt, Protokollquittierung, Resetgrenzen,
+Vorprüfungsablehnungen und begrenztes numerisches Readback auf. Er bewahrt
+keinen vollständigen Werkzeugweg und keine Anschluss-/Projekttexte. Diese
+Instrumentierung verändert keine Freigabe und ist kein physischer
+Bewegungsnachweis; bewusster lokaler Export bleibt eine eigene UI-Integration.
