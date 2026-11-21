@@ -287,6 +287,8 @@ class ControllerRuntimeTestAccess {
     }
     static bool armMachine(Machine &machine,const QString &action,const QVariantMap &arguments={}) {
         if(machine.simulation())return true;
+        // A denied facade context gets no carrier, registration or revocation side effect.
+        if(!machine.session||machine.nativeBinding(action,arguments,machine.session->status()).isEmpty())return false;
         const auto self=QPointer<Machine>(&machine);
         return NativeInputIntentTestAccess::acceptedActivation(*machine.nativeInput,action,[self,action,arguments] {
             return self&&self->session?self->nativeBinding(action,arguments,self->session->status()):QByteArray();
