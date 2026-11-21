@@ -16,6 +16,9 @@
 
 class Document : public QAbstractListModel {
     Q_OBJECT
+    Q_PROPERTY(StartMode startMode READ startMode NOTIFY changed)
+    Q_PROPERTY(JobOrigin jobOrigin READ jobOrigin NOTIFY changed)
+    Q_PROPERTY(QVariantMap placementSummary READ placementSummary NOTIFY changed)
     Q_PROPERTY(QVariantMap beginnerSummary READ beginnerSummary NOTIFY changed)
     Q_PROPERTY(bool imageExportBusy READ imageExportBusy NOTIFY changed)
     Q_PROPERTY(bool batchBusy READ batchBusy NOTIFY changed)
@@ -53,6 +56,22 @@ class Document : public QAbstractListModel {
     Q_PROPERTY(QString basicOperationKey READ basicOperationKey NOTIFY changed)
     Q_PROPERTY(bool materialModified READ materialModified NOTIFY changed)
   public:
+    enum StartMode { AbsoluteCoordinates, CurrentPosition, UserOrigin };
+    Q_ENUM(StartMode)
+    enum JobOrigin { LowerLeft, LowerCenter, LowerRight, CenterLeft, Center, CenterRight, UpperLeft, UpperCenter, UpperRight };
+    Q_ENUM(JobOrigin)
+    StartMode startMode() const { return StartMode(m_placementIntent.mode); }
+    JobOrigin jobOrigin() const { return JobOrigin(m_placementIntent.anchor); }
+    Q_INVOKABLE bool setStartMode(StartMode mode);
+    Q_INVOKABLE bool setJobOrigin(JobOrigin anchor);
+    Q_INVOKABLE bool captureUserOrigin();
+    Q_INVOKABLE bool confirmUserOrigin();
+    Q_INVOKABLE void clearUserOrigin();
+    bool setPreviewPosition(const JobPlacement::PositionSnapshot &position);
+    void clearPreviewPosition();
+    bool hasPreviewPosition() const { return m_previewPosition.has_value(); }
+    QVariantMap placementSummary() const;
+    PlacedJobPlanning::Input planningInput() const;
     enum Roles {
         NameRole = Qt::UserRole + 1,
         KindRole,
@@ -223,6 +242,7 @@ class Document : public QAbstractListModel {
         QList<Guide> guides;
         bool guidesVisible = true, guideSnapping = true;
         DeviceProfile deviceProfile = DeviceProfile::m3Reference();
+        PlacedJobPlanning::Intent placementIntent;
     };
     Snapshot snapshot() const;
     bool sameContent(const Snapshot &a, const Snapshot &b) const;
@@ -234,6 +254,7 @@ class Document : public QAbstractListModel {
     void checkpoint(const QString &label = QStringLiteral("Bearbeitung"));
     void clearHistory();
     void refresh(int row = -1);
+    void refreshPlanning();
     void refreshGuides();
     void markClean();
     void setFileUrl(const QUrl &url);
@@ -266,6 +287,9 @@ class Document : public QAbstractListModel {
     QList<HistoryEntry> m_undo, m_redo;
     quint64 m_historyRevision = 0;
     std::optional<Snapshot> m_beforeMove;
+    PlacedJobPlanning::Intent m_placementIntent;
+    std::optional<JobPlacement::PositionSnapshot> m_previewPosition, m_confirmedUserOrigin;
+    mutable QVariantMap m_syncPlacementSummary;
     mutable std::optional<JobPlan> m_job;
     JobPreparation m_preparation;
     BatchExport m_batch;

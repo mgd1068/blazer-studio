@@ -322,19 +322,17 @@ void Document::notify(const QString &s) {
 Document::Snapshot Document::snapshot() const {
     return {m_items,         m_layers,        m_title,        m_selected, m_material,
             m_selection,     m_pages,         m_activePage,   m_notes,    m_guides,
-            m_guidesVisible, m_guideSnapping, m_deviceProfile};
+            m_guidesVisible, m_guideSnapping, m_deviceProfile, m_placementIntent};
 }
 bool Document::sameContent(const Snapshot &a, const Snapshot &b) const {
     return a.items == b.items && a.layers == b.layers && a.title == b.title &&
            a.material == b.material && a.pages == b.pages && a.notes == b.notes &&
            a.guides == b.guides && a.guidesVisible == b.guidesVisible &&
            a.guideSnapping == b.guideSnapping &&
-           a.deviceProfile.toJson() == b.deviceProfile.toJson();
+           a.deviceProfile.toJson() == b.deviceProfile.toJson() && a.placementIntent == b.placementIntent;
 }
 void Document::refresh(int row) {
-    m_job.reset();
-    if (m_background)
-        m_preparation.submit(jobInput());
+    refreshPlanning();
     m_dirty = !sameContent(snapshot(), m_saved);
     if (row >= 0 && row < m_items.size())
         emit dataChanged(index(row), index(row));
@@ -378,6 +376,10 @@ bool Document::setDeviceProfile(const DeviceProfile &profile) {
     checkpoint("Geräteprofil");
     const bool outputChanged = clean->outputFingerprint() != m_deviceProfile.outputFingerprint();
     m_deviceProfile = *clean;
+    if (outputChanged) {
+        m_previewPosition.reset();
+        m_confirmedUserOrigin.reset();
+    }
     if (outputChanged)
         m_material.clear();
     emit deviceProfileChanged();
@@ -402,6 +404,9 @@ void Document::applySnapshot(const Snapshot &s) {
     m_guides = s.guides;
     m_guidesVisible = s.guidesVisible;
     m_guideSnapping = s.guideSnapping;
+    m_placementIntent = s.placementIntent;
+    m_confirmedUserOrigin.reset(); // History/files restore intent, never runtime confirmation.
+    if (profileChanged) m_previewPosition.reset();
     m_beforeMove.reset();
     endResetModel();
     if (profileChanged)
@@ -409,6 +414,8 @@ void Document::applySnapshot(const Snapshot &s) {
     refresh();
 }
 void Document::demo() {
+    m_placementIntent = {};
+    m_confirmedUserOrigin.reset();
     m_guides.clear();
     m_guidesVisible = m_guideSnapping = true;
     setFileUrl({});
@@ -941,6 +948,7 @@ QByteArray Document::serialize() const {
     return serialize(snapshot());
 }
 QByteArray Document::serialize(const Snapshot &state) const {
+    const bool hasPlacement = !PlacedJobPlanning::defaultIntent(state.placementIntent);
     const bool hasProfile = state.deviceProfile.toJson() != DeviceProfile::m3Reference().toJson();
     QJsonArray objects;
     for (const auto &a : state.items)
@@ -976,8 +984,8 @@ QByteArray Document::serialize(const Snapshot &state) const {
             {"svg", a.asset ? QString::fromLatin1(a.asset->bytes.toBase64()) : QString()}});
     const bool hasOutline = std::any_of(state.items.cbegin(), state.items.cend(), [](const Artwork &a) { return a.engraveOutline; });
     const bool hasTools = std::any_of(state.items.cbegin(), state.items.cend(), [](const Artwork &a){return a.toolLayer!=0;});
-    if (hasTools || hasProfile || hasOutline)
-        for (int i=0;i<objects.size();++i) {auto object=objects[i].toObject();object["toolLayer"]=state.items[i].toolLayer;if (hasOutline) object["engraveOutline"]=state.items[i].engraveOutline;objects[i]=object;}
+    if (hasTools || hasProfile || hasOutline || hasPlacement)
+        for (int i=0;i<objects.size();++i) {auto object=objects[i].toObject();object["toolLayer"]=state.items[i].toolLayer;if (hasOutline || hasPlacement) object["engraveOutline"]=state.items[i].engraveOutline;objects[i]=object;}
     QJsonObject root{{"format", "blazer-studio"},
                      {"version", 8},
                      {"units", "mm"},
@@ -997,10 +1005,10 @@ QByteArray Document::serialize(const Snapshot &state) const {
                      {"objects", objects},
                      {"layers", QJsonArray::fromVariantList(state.layers)},
                      {"material", QJsonObject::fromVariantMap(state.material)}};
-    if (hasOutline || hasProfile || hasTools || !state.guides.isEmpty() || !state.guidesVisible ||
+    if (hasPlacement || hasOutline || hasProfile || hasTools || !state.guides.isEmpty() || !state.guidesVisible ||
         !state.guideSnapping) {
-        root["version"] = hasOutline ? 12 : hasProfile ? 11 : hasTools ? 10 : 9;
-        if (hasProfile || hasOutline)
+        root["version"] = hasPlacement ? 13 : hasOutline ? 12 : hasProfile ? 11 : hasTools ? 10 : 9;
+        if (hasPlacement || hasProfile || hasOutline)
             root["deviceProfile"] = state.deviceProfile.toJson();
         root["guidesVisible"] = state.guidesVisible;
         root["guideSnapping"] = state.guideSnapping;
@@ -1013,6 +1021,7 @@ QByteArray Document::serialize(const Snapshot &state) const {
                                       {"locked", guide.locked}});
         root["guides"] = guides;
     }
+    if (hasPlacement) root["placement"] = PlacedJobPlanning::serializeIntent(state.placementIntent);
     return QJsonDocument(root).toJson();
 }
 std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const {
@@ -1022,7 +1031,7 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     auto json = QJsonDocument::fromJson(bytes, &error);
     auto root = json.object();
     if (error.error != QJsonParseError::NoError || root["format"] != "blazer-studio" ||
-        !number(root, "version", 1, 12) ||
+        !number(root, "version", 1, 13) ||
         std::floor(root["version"].toDouble()) != root["version"].toDouble() ||
         !text(root, "title") || !root["objects"].isArray() || !root["layers"].isArray())
         return {};
@@ -1034,6 +1043,11 @@ std::optional<Document::Snapshot> Document::parse(const QByteArray &bytes) const
     if (objects.size() > Geometry::objectLimit || layers.size() < 2 || layers.size() > 64)
         return {};
     Snapshot state;
+    if (version >= 13) {
+        const auto intent = PlacedJobPlanning::parseIntent(root["placement"]);
+        if (!intent) return {};
+        state.placementIntent = *intent;
+    } else if (root.contains("placement")) return {};
     if (version >= 11) {
         if (!root["deviceProfile"].isObject())
             return {};
@@ -1526,8 +1540,11 @@ QStringList Document::issues() const {
 const JobPlan &Document::job() const {
     if (m_background)
         return m_preparation.plan();
-    if (!m_job)
-        m_job = JobPlanner::build(*this);
+    if (!m_job) {
+        auto result = PlacedJobPlanning::build(planningInput());
+        m_job = std::move(result.plan);
+        m_syncPlacementSummary = std::move(result.summary);
+    }
     return *m_job;
 }
 bool Document::exportGcode(const QUrl &url) {
@@ -1721,6 +1738,11 @@ void Document::setReliefSetting(const QString &key, const QVariant &value) {
 
 bool Document::exportMaterialTest(const QUrl &url, double minSpeed, double maxSpeed,
                                   double minPower, double maxPower, int steps) {
+    if (m_placementIntent.mode != JobPlacement::Mode::Absolute) {
+        notify("Materialtest-Export unterstützt noch keine relativen Startmodi; keine absolute Ersatzdatei erzeugt.");
+        return false;
+    }
+
     auto plan =
         JobPlanner::materialTest(minSpeed, maxSpeed, minPower, maxPower, steps, m_deviceProfile);
     if (!url.isLocalFile() || !plan.valid()) {
@@ -1840,7 +1862,7 @@ void Document::setBackgroundPlanning(bool enabled) {
     m_background = enabled;
     m_job.reset();
     if (enabled)
-        m_preparation.submit(jobInput());
+        m_preparation.submit(planningInput());
     else
         m_preparation.cancel();
     emit changed();
@@ -1866,6 +1888,7 @@ QVariantMap Document::jobSummary() const {
     auto summary = job().summary();
     summary["state"] = planningState();
     summary["busy"] = planningBusy();
+    summary["placement"] = placementSummary();
     return summary;
 }
 QString Document::planningState() const {
@@ -1881,7 +1904,7 @@ void Document::cancelPlanning() {
 }
 void Document::retryPlanning() {
     if (m_background)
-        m_preparation.submit(jobInput());
+        m_preparation.submit(planningInput());
 }
 QImage Document::imagePreview(const Artwork &item) const {
     const auto &plan = job();

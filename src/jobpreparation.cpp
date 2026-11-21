@@ -29,10 +29,14 @@ void JobPreparation::invalidate(QString state, QString message) {
     if (m_cancel)
         m_cancel->store(true, std::memory_order_relaxed);
     m_plan = {};
+    m_placementSummary.clear();
     m_plan.errors = {std::move(message)};
     m_state = std::move(state);
 }
 void JobPreparation::submit(JobInput input) {
+    submit(PlacedJobPlanning::Input{std::move(input), {}});
+}
+void JobPreparation::submit(PlacedJobPlanning::Input input) {
     invalidate("queued", "Auftrag wird im Hintergrund berechnet.");
     m_pending = std::move(input);
     m_debounce.start();
@@ -58,14 +62,18 @@ void JobPreparation::startPending() {
     m_state = "running";
     m_watcher.setFuture(QtConcurrent::run(&m_pool, [input = std::move(input), flag, revision,
                                                     builder]() {
-        JobPlan plan(input.deviceProfile);
+        JobPlan plan(input.document.deviceProfile);
+        QVariantMap placement;
         try {
-            plan = builder(input, flag);
+            plan = builder(input.document, flag);
             if (plan.deviceProfile().outputFingerprint() !=
-                input.deviceProfile.outputFingerprint()) {
-                plan = JobPlan(input.deviceProfile);
+                input.document.deviceProfile.outputFingerprint()) {
+                plan = JobPlan(input.document.deviceProfile);
                 plan.errors = {"Auftragsberechnung lieferte ein abweichendes Geräteprofil."};
             }
+            auto result = PlacedJobPlanning::finish(input, std::move(plan), flag);
+            plan = std::move(result.plan);
+            placement = std::move(result.summary);
             if (plan.valid() && !isCancelled(flag))
                 plan.cacheCommands(flag);
         } catch (const std::exception &) {
@@ -74,10 +82,10 @@ void JobPreparation::startPending() {
             plan.errors = {"Unerwarteter Fehler bei der Auftragsberechnung."};
         }
         if (isCancelled(flag)) {
-            plan = JobPlan(input.deviceProfile);
+            plan = JobPlan(input.document.deviceProfile);
             plan.cancelled = true;
         }
-        return Result{revision, std::move(plan)};
+        return Result{revision, std::move(plan), std::move(placement)};
     }));
     emit changed();
 }
@@ -86,6 +94,7 @@ void JobPreparation::finish() {
     m_active = false;
     if (result.revision == m_revision && !result.plan.cancelled) {
         m_plan = result.plan;
+        m_placementSummary = result.placement;
         m_state = m_plan.valid() ? "ready" : "failed";
     } else if (!m_pending)
         m_state = "cancelled";

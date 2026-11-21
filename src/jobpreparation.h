@@ -1,5 +1,6 @@
 #pragma once
 #include "job.h"
+#include "placedjobplanning.h"
 #include <QFutureWatcher>
 #include <QObject>
 #include <QThreadPool>
@@ -16,6 +17,8 @@ class JobPreparation : public QObject {
     explicit JobPreparation(QObject *parent = nullptr, Builder builder = {});
     ~JobPreparation() override;
     void submit(JobInput input);
+    void submit(PlacedJobPlanning::Input input);
+    QVariantMap placementSummary() const { return m_placementSummary; }
     void cancel();
     bool busy() const;
     QString state() const { return m_state; }
@@ -30,15 +33,17 @@ class JobPreparation : public QObject {
     struct Result {
         quint64 revision;
         JobPlan plan;
+        QVariantMap placement;
     };
     QThreadPool m_pool;
     QFutureWatcher<Result> m_watcher;
     QTimer m_debounce;
     Builder m_builder;
     Cancellation m_cancel;
-    std::optional<JobInput> m_pending;
+    std::optional<PlacedJobPlanning::Input> m_pending;
     bool m_active = false;
     quint64 m_revision = 0;
     JobPlan m_plan;
+    QVariantMap m_placementSummary;
     QString m_state = "idle";
 };

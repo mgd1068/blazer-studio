@@ -350,6 +350,10 @@ bool Document::importProject(const QUrl &url) {
     return true;
 }
 bool Document::batch(const QUrl &csv, const QUrl &directory, const QString &pattern) {
+    if (startMode() != AbsoluteCoordinates) {
+        notify("CSV-Stapelexport unterstützt noch keine relativen Startmodi; keine absolute Ersatzdatei erzeugt.");
+        return false;
+    }
     if (m_background) {
         if (!m_batch.start(jobInput(), csv, directory, pattern)) {
             notify("Ein CSV-Stapel wird bereits exportiert.");

@@ -311,7 +311,7 @@ QPainterPath JobPlanner::geometry(const Artwork &a, QString &error, bool fill) {
     return p;
 }
 JobPlan JobPlanner::build(const Document &d) {
-    return build(d.jobInput());
+    return PlacedJobPlanning::build(d.planningInput()).plan;
 }
 JobPlan JobPlanner::build(const JobInput &d, const Cancellation &cancel) {
     JobPlan job(d.deviceProfile);

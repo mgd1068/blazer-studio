@@ -40,7 +40,7 @@ Vorlagen übernehmen keine Maschinenverbindung oder Startfreigabe. Beim neuen Pr
 
 Abweichende Geräteprofile verwenden ab beta.4-dev **Format 11** mit `deviceProfile`, den Hilfslinienfeldern und `toolLayer` für jedes Objekt. Das Profil enthält ausschließlich den bekannten GRBL-XY-Projektparametervertrag; Herkunft, Anschlussnamen und Zugangsdaten werden nicht eingebettet. Alte Dateien ohne Geräteprofil behalten ausdrücklich die M3-Fläche und Leistungsskala. Ein Öffnen skaliert keine Geometrie. Profilwechsel sind rücknehmbar und bei aktiver Verbindung oder laufendem Auftrag gesperrt. Umfang und aktuelle Gerätebegrenzung stehen im [Mehrgeräteplan](MULTI_DEVICE_PLAN.md). Ein älterer Leser muss Format 11 ablehnen; es wird nicht ohne Gerätedaten zurückgespeichert.
 
-Das eigene Vorlagenformat hat die Kennung `blazer-studio-template`, `templateVersion: 1` und enthält das jeweils benötigte Projektformat 8, 9, 10 oder 11. Die Dateigrenze bleibt 64 MiB; Projekt-, Bild- und Geometriegrenzen werden beim Laden vollständig geprüft. Es wurde kein Import fremder Vorlagenformate abgenommen.
+Das eigene Vorlagenformat hat die Kennung `blazer-studio-template`, `templateVersion: 1` und enthält das jeweils benötigte Projektformat einschließlich der neueren Formate 12/13. Die Dateigrenze bleibt 64 MiB; Projekt-, Bild- und Geometriegrenzen werden beim Laden vollständig geprüft. Es wurde kein Import fremder Vorlagenformate abgenommen.
 
 Das Linux-Paket und der lokale Quellstarter registrieren `.blazertemplate` als eigenen Dateityp. Ein entsprechender Dateistart erzeugt ein neues Projekt. Die Prüfung am tatsächlichen Desktop einschließlich seiner Dateizuordnung bleibt ein eigener T08-Fall.
 
@@ -90,3 +90,10 @@ Der vollständige [Funktionsstand](FUNCTION_ACCEPTANCE.md) und die [Abnahmekrite
 ### Randgravur (Format 12)
 
 Projekte mit expliziter Randgravur verwenden Format **12**. `engraveOutline` ist pro Objekt ein striktes Boolean: Es verändert die Geometriebearbeitung der primären Gravuroperation zu einer Kontur, ohne deren Materialleistung, Geschwindigkeit oder Durchgänge durch Schnittwerte zu ersetzen. Bilder und Reliefs unterstützen diesen Modus nicht. Format 12 enthält außerdem das Geräteprofil, die Hilfslinienfelder und `toolLayer` für jedes Objekt. Ältere Leser müssen dieses Format ablehnen, damit ein Rand nicht versehentlich als Fläche verarbeitet wird. Dateien ohne Randgravur behalten ihre bisherigen Formatversionen; Formate 1–11 bleiben lesbar. Native Zwischenablage und Vorlagen erhalten die neue Angabe ebenfalls.
+
+
+### Startmodus und Benutzerursprungsintent (Format 13)
+
+Projekte mit einem anderen Startmodus, Anker oder gespeicherten Ursprung als dem leeren absoluten Standard verwenden **Format 13**. Das strikte `placement`-Objekt enthält Version 1, den Modus 0–2, den Neunpunktanker 0–8 und null oder gespeicherte Benutzerkoordinaten. Format 13 enthält immer alle Format-12-Voraussetzungen, auch ohne Randgravur: Geräteprofil, Hilfslinienfelder, `toolLayer` und `engraveOutline` je Objekt. Ältere Leser müssen Format 13 ablehnen. Standardprojekte bleiben bei ihrer bisherigen passenden Formatversion.
+
+Dateien und Undo-Snapshots speichern ausschließlich den Intent. Aktuelle Position, Koordinatenrahmen, positive Referenz und die ausdrückliche Bestätigung eines User-Ursprungs gehören nie in eine Datei oder ein History-Proof. Öffnen, Recovery, Vorlagen und Undo/Redo stellen keine solche Bestätigung wieder her; der User-Modus bleibt bis zur ausdrücklichen Bestätigung im aktuellen bekannten Vorschauframe gesperrt. Details und Softwareabnahme im [Platzierungsvertrag](JOB_PLACEMENT.md).
