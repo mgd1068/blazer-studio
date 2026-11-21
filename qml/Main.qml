@@ -1147,8 +1147,26 @@ ApplicationWindow {
                                             Text { text: machine.firing ? project.deviceInfo.focusPower+" % angefordert" : "Fokuspunkt mit "+project.deviceInfo.focusPower+" %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
                                             Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei "+project.deviceInfo.focusPower+" % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
                                         }
-                                        ActionButton { id: focusHoldControl; objectName: "focusHold"; text: "◎  Halten für "+project.deviceInfo.focusPower+" %"; primary: true; implicitHeight: 44; enabled: win.processingReady || machine.firing; Component.onCompleted: machine.registerFocusControl(focusHoldControl); onPressed: machine.beginFocus(); onReleased: machine.endFocus(); onCanceled: machine.endFocus(); Component.onDestruction: machine.endFocus() }
+                                        ActionButton {
+                                            id: focusHoldControl; objectName: "focusHold"
+                                            property bool interactionHeld: false
+                                            text: "◎  Halten für "+project.deviceInfo.focusPower+" %"
+                                            primary: true; implicitHeight: 44
+                                            enabled: win.processingReady || machine.firing || interactionHeld
+                                            Component.onCompleted: machine.registerFocusControl(focusHoldControl)
+                                            onPressed: { interactionHeld=true; machine.beginFocus() }
+                                            onReleased: { machine.endFocus(); interactionHeld=false }
+                                            onCanceled: { machine.endFocus(); interactionHeld=false }
+                                            onVisibleChanged: if (!visible) { machine.endFocus(); interactionHeld=false }
+                                            Component.onDestruction: machine.endFocus()
+                                        }
                                     }
+                                }
+                                Text {
+                                    objectName: "nativeInputSafetyStatus"; Layout.fillWidth: true
+                                    visible: !win.simulationMode && typeof machine.nativeInputSafetyError !== "undefined" && machine.nativeInputSafetyError.length > 0
+                                    text: visible ? machine.nativeInputSafetyError : ""
+                                    textFormat: Text.PlainText; color: win.muted; wrapMode: Text.Wrap
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true; spacing: 6
