@@ -2,7 +2,7 @@
 
 Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Entwicklungsstand:** `0.9.0-beta.6-dev` für Ubuntu 26.04 / x86_64. Blazer Studio erfüllt noch nicht den vollständigen Funktionsumfang von LightBurn 2.2.01. Die [Abnahmematrix](docs/FUNCTION_ACCEPTANCE.md) trennt vorhandene Softwarefunktionen, unabhängige Tests und verbleibende Lücken.
+**Entwicklungsstand:** `0.9.0-beta.7-dev` für Ubuntu 26.04 / x86_64. Blazer Studio erfüllt noch nicht den vollständigen Funktionsumfang von LightBurn 2.2.01. Die [Abnahmematrix](docs/FUNCTION_ACCEPTANCE.md) trennt vorhandene Softwarefunktionen, unabhängige Tests und verbleibende Lücken.
 
 Nach der gemeldeten Kollision und dem ausgebliebenen Gehäuselüfter ist der reale Gerätebetrieb gesperrt: Bewegung, Referenzfahrt und Laserfreigabe benötigen getrennte, tatsächlich nachgewiesene Geräteverträge. Ein Profilimport, eine Quittierung oder eine angezeigte Position erteilt diese Freigabe nicht. Der notwendige Inbetriebnahmeworkflow ist noch offen. Simulator, Planung und Datei-Export sind verfügbar; ein Export bestätigt keine Maschinenkalibrierung.
 
@@ -32,7 +32,7 @@ Neu im Entwicklungszweig sind [Startmodi und neun Ursprungspunkte](docs/JOB_PLAC
 
 ![Blazer Studio – Basic](assets/basic.png)
 
-Der vorhandene Startmenüeintrag startet die lokal installierte Fassung. Sie wurde durch diesen Entwicklungszweig nicht automatisch ersetzt; die gemeldeten Hardwarefehler der beta.5.2-local bleiben dokumentiert. Der Entwicklungsstand startet im Simulator und erlaubt eine ausdrücklich gewählte Diagnoseverbindung, gibt reale Bewegung und Laserbetrieb aber noch nicht frei. Siehe [Gerätebetrieb und Prüfumfang](docs/GRBL_WORKFLOW.md).
+Der Startmenüeintrag startet die lokal installierte Fassung. Ein Quellcode-Update ersetzt sie erst nach einer ausdrücklich durchgeführten Paketinstallation. Die gemeldeten Hardwarefehler der beta.5.2-local bleiben dokumentiert. Der Entwicklungsstand startet im Simulator und erlaubt eine ausdrücklich gewählte Diagnoseverbindung, gibt reale Bewegung und Laserbetrieb aber noch nicht frei. Siehe [Gerätebetrieb und Prüfumfang](docs/GRBL_WORKFLOW.md).
 
 ## Ziel
 

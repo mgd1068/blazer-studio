@@ -1,6 +1,6 @@
 # Blazer Studio – Software-Testkandidat
 
-**Entwicklungszweig beta.6-dev:** Reale Bewegung einschließlich Referenzfahrt und Laserfreigabe bleibt nach der gemeldeten Kollision bis zur nachgewiesenen Geräteeinrichtung gesperrt. Die folgenden Simulatorfunktionen sind nutzbar. Ältere Paketberichte und Materialversuche sind keine Freigabe dieses neuen Stands. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md) und [Koordinatenvertrag](../MOTION_SAFETY.md).
+**Entwicklungszweig beta.7-dev:** Reale Bewegung einschließlich Referenzfahrt und Laserfreigabe bleibt nach der gemeldeten Kollision bis zur nachgewiesenen Geräteeinrichtung gesperrt. Die folgenden Simulatorfunktionen sind nutzbar. Ältere Paketberichte und Materialversuche sind keine Freigabe dieses neuen Stands. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md) und [Koordinatenvertrag](../MOTION_SAFETY.md).
 
 Getestete Paketplattform: **Ubuntu 26.04, x86_64**. Andere Linux-Versionen sind noch nicht als Paketplattform bestätigt. Es handelt sich um einen Software-Testkandidaten; Geräte-/Materialabnahme und externe Bedienungstests sind offen.
 
