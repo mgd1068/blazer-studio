@@ -172,6 +172,7 @@ class GrblTest : public QObject {
         // This is an independent fixture assumption, never a real-machine claim.
         session.commissionedEnvelope = QRectF(0, 0, 200, 150);
         session.commissionedModalContract = true;
+        session.commissionedHomingContract = true;
     }
     void requireReference(ControllerSession &session) {
         if (auto grbl = dynamic_cast<GrblSession *>(&session))
@@ -265,11 +266,74 @@ class GrblTest : public QObject {
         QVERIFY(!controller.commands.contains("M9"));
         QVERIFY(!machine.accessoryJobActive);
     }
+    void enabledHomingSettingAndIdleOrAlarmDoNotAuthorizeHoming_data() {
+        QTest::addColumn<QString>("controllerState");
+        QTest::newRow("Idle") << QString("Idle");
+        QTest::newRow("Alarm") << QString("Alarm");
+    }
+    void enabledHomingSettingAndIdleOrAlarmDoNotAuthorizeHoming() {
+        QFETCH(QString, controllerState);
+        Controller controller;
+        controller.resetState = controllerState;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(controller.commands.contains("$G"));
+        QTRY_COMPARE(session.state,
+                     controllerState == "Idle" ? QString("Bereit") : controllerState);
+        QVERIFY(session.homing); // Controller explicitly reports $22=1.
+        QVERIFY(!session.homingSafetyError().isEmpty());
+        const auto before = controller.commands;
+        session.home();
+        QTest::qWait(40);
+        QCOMPARE(controller.commands, before);
+        QVERIFY(!controller.commands.contains("$H"));
+        QVERIFY(!session.status().positionReferenced);
+    }
+    void homingEvidenceExpiresOnEveryResetDisconnectAndFault_data() {
+        QTest::addColumn<QString>("event");
+        for (const auto &event : {"stop", "close", "alarm", "fault", "restart"})
+            QTest::newRow(event) << QString(event);
+    }
+    void homingEvidenceExpiresOnEveryResetDisconnectAndFault() {
+        QFETCH(QString, event);
+        Controller controller;
+        GrblSession session;
+        QVERIFY(session.open(controller.port));
+        QTRY_VERIFY(session.ready());
+        session.commissionedHomingContract = true;
+        QVERIFY(session.homingSafetyError().isEmpty());
+        if (event == "stop") {
+            session.stop();
+            QTRY_VERIFY(session.ready());
+        } else if (event == "close") {
+            session.close();
+            QTRY_VERIFY(controller.commands.count("M5 S0") >= 2); // Drain best-effort close output.
+        } else if (event == "alarm") {
+            controller.status = "Alarm";
+            controller.report();
+            QTRY_COMPARE(session.state, QString("Alarm"));
+        } else if (event == "fault") {
+            controller.reply("error:20\r\n");
+            QTRY_VERIFY(!session.connected());
+        } else {
+            controller.reply("Grbl 1.3a ['$' for help]\r\n");
+            QTRY_VERIFY(!session.commissionedHomingContract);
+            QTRY_VERIFY(session.ready());
+        }
+        QVERIFY(!session.commissionedHomingContract);
+        QVERIFY(!session.homingSafetyError().isEmpty());
+        const auto before = controller.commands;
+        session.home();
+        QTest::qWait(30);
+        QCOMPARE(controller.commands, before);
+        QVERIFY(!controller.commands.contains("$H"));
+    }
     void homingAloneNeverCommissionsARealMachineCoordinateContract() {
         Controller c;
         GrblSession s;
         QVERIFY(s.open(c.port));
         QTRY_VERIFY(s.ready());
+        s.commissionedHomingContract = true; // Only homing mechanics are synthetic evidence here.
         s.home();
         QTRY_VERIFY(s.status().positionReferenced && s.ready());
         QVERIFY(!s.motionSafetyError().isEmpty());
@@ -298,14 +362,21 @@ class GrblTest : public QObject {
         Document document;
         Machine machine(&document);
         QVERIFY(machine.motionSafetyError().isEmpty());
+        QVERIFY(machine.homingSafetyError().isEmpty());
         QVERIFY(machine.connectHardware(c.port));
         QTRY_VERIFY(machine.ready());
         QVERIFY(!machine.motionSafetyError().isEmpty());
+        QVERIFY(!machine.homingSafetyError().isEmpty());
+        machine.home();
+        QTest::qWait(30);
+        QVERIFY(!c.commands.contains("$H"));
+        static_cast<GrblSession *>(machine.session.get())->commissionedHomingContract = true;
         machine.home();
         QTRY_VERIFY(machine.positionReferenced());
         QVERIFY(!machine.motionSafetyError().isEmpty());
         machine.useSimulator();
         QVERIFY(machine.motionSafetyError().isEmpty());
+        QVERIFY(machine.homingSafetyError().isEmpty());
         QVERIFY(machine.ready());
     }
     void staleIdlePositionCannotAuthorizeMotionOrEmission() {
@@ -447,6 +518,7 @@ class GrblTest : public QObject {
         QVERIFY(session.open(controller.port));
         QTRY_VERIFY(session.ready());
         controller.autoAck = false;
+        session.commissionedHomingContract = true;
         session.home();
         QTRY_VERIFY(controller.commands.contains("M5"));
         controller.report();

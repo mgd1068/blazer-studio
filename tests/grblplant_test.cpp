@@ -148,6 +148,7 @@ bool near(QPointF a, QPointF b) {
 class GrblTest : public QObject {
     Q_OBJECT
     void homeAndSupplySyntheticContract(GrblSession &session, QRectF bounds) {
+        session.commissionedHomingContract = true;
         session.home();
         QTRY_VERIFY(session.ready() && session.status().positionReferenced);
         session.commissionedEnvelope = bounds;
@@ -246,6 +247,12 @@ class GrblTest : public QObject {
         QCOMPARE(port.plant.physical, QPointF(80, 60));
         QVERIFY(port.plant.travel.isEmpty());
         QCOMPARE(port.plant.modal.spindle, 0);
+        session.home();
+        QTest::qWait(40);
+        QCOMPARE(port.plant.physical, QPointF(80, 60));
+        QCOMPARE(port.plant.homes, 0);
+        QVERIFY(!session.homingSafetyError().isEmpty());
+        session.commissionedHomingContract = true; // Independent, synthetic setup evidence.
         session.home();
         QTRY_VERIFY(session.status().positionReferenced && session.ready());
         QCOMPARE(port.plant.physical, QPointF(2, 2));

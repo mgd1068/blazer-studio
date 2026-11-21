@@ -17,6 +17,7 @@ struct ControllerStatus {
     bool verified = false;
     bool positionReferenced = false;
     QString motionSafetyError;
+    QString homingSafetyError;
 };
 class ControllerSession : public QObject {
     Q_OBJECT

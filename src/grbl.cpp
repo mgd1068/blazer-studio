@@ -73,6 +73,23 @@ QString GrblSession::motionSafetyError() const {
         return "Reale Ausgabe gesperrt: aktuelle Controllerposition nicht frisch bestätigt.";
     return {};
 }
+QString GrblSession::homingSafetyError() const {
+    if (!commissionedHomingContract)
+        return "Reale Referenzfahrt gesperrt: Endschalter, Homing-Richtung und Parameter "
+               "sind für diesen Controller nicht gesondert verifiziert. $22=1 allein "
+               "ist keine Freigabe für Bewegung.";
+    if (!homing)
+        return "Referenzfahrt nicht aktiviert ($22).";
+    if (busy() || firing)
+        return "Referenzfahrt gesperrt: eine andere Controlleraktion ist aktiv.";
+    const bool alarmReady = connected() && controllerState == "Alarm" && statusFresh() &&
+                            knownOutput && reportedOutput == 0 && !activeInputs && version &&
+                            laserMode && powerScale && reportMm && bedWidth && bedHeight;
+    if (!ready() && !alarmReady)
+        return "Referenzfahrt gesperrt: aktueller geprüfter Leerlauf oder Alarmstatus mit "
+               "gemeldetem Ausgang 0 fehlt.";
+    return {};
+}
 bool GrblSession::ready() const {
     return statusFresh() && connected() && !handshaking && configurationValid() && knownPosition &&
            knownOffset && knownOutput && reportedOutput == 0 && !activeInputs &&
@@ -142,7 +159,7 @@ bool GrblSession::open(const QString &port) {
 }
 void GrblSession::handshake() {
     lastStatus.invalidate();
-    commissionedModalContract = false;
+    commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     awaitingReset = false;
     connectionVerified = false;
@@ -171,7 +188,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
-    commissionedModalContract = false;
+    commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     const bool active = busy() || firing;
     poll.stop();
@@ -201,7 +218,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message) {
-    commissionedModalContract = false;
+    commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     // A write/flush on a lost USB port can synchronously emit another serial
     // error. Do not recurse while attempting the best-effort shutdown.
@@ -407,7 +424,7 @@ void GrblSession::line(const QByteArray &s) {
         else
             lastStatus.invalidate();
         if (controllerState == "Alarm" || controllerState == "Door") {
-            commissionedModalContract = false;
+            commissionedModalContract = commissionedHomingContract = false;
             positionReferenced = homingPending = false;
             connectionVerified = false;
             if (executing() || firing) {
@@ -638,7 +655,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
-    commissionedModalContract = false;
+    commissionedModalContract = commissionedHomingContract = false;
     positionReferenced = homingPending = false;
     if (!connected())
         return;
@@ -682,10 +699,8 @@ void GrblSession::jog(double dx, double dy) {
     commands({"M5", "$J=G91 G21 X" + n(dx) + " Y" + n(dy) + " F600"});
 }
 void GrblSession::home() {
-    if (busy() || firing)
-        return;
-    if (!homing) {
-        append("Referenzfahrt nicht aktiviert ($22).");
+    if (const auto error = homingSafetyError(); !error.isEmpty()) {
+        append(error);
         return;
     }
     if (connected() && controllerState == "Alarm" && !busy() && version && laserMode &&

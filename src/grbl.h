@@ -28,7 +28,8 @@ class GrblSession : public ControllerSession {
                 state,
                 verified(),
                 positionReferenced,
-                motionSafetyError()};
+                motionSafetyError(),
+                homingSafetyError()};
     }
     QStringList logEntries() const override { return log; }
     const DeviceProfile &deviceProfile() const override { return m_deviceProfile; }
@@ -56,6 +57,7 @@ class GrblSession : public ControllerSession {
     int feedOverride = 100, powerOverride = 100;
     bool overrideFeedback = false;
     QString motionSafetyError() const;
+    QString homingSafetyError() const;
     void pause() override;
     void stop() override;
     void jog(double dx, double dy) override;
@@ -73,6 +75,9 @@ class GrblSession : public ControllerSession {
     // commissioning workflow must bind these to a verified controller identity.
     std::optional<QRectF> commissionedEnvelope;
     bool commissionedModalContract = false;
+    // Separate evidence for switches, directions and homing parameters. Homing
+    // itself is physical motion and cannot be authorized by $22 or Idle alone.
+    bool commissionedHomingContract = false;
     QElapsedTimer lastStatus;
     void receive();
     void line(const QByteArray &line);

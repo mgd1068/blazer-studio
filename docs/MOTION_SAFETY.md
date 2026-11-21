@@ -27,6 +27,18 @@ befreundete PTY-Testklasse kann einen expliziten synthetischen Vertrag injiziere
 Die frühere positive Annahme ist damit aus dem realen Ausgabepfad entfernt.
 Die Homing-Protokollbestätigung bleibt als eigenständiger Zustand erhalten.
 
+Auch die Referenzfahrt selbst bleibt ohne einen **eigenen Homingvertrag**
+gesperrt. `$22=1` und ein plausibler Idle-/Alarmbericht belegen weder korrekt
+verdrahtete Endschalter noch richtige Homing-Richtung, Geschwindigkeiten oder
+Pull-off-Verhalten. `homingSafetyError` meldet den fehlenden Nachweis im Backend
+und an die Oberfläche. Ein zukünftiger separater Einrichtungsablauf muss diese
+Evidenz an Geräteinstanz, Endpunkt, Controller und geprüfte Parameter binden;
+gewöhnliche Produktionsbedienung darf keine solche Freigabe erfinden.
+Reale Sessions erhalten derzeit keinen Homingvertrag und können auch kein `$H`
+senden. Reset, Trennen, Störung und Alarm/Door entwerten diesen Vertrag.
+Nur befreundete PTY-Fixtures können unabhängige synthetische Homingevidenz
+bereitstellen; sie ersetzt weiterhin keine Freigabe des G54-/Maschinenraums.
+
 Zusätzliche Korrekturen:
 
 - Vor Start werden tatsächliche Position und **beide** Endpunkte jedes Segments
@@ -75,7 +87,9 @@ Sperre ersetzen. Keine frei importierbare Eigenschaft darf hierfür genügen.
 
 ## Offline-Nachweise
 
-`tests/grbl_test.cpp` prüft insbesondere die Sperre trotz Homing, unveränderte
+`tests/grbl_test.cpp` prüft insbesondere die Homingsperre trotz `$22=1` und
+Idle/Alarm, das Verfallen synthetischer Homingevidenz nach Stop, Trennen,
+Neustart und Fehler, die Ausgabesperre trotz synthetisch erlaubtem Homing sowie unveränderte
 Simulatorbedienung, veraltete Idle-Daten, negative Maschinenkoordinaten mit
 explizitem synthetischen Rahmen, die erste Anfahrt, widersprüchliche Berichte,
 unvermittelte Offsetänderung und Fehler bei gepuffertem Versand.
@@ -107,8 +121,10 @@ Zählern ist eine ausdrückliche Fixtureannahme.
 
 Über einen echten Unix-PTY läuft der unveränderte Produktionsadapter gegen
 diese virtuelle Maschine. Ohne Inbetriebnahmevertrag bleiben Job/Jog/Rahmen/
-Arbeitsnull/Fokus ohne physische Pfadbewegung; explizites virtuelles Homing
-bleibt separat möglich und allein weiterhin unzureichend. Mit ausschließlich
+Arbeitsnull/Fokus ohne physische Pfadbewegung; auch explizites Homing ohne
+separaten Homingvertrag verändert die virtuelle physische Position nicht.
+Nur mit privat injizierter synthetischer Homingevidenz wird im positiven
+Testfall virtuell referenziert; dies bleibt allein weiterhin unzureichend. Mit ausschließlich
 privat injizierter Testevidenz folgen Rechtecke den unabhängig festgelegten
 physischen Eckpunkten, einschließlich voller positiver und negativer
 200×150-mm-Räume und eines verschobenen G54. Der tatsächliche Startpunkt liegt

@@ -24,8 +24,12 @@ Es gibt keine automatische Referenzfahrt oder Fortsetzung eines alten Auftrags.
 **Reale Ausgabe bleibt auch nach erfolgreicher Referenzfahrt gesperrt.** Es gibt
 noch keinen hardwareverifizierten Vertrag für die vorzeichenbehafteten
 Maschinengrenzen und die G54-Zuordnung des angeschlossenen Controllers.
-`motionSafetyError` nennt diesen Grund; Verbindung, Diagnose und ausdrücklich
-angeforderte Referenzfahrt bleiben davon getrennt. Profile, importierte Projekte
+`motionSafetyError` nennt diesen Grund; Verbindung und Diagnose bleiben davon
+getrennt. Auch eine Referenzfahrt ist reale Bewegung: `homingSafetyError` sperrt
+sie ohne eigenen Nachweis für Endschalter, Homing-Richtung und Parameter.
+`$22=1`, Idle oder Alarm allein erteilen keine Freigabe. Der notwendige separate
+Inbetriebnahmeworkflow ist noch nicht implementiert; reale Sessions erhalten
+keinen solchen Vertrag. Profile, importierte Projekte
 und gemeldete Positionen können diesen Vertrag nicht freigeben. Simulator,
 Planung und Datei-Export bleiben verfügbar; Export ist keine Hardwarefreigabe.
 
@@ -65,7 +69,7 @@ Die aktuelle echte M3-Anbindung prüft GRBL 1.1 beziehungsweise den am Blaze X g
 
 Jobübertragung verwendet Zeichenkredite: höchstens 100 Bytes stehen gleichzeitig ohne `ok` im RX-Puffer. Jede Zeile bleibt ihrer Bestätigung zugeordnet; einzelne manuelle Aktionen und die Konfigurationsabfrage bleiben sequenziell. Zusätzliche Status- und Meldungszeilen gelten nicht als Bestätigung. Nach der letzten Bestätigung wartet der Auftrag noch auf eine neue **Idle**-Meldung. Pause benutzt Feed Hold, Fortsetzen Cycle Start; Stop benutzt Feed Hold und Soft-Reset und setzt keinen Auftrag automatisch fort. Fehler, Alarm oder Kommunikationsausfall brechen die Host-Übertragung ab.
 
-Jog verwendet relative `$J`-Bewegungen und begrenzt die Zielposition im Arbeitsraum. [Rahmenfahrt](FRAMING.md) benutzt Laser-Aus und Eilgänge; ihr Ziel kann der berechnete Auftrag, die sichtbare Auswahl oder T1/T2 sein. Referenzfahrt ist eine ausdrücklich ausgelöste Aktion bei aktiviertem Homing; **Arbeitsnullpunkt hier setzen** setzt X/Y in G54 am aktuellen Ort.
+Jog verwendet relative `$J`-Bewegungen und begrenzt die Zielposition im Arbeitsraum. [Rahmenfahrt](FRAMING.md) benutzt Laser-Aus und Eilgänge; ihr Ziel kann der berechnete Auftrag, die sichtbare Auswahl oder T1/T2 sein. Referenzfahrt verlangt einen separat nachgewiesenen Homingvertrag und eine ausdrückliche Aktion; aktiviertes `$22` allein genügt nicht; **Arbeitsnullpunkt hier setzen** setzt X/Y in G54 am aktuellen Ort.
 
 Nach künftig nachgewiesenem Koordinaten-/Zubehörvertrag würde der M3-Hardware-Fokusknopf einen **0,2-s-Puls mit S20 (2 % Sollwert)** an. Puls, Verweilen und M5/S0 werden gemeinsam in den RX-Puffer geschickt; Loslassen fordert einen Abbruch an, zusätzlich besteht ein Host-Zeitlimit. Ein beschädigter oder ausgefallener Kommunikationsweg kann keinen garantierten Laser-Aus-Befehl liefern. Die optische Wirkung und geräteseitige Abschaltung dieses Pulses wurden am realen Gerät noch nicht abgenommen. Absaugung und Lasermodulkühlung werden nicht als austauschbare Funktionen behandelt; keine ungeprüften Lüfterparameter werden umgeschrieben.
 

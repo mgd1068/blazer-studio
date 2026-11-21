@@ -11,6 +11,7 @@ class Machine : public Simulator {
     Q_PROPERTY(QVariantList capabilities READ capabilities CONSTANT)
     Q_PROPERTY(bool connectionVerified READ connectionVerified NOTIFY changed)
     Q_PROPERTY(QString motionSafetyError READ motionSafetyError NOTIFY changed)
+    Q_PROPERTY(QString homingSafetyError READ homingSafetyError NOTIFY changed)
     Q_PROPERTY(QString extractionSafetyError READ extractionSafetyError NOTIFY changed)
     Q_PROPERTY(QStringList processingSafetyErrors READ processingSafetyErrors NOTIFY changed)
     Q_PROPERTY(QStringList ports READ ports NOTIFY changed)
@@ -24,6 +25,9 @@ class Machine : public Simulator {
     QVariantList capabilities() const;
     QString motionSafetyError() const {
         return live && session ? session->status().motionSafetyError : QString();
+    }
+    QString homingSafetyError() const {
+        return live && session ? session->status().homingSafetyError : QString();
     }
     QString extractionSafetyError() const {
         return live ? accessory.preflightError(accessoryClock.elapsed()) : QString();
