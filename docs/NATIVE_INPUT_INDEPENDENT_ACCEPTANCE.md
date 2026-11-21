@@ -66,3 +66,25 @@ seals that old input against the new generation. This is an explicit cancellatio
 retirement gap. Actual native release already revokes the collector, and a real
 Button's pressed=false separately prevents consumption; this red fixture keeps
 pressed=true intentionally to isolate the public cancel contract.
+
+## Final focused verification
+
+With adapter ae49013/4610de3 and Machine cancel fix35c9bcc, independent adapter
+checks pass20/20 normally (345ms) and ASan/UBSan (349ms), including direct collector
+deletion from its continuity-revocation callback. Original adapter suite passes
+9/9 under ASan/UBSan (793ms). The actual Machine-to-worker focus suite passes8/8
+normally (2098ms) and with the complete linked core instrumented by ASan/UBSan
+(2872ms),0skipped. The explicit cancel regression becomes green without changing
+its meaning. Leak detection remains disabled; no leak-free claim is made.
+
+The standalone review CMake projects live in the evidence directory only, without
+product CMake edits. Both actual core builds use immutable product deltas on6c9ffca
+plus the test commits; the separate Root offline-noRuntime branch is not required
+by these Allowed+own-PTY fixtures. A pre-existing missing-field-initializer compiler
+warning on ControllerStatus::extractionSafetyError remains in that historical core
+base; it was not a Qt runtime warning or sanitizer finding. Root integration owns
+registration, final complete tests, source freeze and packaging.
+
+These results accept the specified synthetic focus paths only. They do not cover
+generic Start/Jog/Home/Frame/Zero native action provenance, real OS event delivery,
+external usability, physical controller timing, mechanical position or airflow.
