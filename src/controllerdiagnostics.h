@@ -87,7 +87,8 @@ class ControllerDiagnostics {
         ExcessOverride,
         UnexpectedAck,
         ConfigurationReadback,
-        ReportedPhysicalBounds
+        ReportedPhysicalBounds,
+        HostClockContinuity
     };
     enum class ResetReason { None, Connect, Stop, Fault, Disconnect };
     enum class ControllerState { Unknown, Idle, Run, Home, Hold, Alarm, Door, Jog, Check, Sleep };
@@ -598,7 +599,8 @@ class ControllerDiagnostics {
                                              "excessOverride",
                                              "unexpectedAcknowledgement",
                                              "configurationReadback",
-                                             "reportedPhysicalBounds"};
+                                             "reportedPhysicalBounds",
+                                             "hostClockContinuity"};
         return value >= 0 && size_t(value) < sizeof(names) / sizeof(*names) ? names[value]
                                                                             : "unknown";
     }

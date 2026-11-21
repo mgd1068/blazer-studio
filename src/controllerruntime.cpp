@@ -11,6 +11,8 @@
 #include <QThreadPool>
 #include <chrono>
 #include <deque>
+#include <algorithm>
+#include <time.h>
 
 namespace {
 qint64 nowMs() {
@@ -131,7 +133,7 @@ ControllerStatus ControllerRuntimeSession::status() const {
     result.closing |= m_closing || m_mailbox->close.load();
     result.opening |= m_pendingOpen != 0;
     result.requestPending |= m_pendingOpen != 0 || !m_mailbox->normal.empty() ||
-                             m_mailbox->dispatchInFlight;
+                             m_mailbox->dispatchInFlight || m_mailbox->continuityFence;
     result.occupied |= result.opening || result.requestPending || m_mailbox->close.load() ||
                        m_mailbox->stop.load();
     result.occupied |= result.closing;
@@ -339,6 +341,62 @@ ControllerRuntimeWorker::ControllerRuntimeWorker(DeviceProfile profile,
     : m_profile(std::move(profile)), m_mailbox(std::move(mailbox)) {
 }
 ControllerRuntimeWorker::~ControllerRuntimeWorker() = default;
+std::optional<ControllerRuntimeWorker::ClockInterval> ControllerRuntimeWorker::readClockInterval() {
+    timespec before{},boot{},after{};
+    if (clock_gettime(CLOCK_MONOTONIC,&before)!=0 || clock_gettime(CLOCK_BOOTTIME,&boot)!=0 ||
+        clock_gettime(CLOCK_MONOTONIC,&after)!=0) return {};
+    const auto ns=[](const timespec &t) { return qint64(t.tv_sec)*1000000000LL+t.tv_nsec; };
+    const auto first=ns(before),last=ns(after),value=ns(boot);
+    // A delayed/descheduled sample is not permission to assume continuity.
+    if (first<0 || last<first || value<0 || last-first>5000000) return {};
+    return ClockInterval{value-last,value-first};
+}
+bool ControllerRuntimeWorker::checkClockContinuity() {
+    if (m_continuityHandling) return false;
+    const auto sample=m_clockSample();
+    const bool wellFormed=sample && sample->lowNs>=-5000000 && sample->highNs>=0 && sample->highNs>=sample->lowNs &&
+        quint64(sample->highNs)-quint64(sample->lowNs)<=5000000ULL;
+    bool valid=wellFormed;
+    if (valid && m_clockBaseline) {
+        const auto low=std::max(sample->lowNs,m_clockBaseline->lowNs);
+        const auto high=std::min(sample->highNs,m_clockBaseline->highNs);
+        valid=low<=high;
+        if (valid) m_clockBaseline=ClockInterval{low,high};
+    } else if (valid) m_clockBaseline=sample;
+    if (valid) return true;
+    m_continuityHandling=true;
+    const auto cleanup=qScopeGuard([this] { m_continuityHandling=false; });
+    std::deque<Request> rejected;
+    {
+        QMutexLocker lock(&m_mailbox->mutex);
+        m_mailbox->continuityFence=true;
+        m_mailbox->generation.fetch_add(1);
+        m_mailbox->stop.store(true);
+        m_mailbox->normal.swap(rejected);
+        m_mailbox->wakeLocked();
+    }
+    m_accessory.transition(AccessoryContract::Event::Fault);
+    m_jobActive=m_focusActive=false;
+    ++m_connectionEpoch;
+    if (m_core) {
+        m_core->fail("Host-Zeitkontinuität verloren. Verbindung gesperrt; vor neuer Ausgabe explizit neu verbinden und Referenz/Luftstrom erneut prüfen.",
+                     ControllerDiagnostics::FaultCause::HostClockContinuity);
+        retirePrepared();
+    }
+    // Reset the comparison baseline only after authority/queued work has been
+    // revoked. This permits a later explicit Open; never automatic reconnection.
+    m_clockBaseline=wellFormed ? sample : std::nullopt;
+    publish();
+    {
+        QMutexLocker lock(&m_mailbox->mutex);
+        m_mailbox->continuityFence=false;
+    }
+    for(const auto &request:rejected)
+        if (request.kind==Kind::Open)
+            emit openFinished(request.id,false,"Verbindung wegen verlorener Host-Zeitkontinuität abgelehnt.");
+    retireControllerRequests(std::move(rejected));
+    return false;
+}
 void ControllerRuntimeWorker::initialize() {
     Q_ASSERT(QThread::currentThread() == thread());
     m_accessoryClock.start();
@@ -349,11 +407,12 @@ void ControllerRuntimeWorker::initialize() {
     m_watchdog->setInterval(50);
     connect(m_watchdog, &QTimer::timeout, this, &ControllerRuntimeWorker::watchdog);
     m_core->dispatchCancelled = [this] {
-        return m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load();
+        return !checkClockContinuity() || m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load();
     };
     m_core->dispatchPreflight = [this] { return cancelDispatch(); };
     connect(m_core.get(), &ControllerSession::changed, this, &ControllerRuntimeWorker::coreChanged);
     m_watchdog->start();
+    checkClockContinuity();
     publish();
 }
 void ControllerRuntimeWorker::drain() {
@@ -363,6 +422,7 @@ void ControllerRuntimeWorker::drain() {
         QMutexLocker lock(&m_mailbox->mutex);
         m_mailbox->wakePending = false;
     }
+    checkClockContinuity(); // Revocation/close latches below still run even after a clock fault.
     if (m_mailbox->focusOff.exchange(false) && (m_focusActive || m_core->firing))
         m_core->focus(false);
     if (m_mailbox->stop.exchange(false)) {
@@ -401,7 +461,7 @@ void ControllerRuntimeWorker::drain() {
         case Kind::Open: {
             ++m_connectionEpoch;
             m_accessory = AccessoryContract(true);
-            const bool opened = m_core->open(request.endpoint);
+            const bool opened = m_core->open(request.endpoint) && checkClockContinuity();
             emit openFinished(
                 request.id, opened,
                 opened ? QString() : QString("Controlleranschluss konnte nicht geöffnet werden."));
@@ -487,6 +547,7 @@ void ControllerRuntimeWorker::retirePrepared() {
     retireControllerJob(std::move(m_activePrepared));
 }
 bool ControllerRuntimeWorker::cancelDispatch() {
+    if (!checkClockContinuity()) return true;
     if (m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load())
         return true;
     if (!m_core || m_core->handshaking || m_core->awaitingReset || m_core->homingPending)
@@ -538,6 +599,7 @@ void ControllerRuntimeWorker::coreChanged() {
 void ControllerRuntimeWorker::watchdog() {
     if (!m_core)
         return;
+    if (!checkClockContinuity()) return;
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     const bool coordinate = status.coordinateUpdatePending && !output;

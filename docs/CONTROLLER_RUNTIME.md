@@ -54,6 +54,21 @@ time. OS scheduling, allocation, drivers, process failure and finite dispatch
 work can still delay servicing. Runtime and airflow fixtures use a separate PTY
 peer process so GUI sleep does not stop the synthetic controller as well.
 
+The worker also verifies host clock continuity independently of GUI input. A
+MONOTONIC-before / BOOTTIME / MONOTONIC-after sample bounds the suspend offset
+in nanoseconds. Disjoint offset intervals, failed reads or a sampling interval
+above5 ms revoke the global request generation, reject queued Open requests,
+invalidate reference and accessory observations, and attempt fault reset/close.
+This runs at request drain, watchdog, receive processing and normal-write
+preflight; status/ACK/airflow freshness cannot revive pre-suspend evidence. A
+small mailbox fence covers fault publication so a concurrent new Open cannot
+slip into discarded work. Later explicit reconnection needs fresh reference and
+flow; there is no automatic reconnect, retry, homing or resume. Software cannot
+stop firmware or laser output while the host is suspended, and cannot make the
+clock-check/write interval atomic with external suspend. Independent hardware
+shutdown remains a commissioning requirement. Tests inject a private synthetic
+clock interval discontinuity; they do not suspend the real host.
+
 Real motion, homing and override commissioning contracts still default closed.
 No real airflow producer is supplied by this thread refactor. The separate
 [native focus adapter](NATIVE_INPUT_INTENT.md) supports explicitly reviewed clock

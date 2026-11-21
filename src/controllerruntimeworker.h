@@ -4,6 +4,8 @@
 #include "grbl.h"
 #include <QElapsedTimer>
 #include <QTimer>
+#include <functional>
+#include <optional>
 
 // Internal implementation header. No GUI caller may access these objects directly.
 class ControllerRuntimeWorker final : public QObject {
@@ -27,6 +29,13 @@ class ControllerRuntimeWorker final : public QObject {
     quint64 m_lastFocusInteraction = 0;
     PreparedControllerJob::Ptr m_activePrepared;
     quint64 m_connectionEpoch = 0, m_sequence = 0;
+    struct ClockInterval { qint64 lowNs, highNs; };
+    static std::optional<ClockInterval> readClockInterval();
+    // Private synthetic seam; no configuration/UI can override the real clock.
+    std::function<std::optional<ClockInterval>()> m_clockSample = readClockInterval;
+    std::optional<ClockInterval> m_clockBaseline;
+    bool m_continuityHandling = false;
+    bool checkClockContinuity();
     void initialize();
   private slots:
     void drain();

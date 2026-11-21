@@ -45,6 +45,7 @@ struct ControllerRuntimeMailbox {
     // Reservation spans pop -> core dispatch -> final snapshot publication. Nested
     // Core.changed publications cannot make a dequeued request appear idle.
     bool dispatchInFlight = false;
+    bool continuityFence = false;
     bool wakePending = false, accepting = true;
     bool notificationPending = false;
     ControllerStatus latest;
@@ -62,7 +63,7 @@ struct ControllerRuntimeMailbox {
         bool accepted = false;
         {
             QMutexLocker lock(&mutex);
-            if (accepting && normal.size() < 16 && context) {
+            if (accepting && !continuityFence && normal.size() < 16 && context) {
                 request.generation = generation.load();
                 request.connectionEpoch = latest.connectionEpoch;
                 request.focusGeneration = focusGeneration.load();
