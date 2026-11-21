@@ -50,6 +50,14 @@ struct ControllerRuntimeMailbox {
     bool continuityFence = false;
     bool wakePending = false, accepting = true;
     bool notificationPending = false;
+    bool takeControl(std::atomic_bool &latch) {
+        // status() observes the latch and reservation under this same mutex.
+        // Transfer ownership before consuming the only public pending evidence.
+        QMutexLocker lock(&mutex);
+        if(!latch.exchange(false))return false;
+        dispatchInFlight=true;
+        return true;
+    }
     ControllerStatus latest;
     QStringList log;
     QVariantMap diagnostic;

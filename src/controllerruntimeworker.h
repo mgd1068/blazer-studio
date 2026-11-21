@@ -42,6 +42,7 @@ class ControllerRuntimeWorker final : public QObject {
     std::function<std::optional<ClockInterval>()> m_clockSample = readClockInterval;
     std::optional<ClockInterval> m_clockBaseline;
     bool m_continuityHandling = false;
+    std::function<void()> m_stopHandoffProbe; // Private test boundary; unset in production.
     bool checkClockContinuity();
     void initialize();
   private slots:

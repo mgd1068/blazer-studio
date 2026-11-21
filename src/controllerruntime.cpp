@@ -460,14 +460,15 @@ void ControllerRuntimeWorker::drain() {
     checkClockContinuity(); // Revocation/close latches below still run even after a clock fault.
     if (m_mailbox->focusOff.exchange(false) && (m_focusActive || m_core->firing))
         m_core->focus(false);
-    if (m_mailbox->stop.exchange(false)) {
+    if (m_mailbox->takeControl(m_mailbox->stop)) {
+        if(m_stopHandoffProbe)m_stopHandoffProbe();
         m_accessory.transition(AccessoryContract::Event::Fault);
         m_jobActive = m_focusActive = false;
         if (!m_mailbox->close.load() && !m_core->awaitingReset)
             m_core->stop();
         retirePrepared();
     }
-    if (m_mailbox->close.exchange(false)) {
+    if (m_mailbox->takeControl(m_mailbox->close)) {
         m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_core->close();
         ++m_connectionEpoch;
@@ -762,6 +763,7 @@ void ControllerRuntimeWorker::shutdown() {
     if (m_core) {
         m_core->close();
         retirePrepared();
+        publish(true); // Complete any control reservation with the actual closed snapshot.
         m_core.reset();
     }
     std::deque<ControllerRuntimeRequest> retired;
