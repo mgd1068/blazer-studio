@@ -18,7 +18,7 @@ line. Each synchronous response contains the caller's `id`.
 
 | Action | Fields / result |
 | --- | --- |
-| `set` | `values`: state, position/offset XY pairs, statusEnabled, ackEnabled, resetEnabled |
+| `set` | `values`: state, position/offset XY pairs, statusEnabled, ackEnabled, resetEnabled, runOnPoweredCommand |
 | `schedule` | delayMs 0–10000; operation with action set/reply/report/disconnect |
 | `report` | Send synthetic status using current configured values |
 | `reply` | data: explicit ASCII protocol input for adversarial adapter tests |
@@ -34,6 +34,11 @@ monotonic return timestamp. This distinguishes pre-return wire activity from
 delayed Qt delivery. Do not schedule future operations through GUI callbacks.
 Do not request repeated snapshots while the parent cannot consume them.
 
+The explicit `runOnPoweredCommand` timing option defaults to false. When enabled,
+a positive S word on M3/M4/G1 sets synthetic Run; Run remains until reset or an
+explicit state update, even after M5. This lets a test distinguish ACK delivery
+from controller completion. It is not a firmware planner or physical model.
+
 The peer responds to the bounded handshake, status queries, settings/modal
 queries, ACKs and Hold/Reset/Resume. It records override bytes without assuming
 firmware processing semantics. It does **not** model physical movement, laser
@@ -43,7 +48,7 @@ fixtures. This fixture alone proves no runtime improvement; tests must exercise
 the actual production runtime and inspect the independently recorded outcome.
 
 Run `python3 tests/runtime_pty_peer_test.py -v` (also CTest `runtime_pty_peer` on
-Unix). Five fixture checks cover handshake/realtime, scheduled state/status while
-the parent sleeps, independently timed hangup, status silence with continuing
+Unix). Six fixture checks cover handshake/realtime, scheduled state/status while
+the parent sleeps, independently timed hangup, explicit synthetic busy mode, status silence with continuing
 ACKs, fragmented input and bounded journal retention. Processes exit on EOF;
 test failures have bounded waits and kill only the specific child if necessary.

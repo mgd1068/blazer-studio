@@ -12,6 +12,7 @@ import heapq
 import json
 import math
 import os
+import re
 import selectors
 import sys
 import termios
@@ -34,6 +35,7 @@ class Peer:
         self.position = [0.0, 0.0]
         self.offset = [0.0, 0.0]
         self.status_enabled = self.ack_enabled = self.reset_enabled = True
+        self.run_on_powered_command = False
         self.banner = False
         self.input = bytearray()
         self.controls = bytearray()
@@ -100,6 +102,13 @@ class Peer:
                     line = self.input.decode('ascii')
                     self.input.clear()
                     self.event('command', line)
+                    # Explicit timing fixture only, not GRBL planner/physical
+                    # simulation. Remain busy even after M5 until reset/set.
+                    if self.run_on_powered_command and re.match(r'^M[34](?: |$)|^G1(?: |$)', line):
+                        power = re.search(r'(?:^| )S([+-]?[0-9]+(?:\.[0-9]+)?)(?: |$)', line)
+                        if power and float(power.group(1)) > 0:
+                            self.state = 'Run'
+                            self.event('syntheticRunOnOutputRequest')
                     if line == '$I':
                         self.reply('[VER:1.3a.20211103:]\r\n')
                     elif line == '$G':
@@ -121,7 +130,8 @@ class Peer:
         action = request.get('action')
         if action == 'set':
             values = request['values']
-            allowed = {'state', 'position', 'offset', 'statusEnabled', 'ackEnabled', 'resetEnabled'}
+            allowed = {'state', 'position', 'offset', 'statusEnabled', 'ackEnabled', 'resetEnabled',
+                       'runOnPoweredCommand'}
             if not values or set(values) - allowed:
                 raise ValueError('unknown synthetic setting')
             for key, value in values.items():
@@ -138,7 +148,8 @@ class Peer:
                     if type(value) is not bool:
                         raise ValueError('invalid switch')
                     setattr(self, {'statusEnabled': 'status_enabled', 'ackEnabled': 'ack_enabled',
-                                  'resetEnabled': 'reset_enabled'}[key], value)
+                                  'resetEnabled': 'reset_enabled',
+                                  'runOnPoweredCommand': 'run_on_powered_command'}[key], value)
             self.event('configured', values)
         elif action == 'schedule':
             delay = request['delayMs']

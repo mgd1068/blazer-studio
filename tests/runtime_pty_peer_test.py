@@ -130,6 +130,25 @@ class RuntimePeerTest(unittest.TestCase):
         self.assertLess(event['atNs'], parent_return)
         self.assertEqual(os.read(self.port, 1), b'')
 
+    def test_explicit_synthetic_run_mode_keeps_ack_and_completion_separate(self):
+        os.write(self.port, b'\n')
+        self.wire(b'Grbl 1.3a')
+        os.write(self.port, b'M4 S10\n')
+        self.wire(b'ok\r\n')
+        self.assertEqual(self.control('snapshot')['state'], 'Idle') # Default unchanged.
+        self.control('set', values={'runOnPoweredCommand':True})
+        os.write(self.port, b'M4 S0\n')
+        self.wire(b'ok\r\n')
+        self.assertEqual(self.control('snapshot')['state'], 'Idle')
+        os.write(self.port, b'M4 S10\nM5 S0\n')
+        self.wire(b'ok\r\nok\r\n')
+        snapshot = self.control('snapshot')
+        self.assertEqual(snapshot['state'], 'Run')
+        self.assertEqual(snapshot['counts']['syntheticRunOnOutputRequest'], 1)
+        os.write(self.port, b'\x18')
+        self.wire(b'Grbl 1.3a')
+        self.assertEqual(self.control('snapshot')['state'], 'Idle')
+
 
 if __name__ == '__main__':
     unittest.main()
