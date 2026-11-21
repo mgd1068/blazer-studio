@@ -16,7 +16,10 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
             emit changed(); // Also refresh stale airflow/status evidence while idle.
         }
         const auto status = session ? session->status() : ControllerStatus{};
+        const bool coordinateUpdate = status.coordinateUpdatePending && !accessory.activeLease() &&
+            !accessoryJobActive && !accessoryFocusActive && !status.firing;
         const bool unsafeMotion = live && status.executing && !status.referencing && !status.resetting &&
+            !coordinateUpdate &&
             (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty());
         const bool unsafeOutput = live && (accessory.activeLease() || accessoryJobActive || accessoryFocusActive || firing()) &&
             !errors.isEmpty();
@@ -94,6 +97,13 @@ void Machine::syncDeviceProfile() {
                     accessory.activeLease() || accessoryJobActive || accessoryFocusActive;
                 sessionWasVerified = status.verified;
                 sessionWasReferenced = status.positionReferenced;
+                if (status.coordinateUpdatePending && !accessory.activeLease() &&
+                    !accessoryJobActive && !accessoryFocusActive && !status.firing) {
+                    // Only the adapter's bounded, non-emitting WorkZero
+                    // transaction may await its fresh coordinate readback.
+                    emit changed();
+                    return;
+                }
                 accessory.transition(AccessoryContract::Event::Fault);
                 if (status.resetting && !status.firing) {
                     // The adapter has already requested a host reset. Fault the
