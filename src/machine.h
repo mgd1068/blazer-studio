@@ -130,6 +130,7 @@ class Machine : public Simulator {
 
   private:
     friend class GrblTest; // Synthetic PTY commissioning, never a public release switch.
+    friend class ControllerRuntimeTestAccess;
     Document *document;
     std::unique_ptr<ControllerSession> session;
     void syncDeviceProfile();

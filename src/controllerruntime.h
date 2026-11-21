@@ -11,6 +11,7 @@
 class ControllerRuntimeWorker;
 class ControllerRuntimeTestAccess;
 class ControllerRuntimeHost;
+class QTimer;
 struct ControllerRuntimeMailbox;
 class ControllerNativePressProof final {
     friend class Machine;
@@ -84,6 +85,7 @@ class ControllerRuntimeSession final : public ControllerSession {
     QByteArray m_candidateProfile;
     quint64 m_prepareSequence = 0;
     ControllerJobPreparation *m_preparation = nullptr;
+    QTimer *m_uiAgeTicker = nullptr; // Read-only projection, never a safety deadline.
     ControllerRuntimeInputStamp sealNativePress(quint64 interaction, quint64 window,
                                                 qint64 observedAt);
     void revokeFocusContext();

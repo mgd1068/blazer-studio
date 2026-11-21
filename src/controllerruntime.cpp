@@ -26,6 +26,8 @@ QThreadPool &retirementPool() {
     static QThreadPool pool;
     static const bool configured = [] {
         pool.setMaxThreadCount(1);
+        pool.setExpiryTimeout(-1);
+        pool.start([] {}); // Warm thread creation before any controller I/O is admitted.
         return true;
     }();
     Q_UNUSED(configured);
@@ -51,6 +53,10 @@ ControllerRuntimeSession::ControllerRuntimeSession(DeviceProfile profile, QObjec
       m_mailbox(std::make_shared<ControllerRuntimeMailbox>()) {
     m_preparation = new ControllerJobPreparation(this);
     connect(m_preparation, &ControllerJobPreparation::changed, this, [this] { emit changed(); });
+    m_uiAgeTicker = new QTimer(this);
+    m_uiAgeTicker->setInterval(100);
+    connect(m_uiAgeTicker, &QTimer::timeout, this, [this] { emit changed(); });
+    m_uiAgeTicker->start();
     (void)retirementPool(); // Construct pool owner in the GUI thread, never on the realtime path.
     m_mailbox->inputIssuer = QRandomGenerator::global()->generate64();
     auto host = m_host;
@@ -135,6 +141,8 @@ ControllerStatus ControllerRuntimeSession::status() const {
         result.connectionPhase = "opening";
     if (result.requestPending || result.opening)
         result.ready = false;
+    if (!result.statusFresh && result.connected && !result.opening && !result.closing)
+        result.state = "Runtime-/Controllerstatus veraltet";
     return result;
 }
 void ControllerRuntimeSession::consumeLatest() {
@@ -563,7 +571,7 @@ void ControllerRuntimeWorker::publish() {
     status.extractionSafetyError = m_accessory.preflightError(m_accessoryClock.elapsed());
     status.occupied = status.busy || status.firing || status.opening ||
                       status.accessoryLeaseActive || m_jobActive || m_focusActive;
-    status.connectionPhase = !status.connected       ? QString("closed")
+    status.connectionPhase = !status.connected       ? (status.state == "Verbindungsfehler" ? QString("fault") : QString("closed"))
                              : m_core->handshaking   ? QString("handshake")
                              : m_core->awaitingReset ? QString("opening")
                              : status.occupied       ? QString("active")

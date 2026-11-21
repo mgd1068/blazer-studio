@@ -72,12 +72,15 @@ void Machine::syncDeviceProfile() {
     session = ControllerSessions::create(document->deviceProfile(), error);
     if (session)
         connect(session.get(), &ControllerSession::changed, this, [this] {
+            const QPointer<Machine> alive(this);
             if (pendingSimulator && !session->status().connected && !session->status().occupied) {
                 pendingSimulator = false;
                 live = false;
                 simulatorFrameNonce = QUuid::createUuid().toRfc4122();
                 Simulator::stop();
+                if (!alive) return;
                 refreshPreviewPosition();
+                if (!alive) return;
             }
             emit changed();
         });
@@ -104,11 +107,18 @@ ControllerSubmission Machine::requestConnectHardware(const QString &port, const 
     if (!error.isEmpty()) return {0,false,error};
     if (!session || occupied() || session->status().connected)
         return {0,false,"Verbindung oder Geräteaktion noch belegt."};
-    Simulator::stop(); live = true; pendingSimulator = false;
+    const QPointer<Machine> alive(this);
+    Simulator::stop();
+    if (!alive) return {0,false,"Verbindungsbesitzer beendet."};
+    live = true; pendingSimulator = false;
     document->clearPreviewPosition();
+    if (!alive) return {0,false,"Verbindungsbesitzer beendet."};
     const auto result=session->requestOpen(port,binding);
+    if (!alive) return result;
     if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); runtime && !document->planningBusy()) runtime->prepare(document->job());
+    if (!alive) return result;
     if (!result.enqueued) document->notify(result.reason);
+    if (!alive) return result;
     emit changed(); return result;
 }
 bool Machine::occupied() const { return pendingSimulator || busy() || firing() || (live && session && session->status().occupied); }
@@ -127,12 +137,13 @@ void Machine::beginFocus() {
 }
 void Machine::endFocus() { focus(false); }
 void Machine::useSimulator() {
+    const QPointer<Machine> alive(this);
     if (live && session && (session->status().connected || session->status().occupied)) {
-        pendingSimulator = true; session->close(); emit changed(); return;
+        pendingSimulator = true; session->close(); if (!alive) return; emit changed(); return;
     }
     pendingSimulator = false; live = false;
     simulatorFrameNonce = QUuid::createUuid().toRfc4122();
-    Simulator::stop(); refreshPreviewPosition(); emit changed();
+    Simulator::stop(); if (!alive) return; refreshPreviewPosition(); if (!alive) return; emit changed();
 }
 void Machine::toggleConnection() {
     if (live)
