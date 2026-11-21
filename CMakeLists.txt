@@ -31,6 +31,7 @@ qt_add_library(blazer-core STATIC
     src/materialtestledger.cpp src/materialtestledger.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/grblwirenumbers.h src/joboutput.cpp
     src/preparedcontrollerjob.cpp src/preparedcontrollerjob.h
+    src/controllerjobpreparation.cpp src/controllerjobpreparation.h src/controllerjobpreparation_p.h
     src/settingsbundle.cpp src/settingsbundle.h
     src/nativedesign.cpp src/nativedesign.h src/nativecompatibility.cpp src/nativecompatibility.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
@@ -69,6 +70,10 @@ target_link_libraries(blazer-studio PRIVATE blazer-core Qt6::QuickControls2)
 
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test QuickTest)
+    qt_add_executable(blazer-controllerjobpreparation-tests tests/controllerjobpreparation_test.cpp)
+    target_link_libraries(blazer-controllerjobpreparation-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME controllerjobpreparation COMMAND blazer-controllerjobpreparation-tests)
+    set_tests_properties(controllerjobpreparation PROPERTIES TIMEOUT 30)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         qt_add_executable(blazer-runtimepeer-cpp-tests tests/runtimepeer_cpp_test.cpp)
         target_link_libraries(blazer-runtimepeer-cpp-tests PRIVATE Qt6::Gui Qt6::Test)
