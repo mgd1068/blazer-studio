@@ -570,6 +570,11 @@ void GrblSession::receive() {
 }
 void GrblSession::line(const QByteArray &s) {
     if (s.contains('<') && (!s.startsWith('<') || !s.endsWith('>') || s.count('<') > 1)) {
+        if (s.count('<') > 8) {
+            fail("Zu viele verschachtelte Statusberichte in einer Antwortzeile.",
+                 ControllerDiagnostics::FaultCause::InvalidReply);
+            return;
+        }
         QByteArray remainder = s;
         QList<QByteArray> reports;
         int begin;

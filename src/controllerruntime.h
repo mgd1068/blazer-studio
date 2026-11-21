@@ -1,4 +1,5 @@
 #pragma once
+#include "controllerjobpreparation.h"
 #include "controllersession.h"
 #include "job.h"
 #include "preparedcontrollerjob.h"
@@ -17,11 +18,14 @@ class ControllerNativePressProof final {
     friend class ControllerRuntimeWorker;
     friend class ControllerRuntimeTestAccess;
     ControllerNativePressProof(quint64 issuerValue, quint64 interactionValue, quint64 windowValue,
-                               qint64 observed, qint64 expires)
+                               qint64 observed, qint64 expires, quint64 connectionValue,
+                               quint64 revocationValue, quint64 focusValue)
         : issuer(issuerValue), interaction(interactionValue), window(windowValue),
-          observedAt(observed), expiresAt(expires) {}
+          observedAt(observed), expiresAt(expires), connection(connectionValue),
+          revocation(revocationValue), focusGeneration(focusValue) {}
     const quint64 issuer, interaction, window;
     const qint64 observedAt, expiresAt;
+    const quint64 connection, revocation, focusGeneration;
 };
 struct ControllerRuntimeInputStamp {
     quint64 interactionId = 0, windowEpoch = 0;
@@ -79,6 +83,7 @@ class ControllerRuntimeSession final : public ControllerSession {
     JobMoves m_candidateMoves;
     QByteArray m_candidateProfile;
     quint64 m_prepareSequence = 0;
+    ControllerJobPreparation *m_preparation = nullptr;
     ControllerRuntimeInputStamp sealNativePress(quint64 interaction, quint64 window,
                                                 qint64 observedAt);
     void revokeFocusContext();

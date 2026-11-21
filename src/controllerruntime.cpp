@@ -5,7 +5,9 @@
 #include <QCoreApplication>
 #include <QMutexLocker>
 #include <QRandomGenerator>
+#include <QPointer>
 #include <QScopeGuard>
+#include <QSignalBlocker>
 #include <QThreadPool>
 #include <chrono>
 #include <deque>
@@ -47,6 +49,8 @@ ControllerRuntimeSession::ControllerRuntimeSession(DeviceProfile profile, QObjec
     : ControllerSession(parent), m_profile(std::move(profile)),
       m_host(std::make_shared<ControllerRuntimeHost>()),
       m_mailbox(std::make_shared<ControllerRuntimeMailbox>()) {
+    m_preparation = new ControllerJobPreparation(this);
+    connect(m_preparation, &ControllerJobPreparation::changed, this, [this] { emit changed(); });
     (void)retirementPool(); // Construct pool owner in the GUI thread, never on the realtime path.
     m_mailbox->inputIssuer = QRandomGenerator::global()->generate64();
     auto host = m_host;
@@ -68,7 +72,10 @@ ControllerRuntimeSession::ControllerRuntimeSession(DeviceProfile profile, QObjec
             if (id != m_pendingOpen)
                 return;
             m_pendingOpen = 0;
+                const QPointer<ControllerRuntimeSession> alive(this);
             emit connectionRequestFinished(id, opened, reason);
+                if (!alive)
+                    return;
             consumeLatest();
         },
         Qt::QueuedConnection);
@@ -93,13 +100,13 @@ ControllerRuntimeSession::ControllerRuntimeSession(DeviceProfile profile, QObjec
     host->thread->start();
 }
 ControllerRuntimeSession::~ControllerRuntimeSession() {
+    const QSignalBlocker notifications(this);
     {
         QMutexLocker lock(&m_mailbox->mutex);
         m_mailbox->guiContext = nullptr;
-        if (m_mailbox->prepareCancel)
-            m_mailbox->prepareCancel->store(true);
     }
-    m_mailbox->revoke(true, true);
+    m_mailbox->revoke(true, true); // Revoke I/O BEFORE any large data-side cleanup.
+    m_preparation->close();
 }
 ControllerStatus ControllerRuntimeSession::status() const {
     QMutexLocker lock(&m_mailbox->mutex);
@@ -260,8 +267,11 @@ ControllerRuntimeSession::sealNativePress(quint64 interaction, quint64 window, q
     stamp.windowEpoch = window;
     stamp.observedAtMs = observedAt;
     stamp.expiresAtMs = observedAt + 250;
+    QMutexLocker lock(&m_mailbox->mutex);
     stamp.proof = std::shared_ptr<const ControllerNativePressProof>(new ControllerNativePressProof(
-        m_mailbox->inputIssuer, interaction, window, observedAt, stamp.expiresAtMs));
+        m_mailbox->inputIssuer, interaction, window, observedAt, stamp.expiresAtMs,
+        m_mailbox->latest.connectionEpoch, m_mailbox->generation.load(),
+        m_mailbox->focusGeneration.load()));
     return stamp;
 }
 void ControllerRuntimeSession::revokeFocusContext() {
@@ -269,22 +279,14 @@ void ControllerRuntimeSession::revokeFocusContext() {
     endFocus();
 }
 bool ControllerRuntimeSession::jobPreparing() const {
-    QMutexLocker lock(&m_mailbox->mutex);
-    return m_mailbox->preparing;
+    return m_preparation->preparing();
 }
 bool ControllerRuntimeSession::jobPrepared() const {
-    QMutexLocker lock(&m_mailbox->mutex);
-    return !m_mailbox->preparing && m_mailbox->prepared && m_mailbox->prepared->valid();
+    const auto result = m_preparation->result(m_prepareSequence);
+    return result && result->valid();
 }
 QString ControllerRuntimeSession::prepareReason() const {
-    QMutexLocker lock(&m_mailbox->mutex);
-    if (m_mailbox->preparing)
-        return "Controllerausgabe wird vorbereitet; noch keine Startfreigabe.";
-    if (!m_mailbox->prepareError.isEmpty())
-        return m_mailbox->prepareError;
-    return m_mailbox->prepared && m_mailbox->prepared->valid()
-               ? QString()
-               : QString("Controllerausgabe noch nicht vorbereitet.");
+    return m_preparation->reason();
 }
 void ControllerRuntimeSession::prepare(const JobPlan &plan) {
     const auto profile = plan.deviceProfile().outputFingerprint();
@@ -294,36 +296,8 @@ void ControllerRuntimeSession::prepare(const JobPlan &plan) {
         return;
     m_candidateMoves = plan.moves;
     m_candidateProfile = profile;
-    const auto sequence = ++m_prepareSequence;
-    auto cancel = std::make_shared<std::atomic_bool>(false);
-    auto mailbox = m_mailbox;
-    {
-        QMutexLocker lock(&mailbox->mutex);
-        if (mailbox->prepareCancel)
-            mailbox->prepareCancel->store(true);
-        mailbox->prepareCancel = cancel;
-        mailbox->prepareSequence = sequence;
-        mailbox->preparing = true;
-        mailbox->prepareError.clear();
-        mailbox->prepared.reset();
-    }
-    emit changed();
-    QThreadPool::globalInstance()->start([mailbox, plan, cancel, sequence] {
-        auto prepared = PreparedControllerJob::prepare(plan, cancel);
-        QMutexLocker lock(&mailbox->mutex);
-        if (mailbox->prepareSequence != sequence || isCancelled(cancel) || !mailbox->guiContext)
-            return;
-        mailbox->prepared = std::move(prepared);
-        mailbox->preparing = false;
-        mailbox->prepareError =
-            mailbox->prepared->valid() ? QString() : mailbox->prepared->errors().join("; ");
-        QMetaObject::invokeMethod(
-            mailbox->guiContext,
-            [context = mailbox->guiContext] {
-                static_cast<ControllerRuntimeSession *>(context)->consumeLatest();
-            },
-            Qt::QueuedConnection);
-    });
+    m_preparation->prepare(
+        plan, ++m_prepareSequence); // Invalidates old data immediately; never starts I/O.
 }
 ControllerSubmission ControllerRuntimeSession::requestStart(PreparedControllerJob::Ptr prepared) {
     const auto id = ++m_nextRequest;
@@ -348,12 +322,7 @@ void ControllerRuntimeSession::start(const JobPlan &plan) {
         prepare(plan);
         return; // Never auto-start from an asynchronous preparation completion.
     }
-    PreparedControllerJob::Ptr job;
-    {
-        QMutexLocker lock(&m_mailbox->mutex);
-        job = m_mailbox->prepared;
-    }
-    requestStart(std::move(job));
+    requestStart(m_preparation->result(m_prepareSequence));
 }
 
 ControllerRuntimeWorker::ControllerRuntimeWorker(DeviceProfile profile,
@@ -455,6 +424,9 @@ void ControllerRuntimeWorker::drain() {
             const auto &proof = request.input.proof;
             if (!proof || proof->issuer != m_mailbox->inputIssuer ||
                 proof->window != m_mailbox->focusWindowEpoch.load() ||
+                proof->connection != m_connectionEpoch ||
+                proof->revocation != m_mailbox->generation.load() ||
+                proof->focusGeneration != m_mailbox->focusGeneration.load() ||
                 proof->interaction <= m_lastFocusInteraction || proof->observedAt > nowMs() ||
                 proof->expiresAt < nowMs() ||
                 request.focusGeneration != m_mailbox->focusGeneration.load() || !m_core->ready() ||

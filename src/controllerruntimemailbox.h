@@ -49,11 +49,6 @@ struct ControllerRuntimeMailbox {
     QVariantMap diagnostic;
     qint64 deviceCapture = -1, heartbeatCapture = -1;
     QObject *guiContext = nullptr;
-    quint64 prepareSequence = 0;
-    Cancellation prepareCancel;
-    bool preparing = false;
-    PreparedControllerJob::Ptr prepared;
-    QString prepareError;
     void wakeLocked() {
         if (context && !wakePending) {
             wakePending = true;
