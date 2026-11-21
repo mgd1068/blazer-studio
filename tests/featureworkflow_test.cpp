@@ -1,6 +1,6 @@
+#include "applicationservices.h"
 #include "artlibrary.h"
 #include "artlibrarycontroller.h"
-#include "applicationservices.h"
 #include "devicemanager.h"
 #include "document.h"
 #include "machine.h"
@@ -8,11 +8,13 @@
 #include "materialtestledger.h"
 #include "registration.h"
 #include "reliefpreview.h"
-#include "workspace.h"
 #include "vectorinspectionservice.h"
+#include "workspace.h"
+#include <QClipboard>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QMimeData>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -27,8 +29,9 @@ QQuickItem *find(QQuickItem *root, const QString &name) {
     for (auto *child : root->childItems()) if (auto *item = find(child, name)) return item;
     return nullptr;
 }
-bool click(QQuickWindow *window, QQuickItem *item) {
-    if (!item || !item->isVisible() || !item->isEnabled()) return false;
+bool click(QQuickWindow *window, QQuickItem *item, bool requireEnabled = true) {
+    if (!item || !item->isVisible() || (requireEnabled && !item->isEnabled()))
+        return false;
     window->requestActivate();
     if (!QTest::qWaitForWindowActive(window, 1000)) return false;
     QTest::qWait(40);
@@ -60,6 +63,278 @@ class FeatureWorkflowTest : public QObject {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio",1,0,"Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio",1,0,"ReliefPreview");
+    }
+    void synchronousWorkGatesThroughRealMain_data() {
+        QTest::addColumn<bool>("compactDark");
+        QTest::newRow("guard-normal-light") << false;
+        QTest::newRow("guard-compact-dark") << true;
+    }
+    void synchronousWorkGatesThroughRealMain() {
+        QFETCH(bool, compactDark);
+        QTemporaryDir storage;
+        QString guardReason;
+        Document project;
+        project.newProject();
+        project.addShape("rect");
+        project.setLayer(1);
+        project.setProperty("name", "Original next design");
+        project.setProperty("width", 40.);
+        project.setProperty("height", 20.);
+        project.setLayerSetting(1, "speed", 60.);
+        Machine machine(&project, nullptr, Machine::HardwareAccess::Disabled);
+        project.addSynchronousWorkGuard([&] { return guardReason; });
+        auto block = [&](bool active) {
+            guardReason =
+                active
+                    ? QString("Test-Sperre: Laufende Gerätekommunikation hat Vorrang. Dateien, "
+                              "Import und Artwork-Zwischenablage nach Ende erneut ausdrücklich "
+                              "ausführen; leichte Änderungen am nächsten Entwurf bleiben möglich.")
+                    : QString();
+            project.notifySynchronousWorkGuardChanged();
+        };
+        DeviceManager devices(&project, &machine, storage.filePath("devices.json"));
+        MaterialLibrary materials(storage.filePath("materials.json"));
+        MaterialTestLedger ledger(storage.filePath("ledger.json"));
+        ArtLibrary arts(storage.filePath("arts.json"));
+        ArtLibraryController artController(&project, &machine, &arts);
+        VectorInspectionService vectors(&project);
+        Registration registration;
+        ApplicationServices services(&project, &machine, storage.filePath("settings.ini"));
+        QVERIFY(services.finishOnboarding());
+        QVERIFY(services.setDarkTheme(compactDark));
+        const auto initialFile = QUrl::fromLocalFile(storage.filePath("initial.blazer"));
+        QVERIFY(project.save(initialFile));
+        const auto initialBytes = project.projectBytes();
+        QVERIFY(!initialBytes.isEmpty());
+        Document other;
+        other.newProject();
+        other.addShape("ellipse");
+        other.addShape("rect");
+        QVERIFY(other.setMetadata("Different released project", "Local fixture"));
+        const auto otherFile = QUrl::fromLocalFile(storage.filePath("other.blazer"));
+        QVERIFY(other.save(otherFile));
+        const auto otherBytes = other.projectBytes();
+        QQmlApplicationEngine engine;
+        auto *context = engine.rootContext();
+        context->setContextProperty("project", &project);
+        context->setContextProperty("machine", &machine);
+        context->setContextProperty("deviceManager", &devices);
+        context->setContextProperty("materialLibrary", &materials);
+        context->setContextProperty("materialTestLedger", &ledger);
+        context->setContextProperty("artLibrary", &arts);
+        context->setContextProperty("artLibraryController", &artController);
+        context->setContextProperty("vectorInspectionService", &vectors);
+        context->setContextProperty("cameraRegistration", &registration);
+        context->setContextProperty("appServices", &services);
+        engine.load(QUrl::fromLocalFile(QString(BLAZER_SOURCE_DIR) + "/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->resize(compactDark ? 1180 : 1480, compactDark ? 760 : 920);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto item = [&](const QString &name) { return find(window->contentItem(), name); };
+        auto object = [&](const char *name) { return window->findChild<QObject *>(name); };
+        auto visible = [&](const char *name) {
+            auto *value = object(name);
+            return value && value->property("visible").toBool();
+        };
+        auto type = [&](QQuickItem *field, const QString &text) {
+            if (!click(window, field))
+                return false;
+            field->forceActiveFocus();
+            QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+            QTest::keyClick(window, Qt::Key_Backspace);
+            for (char c : text.toLatin1())
+                QTest::keyClick(window, c);
+            return true;
+        };
+        auto fileResult = [&](const char *name, const QUrl &file) {
+            auto *picker = object(name);
+            return picker && picker->setProperty("selectedFile", file) &&
+                   QMetaObject::invokeMethod(picker, "accepted") &&
+                   QMetaObject::invokeMethod(picker, "reject");
+        };
+        auto read = [](const QUrl &url) {
+            QFile file(url.toLocalFile());
+            return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        };
+        auto clipboard = [] {
+            QVariantMap result;
+            const auto *mime = QGuiApplication::clipboard()->mimeData();
+            for (const auto &format : mime->formats())
+                result[format] = mime->data(format);
+            return result;
+        };
+        QTRY_VERIFY(visible("startupSafetyDialog"));
+        QVERIFY(click(window, item("acknowledgeStartupSafety")));
+        QTRY_VERIFY(!visible("startupSafetyDialog"));
+        window->setProperty("basic", false);
+        QTRY_VERIFY(project.job().valid());
+        auto *mime = new QMimeData;
+        mime->setData("image/svg+xml",
+                      "<svg xmlns='http://www.w3.org/2000/svg' width='5mm' height='5mm' viewBox='0 "
+                      "0 5 5'><rect width='5' height='5'/></svg>");
+        mime->setText("KEEP ARTWORK CLIPBOARD");
+        QGuiApplication::clipboard()->setMimeData(mime);
+        const auto preservedClipboard = clipboard();
+        machine.start();
+        QVERIFY(machine.busy());
+        block(true);
+        QTRY_VERIFY(!window->property("synchronousWorkReady").toBool());
+        auto *status = item("synchronousWorkStatus");
+        QVERIFY(status);
+        QTRY_VERIFY(status->isVisible());
+        QCOMPARE(status->property("text").toString(), guardReason);
+        for (const auto &name : QStringList{
+                 "openProjectButton", "saveProjectButton", "importMotifButton", "importImageButton",
+                 "exportGcodeButton", "clipboardCopyButton", "clipboardPasteButton"}) {
+            auto *button = item(name);
+            QVERIFY2(button, qPrintable(name));
+            QVERIFY2(!button->isEnabled(), qPrintable(name));
+            QVERIFY2(click(window, button, false), qPrintable(name));
+        }
+        item("workspace")->forceActiveFocus();
+        for (const auto key : {Qt::Key_O, Qt::Key_S, Qt::Key_I, Qt::Key_C, Qt::Key_X, Qt::Key_V})
+            QTest::keyClick(window, key, Qt::ControlModifier);
+        QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+        QTest::qWait(50);
+        QVERIFY(!visible("openProjectDialog"));
+        QVERIFY(!visible("saveProjectDialog"));
+        QVERIFY(!visible("importMotifDialog"));
+        QVERIFY(!visible("exportGcodeDialog"));
+        QVERIFY(!visible("discardDialog"));
+        QCOMPARE(window->property("pendingAction").toString(), QString());
+        QCOMPARE(clipboard(), preservedClipboard);
+        QCOMPARE(project.count(), 1);
+        const auto folder = qEnvironmentVariable("BLAZER_SYNC_UI_EVIDENCE");
+        if (!folder.isEmpty()) {
+            QVERIFY(QDir().mkpath(folder));
+            QTest::qWait(60);
+            QVERIFY(window->grabWindow().save(folder + "/work-gate-" + QTest::currentDataTag() +
+                                              ".png"));
+        }
+        QVERIFY(machine.busy());
+        QTest::keyClick(window, Qt::Key_Period, Qt::ControlModifier);
+        QTRY_VERIFY(!machine.busy());
+        QVERIFY(!machine.firing());
+        QVERIFY(!window->property("synchronousWorkReady").toBool());
+        block(false);
+        QTRY_VERIFY(window->property("synchronousWorkReady").toBool());
+        QTRY_VERIFY(!status->isVisible());
+        QCOMPARE(project.projectBytes(),
+                 initialBytes); // Inspect serialized payload only after releasing the guard.
+        QVERIFY(item("openProjectButton")->isEnabled());
+        QVERIFY(item("saveProjectButton")->isEnabled());
+        QVERIFY(item("exportGcodeButton")->isEnabled());
+        // Local text copy is still permitted; artwork serialization shortcuts remain blocked.
+        block(true);
+        auto *name = item("objectNameInput");
+        QVERIFY(name);
+        QVERIFY(name->isEnabled());
+        QVERIFY(click(window, name));
+        name->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(), QString("Original next design"));
+        QVERIFY(!QGuiApplication::clipboard()->mimeData()->hasFormat("image/svg+xml"));
+        QVERIFY(type(name, "Allowed next design"));
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(project.selection()["name"].toString(), QString("Allowed next design"));
+        auto *x = item("objectXInput")->findChild<QQuickItem *>("numericEditor");
+        QVERIFY(x);
+        QVERIFY(type(x, "12 mm"));
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(project.selection()["x"].toDouble(), 12.);
+        block(false);
+        const auto editedBytes = project.projectBytes();
+        QVERIFY(editedBytes != initialBytes);
+        const auto normalSave = QUrl::fromLocalFile(storage.filePath("released-save.blazer"));
+        QTest::keyClick(window, Qt::Key_S, Qt::ControlModifier);
+        QTRY_VERIFY(visible("saveProjectDialog"));
+        QVERIFY(fileResult("saveProjectDialog", normalSave));
+        QCOMPARE(read(normalSave), editedBytes);
+        QVERIFY(window->isVisible());
+        QVERIFY(!visible("openProjectDialog"));
+        // A close request whose Save is denied must never replay Quit on a later successful Save.
+        project.setProperty("name", "Close request remains local");
+        window->close();
+        QTRY_VERIFY(visible("discardDialog"));
+        QCOMPARE(window->property("pendingAction").toString(), QString("close"));
+        block(true);
+        QVERIFY(click(window, item("saveChangesButton")));
+        QTRY_VERIFY(!visible("discardDialog"));
+        QVERIFY(!visible("saveProjectDialog"));
+        QCOMPARE(window->property("pendingAction").toString(), QString());
+        QVERIFY(window->isVisible());
+        block(false);
+        const auto afterClose = QUrl::fromLocalFile(storage.filePath("after-denied-close.blazer"));
+        QVERIFY(click(window, item("saveProjectButton")));
+        QTRY_VERIFY(visible("saveProjectDialog"));
+        QVERIFY(fileResult("saveProjectDialog", afterClose));
+        QVERIFY(QFile::exists(afterClose.toLocalFile()));
+        QTest::qWait(50);
+        QVERIFY(window->isVisible());
+        QVERIFY(!visible("openProjectDialog"));
+        // Already-open Save may become blocked before acceptance; its pending Open must be
+        // discarded.
+        project.setProperty("name", "Open request remains local");
+        QVERIFY(click(window, item("openProjectButton")));
+        QTRY_VERIFY(visible("discardDialog"));
+        QCOMPARE(window->property("pendingAction").toString(), QString("open"));
+        QVERIFY(click(window, item("saveChangesButton")));
+        QTRY_VERIFY(visible("saveProjectDialog"));
+        block(true);
+        const auto denied = QUrl::fromLocalFile(storage.filePath("denied-save.blazer"));
+        QVERIFY(fileResult("saveProjectDialog", denied));
+        QVERIFY(!QFile::exists(denied.toLocalFile()));
+        QCOMPARE(window->property("pendingAction").toString(), QString());
+        QVERIFY(!visible("openProjectDialog"));
+        block(false);
+        const auto finalBytes = project.projectBytes();
+        const auto finalSave = QUrl::fromLocalFile(storage.filePath("after-denied-open.blazer"));
+        QVERIFY(click(window, item("saveProjectButton")));
+        QTRY_VERIFY(visible("saveProjectDialog"));
+        QVERIFY(fileResult("saveProjectDialog", finalSave));
+        QCOMPARE(read(finalSave), finalBytes);
+        QTest::qWait(50);
+        QVERIFY(window->isVisible());
+        QVERIFY(!visible("openProjectDialog"));
+        // Freely allowed shortcuts and GCode actions actually work again after release.
+        item("workspace")->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_O, Qt::ControlModifier);
+        QTRY_VERIFY(visible("openProjectDialog"));
+        QVERIFY(fileResult("openProjectDialog", otherFile));
+        QCOMPARE(project.projectBytes(), otherBytes);
+        QCOMPARE(project.title(), QString("Different released project"));
+        QCOMPARE(project.count(), 2);
+        const auto svg = storage.filePath("local.svg");
+        QFile svgFile(svg);
+        QVERIFY(svgFile.open(QIODevice::WriteOnly));
+        svgFile.write("<svg xmlns='http://www.w3.org/2000/svg' width='5mm' height='5mm' viewBox='0 "
+                      "0 5 5'><rect width='5' height='5'/></svg>");
+        svgFile.close();
+        const int beforeImport = project.count();
+        item("workspace")->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
+        QTRY_VERIFY(visible("importMotifDialog"));
+        QVERIFY(fileResult("importMotifDialog", QUrl::fromLocalFile(svg)));
+        QCOMPARE(project.count(), beforeImport + 1);
+        item("workspace")->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+        QTRY_VERIFY(
+            QGuiApplication::clipboard()->mimeData()->hasFormat("application/x-blazer-objects-v1"));
+        const int beforePaste = project.count();
+        QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier);
+        QTRY_COMPARE(project.count(), beforePaste + 1);
+        QVERIFY(click(window, item("exportGcodeButton")));
+        QTRY_VERIFY(visible("exportGcodeDialog"));
+        const auto gcode = QUrl::fromLocalFile(storage.filePath("released.gcode"));
+        QVERIFY(fileResult("exportGcodeDialog", gcode));
+        QVERIFY(!read(gcode).isEmpty());
+        QVERIFY(machine.simulation());
+        QVERIFY(machine.ports().isEmpty());
+        window->setProperty("discardCloseApproved", true);
+        window->close();
     }
     void realApplicationFeatures_data() {
         QTest::addColumn<bool>("compactDark");
