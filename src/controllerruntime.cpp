@@ -78,10 +78,10 @@ ControllerRuntimeSession::ControllerRuntimeSession(DeviceProfile profile, QObjec
             if (id != m_pendingOpen)
                 return;
             m_pendingOpen = 0;
-                const QPointer<ControllerRuntimeSession> alive(this);
+            const QPointer<ControllerRuntimeSession> alive(this);
             emit connectionRequestFinished(id, opened, reason);
-                if (!alive)
-                    return;
+            if (!alive)
+                return;
             consumeLatest();
         },
         Qt::QueuedConnection);
@@ -208,10 +208,10 @@ void ControllerRuntimeSession::stop() {
     emit changed();
 }
 namespace {
-void send(const std::shared_ptr<ControllerRuntimeMailbox> &box, Request request) {
+bool send(const std::shared_ptr<ControllerRuntimeMailbox> &box, Request request) {
     request.issuedAt = nowMs();
     request.expiresAt = request.issuedAt + 250;
-    box->enqueue(std::move(request));
+    return box->enqueue(std::move(request));
 }
 } // namespace
 void ControllerRuntimeSession::jog(double x, double y) {
@@ -243,9 +243,9 @@ bool ControllerRuntimeSession::overrides(int feed, int power) {
     Request r{Kind::Override};
     r.feed = feed;
     r.power = power;
-    send(m_mailbox, std::move(r));
+    const bool accepted = send(m_mailbox, std::move(r));
     emit changed();
-    return true;
+    return accepted; // Admission only; worker preflight still decides actual dispatch.
 }
 void ControllerRuntimeSession::focus(bool on) {
     if (!on)
