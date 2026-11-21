@@ -30,6 +30,7 @@ qt_add_library(blazer-core STATIC
     src/vectorinspection.cpp src/vectorinspection.h src/vectorinspectionservice.cpp src/vectorinspectionservice.h
     src/materialtestledger.cpp src/materialtestledger.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/joboutput.cpp
+    src/preparedcontrollerjob.cpp src/preparedcontrollerjob.h
     src/settingsbundle.cpp src/settingsbundle.h
     src/nativedesign.cpp src/nativedesign.h src/nativecompatibility.cpp src/nativecompatibility.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
@@ -68,6 +69,9 @@ target_link_libraries(blazer-studio PRIVATE blazer-core Qt6::QuickControls2)
 
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test QuickTest)
+    qt_add_executable(blazer-preparedcontrollerjob-tests tests/preparedcontrollerjob_test.cpp)
+    target_link_libraries(blazer-preparedcontrollerjob-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME preparedcontrollerjob COMMAND blazer-preparedcontrollerjob-tests)
     qt_add_executable(blazer-devicelibrary-tests tests/devicelibrary_test.cpp)
     target_link_libraries(blazer-devicelibrary-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME devicelibrary COMMAND blazer-devicelibrary-tests -platform offscreen)
