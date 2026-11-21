@@ -12,14 +12,17 @@
 #include "workspace.h"
 #include <QDir>
 #include <QFile>
+#include <QElapsedTimer>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlComponent>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <algorithm>
+#include <memory>
 namespace {
 QQuickItem *find(QQuickItem *root, const QString &name) {
     if (root->objectName() == name)
@@ -35,24 +38,36 @@ bool reveal(QQuickWindow *window, QQuickItem *item) {
     window->requestActivate();
     if (!QTest::qWaitForWindowActive(window, 1000))
         return false;
-    for (auto *parent = item->parentItem(); parent; parent = parent->parentItem()) {
-        if (!parent->property("contentY").isValid())
-            continue;
-        const auto p = item->mapToItem(parent, QPointF());
-        const double delta = p.y() < 5 ? p.y() - 5
-                             : p.y() + item->height() > parent->height() - 5
-                                 ? p.y() + item->height() - parent->height() + 5
-                                 : 0;
-        parent->setProperty("contentY",
-                            std::clamp(parent->property("contentY").toDouble() + delta, 0.,
-                                       std::max(0., parent->property("contentHeight").toDouble() -
-                                                        parent->height())));
-    }
-    QTest::qWait(40);
-    const auto p = item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint();
-    if (!QRect(0, 0, window->width(), window->height()).contains(p))
-        return false;
-    return true;
+    QElapsedTimer deadline;
+    deadline.start();
+    do {
+        // Review thumbnails, wrapped notices and popup layouts settle after the
+        // event handler. Re-measure after polishing; never scroll a stale box.
+        QTest::qWait(20);
+        for (auto *parent = item->parentItem(); parent; parent = parent->parentItem()) {
+            if (!parent->property("contentY").isValid())
+                continue;
+            const auto p = item->mapToItem(parent, QPointF());
+            const double delta = p.y() < 5 ? p.y() - 5
+                                 : p.y() + item->height() > parent->height() - 5
+                                     ? p.y() + item->height() - parent->height() + 5
+                                     : 0;
+            parent->setProperty("contentY",
+                                std::clamp(parent->property("contentY").toDouble() + delta, 0.,
+                                           std::max(0., parent->property("contentHeight").toDouble() -
+                                                            parent->height())));
+        }
+        QTest::qWait(20);
+        const auto center = item->boundingRect().center();
+        bool visible = item->isVisible() &&
+                       QRectF(0, 0, window->width(), window->height()).contains(item->mapToScene(center));
+        for (auto *parent = item->parentItem(); visible && parent; parent = parent->parentItem())
+            if (parent->clip())
+                visible = QRectF(0, 0, parent->width(), parent->height()).contains(item->mapToItem(parent, center));
+        if (visible)
+            return true;
+    } while (deadline.elapsed() < 1000);
+    return false;
 }
 bool click(QQuickWindow *window, QQuickItem *item, bool requireEnabled = true) {
     if (!item || (requireEnabled && !item->isEnabled()) || !reveal(window, item))
@@ -96,6 +111,44 @@ class ArtLibraryUiTest : public QObject {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
+    }
+    void revealTracksDeferredContentLayout() {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(R"(
+            import QtQuick
+            import QtQuick.Window
+            Window {
+                width:480; height:320; visible:true
+                Flickable {
+                    id:viewport; objectName:"deferredViewport"; x:20; y:20; width:440; height:260
+                    contentWidth:440; contentHeight:1000; clip:true
+                    property bool shifted:false
+                    onContentYChanged: if(!shifted && contentY>0) {
+                        shifted=true
+                        Qt.callLater(() => {target.y=900;viewport.contentHeight=1200})
+                    }
+                    Rectangle { id:target; objectName:"deferredTarget"; x:10; y:700; width:100; height:40; color:"green" }
+                }
+            }
+        )",QUrl());
+        std::unique_ptr<QObject> root(component.create());
+        QVERIFY2(root,qPrintable(component.errorString()));
+        auto window=qobject_cast<QQuickWindow *>(root.get());QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window,1000));
+        auto target=find(window->contentItem(),"deferredTarget");
+        auto viewport=find(window->contentItem(),"deferredViewport");
+        QVERIFY(target&&viewport);
+        // Same failure mode as a thumbnail/label changing the content after a
+        // scroll calculation. Actual viewport scrolling must reveal it again.
+        const bool reached=reveal(window,target);
+        qInfo()<<"Deferred target scene"<<target->mapToScene(target->boundingRect().center())
+               <<"viewport"<<viewport->size()<<"contentY"<<viewport->property("contentY");
+        QVERIFY(reached);
+        QCOMPARE(target->y(),900.); // The deferred layout really happened before success.
+        QVERIFY(QRectF(0,0,viewport->width(),viewport->height()).contains(
+            target->mapToItem(viewport,target->boundingRect().center())));
     }
     void realMainLibraryWorkflow_data() {
         QTest::addColumn<bool>("compactDark");
