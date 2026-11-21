@@ -9,7 +9,7 @@ if [[ "${BLAZER_INSTALL_DEPS:-0}" == 1 ]]; then
         qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins qt6-serialport-dev libqrcodegencpp-dev \
         qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
         qml6-module-qtquick-dialogs qml6-module-qtquick-window qml6-module-qtquick-templates \
-        qml6-module-qtqml-workerscript qml6-module-qtqml-models fonts-dejavu-core inkscape
+        qml6-module-qtqml-workerscript qml6-module-qtqml-models qml6-module-qttest fonts-dejavu-core inkscape
 fi
 if [[ "${BLAZER_DEPS_ONLY:-0}" == 1 ]]; then exit 0; fi
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
