@@ -545,6 +545,10 @@ void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause
     append(message);
 }
 void GrblSession::receive() {
+    if (!connected()) {
+        input.clear();
+        return;
+    }
     input += serial.readAll();
     if (input.size() > 65536) {
         fail("Ungültig lange GRBL-Antwort.", ControllerDiagnostics::FaultCause::InvalidReply);

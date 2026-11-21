@@ -130,7 +130,8 @@ ControllerStatus ControllerRuntimeSession::status() const {
     }
     result.closing |= m_closing || m_mailbox->close.load();
     result.opening |= m_pendingOpen != 0;
-    result.requestPending |= m_pendingOpen != 0 || !m_mailbox->normal.empty();
+    result.requestPending |= m_pendingOpen != 0 || !m_mailbox->normal.empty() ||
+                             m_mailbox->dispatchInFlight;
     result.occupied |= result.opening || result.requestPending || m_mailbox->close.load() ||
                        m_mailbox->stop.load();
     result.occupied |= result.closing;
@@ -387,6 +388,7 @@ void ControllerRuntimeWorker::drain() {
         if (!m_mailbox->normal.empty()) {
             request = std::move(m_mailbox->normal.front());
             m_mailbox->normal.pop_front();
+            m_mailbox->dispatchInFlight = true;
             have = true;
         }
     }
@@ -473,7 +475,7 @@ void ControllerRuntimeWorker::drain() {
     } else if (have && request.kind == Kind::Open) {
         emit openFinished(request.id, false, "Verbindungsanforderung veraltet oder widerrufen.");
     }
-    publish();
+    publish(true);
     QMutexLocker lock(&m_mailbox->mutex);
     if (!m_mailbox->normal.empty() || m_mailbox->stop.load() || m_mailbox->close.load() ||
         m_mailbox->focusOff.load())
@@ -557,7 +559,7 @@ void ControllerRuntimeWorker::watchdog() {
     }
     publish();
 }
-void ControllerRuntimeWorker::publish() {
+void ControllerRuntimeWorker::publish(bool finishDispatch) {
     if (!m_core)
         return;
     auto status = m_core->status();
@@ -579,6 +581,8 @@ void ControllerRuntimeWorker::publish() {
     const auto diagnostic = m_core->diagnosticSnapshot();
     QMutexLocker lock(&m_mailbox->mutex);
     m_mailbox->latest = status;
+    if (finishDispatch)
+        m_mailbox->dispatchInFlight = false;
     m_mailbox->deviceCapture = m_core->lastStatus.isValid() && m_core->knownPosition &&
                                        m_core->knownOffset && m_core->knownOutput &&
                                        m_core->reportMm

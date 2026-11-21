@@ -33,7 +33,7 @@ class ControllerRuntimeWorker final : public QObject {
 
   private:
     void watchdog();
-    void publish();
+    void publish(bool finishDispatch = false);
     void coreChanged();
     bool cancelDispatch();
     void retirePrepared();

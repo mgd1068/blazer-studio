@@ -42,6 +42,9 @@ struct ControllerRuntimeMailbox {
     std::atomic<quint64> focusGeneration{1}, focusWindowEpoch{1};
     std::atomic_bool focusOff{false};
     quint64 inputIssuer = 0;
+    // Reservation spans pop -> core dispatch -> final snapshot publication. Nested
+    // Core.changed publications cannot make a dequeued request appear idle.
+    bool dispatchInFlight = false;
     bool wakePending = false, accepting = true;
     bool notificationPending = false;
     ControllerStatus latest;
