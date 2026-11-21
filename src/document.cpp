@@ -1879,7 +1879,7 @@ void Document::setBackgroundPlanning(bool enabled) {
     emit changed();
 }
 JobInput Document::jobInput() const {
-    JobInput result{m_items, m_layers, m_activePage, m_deviceProfile};
+    JobInput result{m_items, m_layers, m_activePage, m_deviceProfile, false, {}};
     result.cutSelectedGraphics = cutSelectedGraphics();
     result.selectedIds = selectedArtworkIds();
     // Do not transfer GUI-owned QSvgRenderer instances, even by shared_ptr.

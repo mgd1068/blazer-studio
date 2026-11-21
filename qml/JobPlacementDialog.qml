@@ -75,7 +75,7 @@ Dialog {
                         }
                     }
                 }
-                Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink; text: "Anker der auszugebenden Grafik: Ecke, Kantenmitte oder Mitte. Leerfahrten und Rasterüberlauf verschieben diesen Grafikanker nicht; sie werden trotzdem auf Grenzüberschreitungen geprüft." }
+                Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink; text: "Anker des oben gewählten Grafik-Bezugsrechtecks: Ecke, Kantenmitte oder Mitte. Leerfahrten und Rasterüberlauf verschieben diesen Grafikanker nicht; sie werden trotzdem auf Grenzüberschreitungen geprüft." }
             }
             Label {
                 objectName: "previewHeadPosition"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink

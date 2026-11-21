@@ -16,6 +16,8 @@ ApplicationWindow {
     readonly property bool positioningReady: machine.ready && machine.positionReferenced && (win.simulationMode || (typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
     readonly property bool processingReady: machine.ready && (win.simulationMode || (typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))
     readonly property var deviceService: typeof deviceManager !== "undefined" ? deviceManager : null
+    readonly property var artStore: typeof artLibrary !== "undefined" ? artLibrary : null
+    readonly property var artService: typeof artLibraryController !== "undefined" ? artLibraryController : null
     readonly property var vectorInspector: typeof vectorInspectionService !== "undefined" ? vectorInspectionService : null
     readonly property var testLedger: typeof materialTestLedger !== "undefined" ? materialTestLedger : null
     property bool preferencesSyncing: true
@@ -61,7 +63,7 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || technicalDiagnosticsPreview.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible
+    readonly property bool projectDialogActive: startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible || artLibraryDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
@@ -140,6 +142,7 @@ ApplicationWindow {
         if(project.fileUrl.toString().length>0)saveDialog.selectedFile=project.fileUrl
         saveDialog.open()
     }
+    ArtLibraryDialog { id: artLibraryDialog; library: win.artStore; controller: win.artService; document: project; dark: win.night; onAboutToShow: machine.focus(false); onInserted: { win.page=0; win.proofConfirmed=false; Qt.callLater(win.revealObjectSelection) } }
     NativeImportDialog { id: nativeImportReview; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false); onImported: { win.page=0; win.proofConfirmed=false; Qt.callLater(win.revealObjectSelection) } }
     VectorInspectionDialog { id: vectorInspectionDialog; service: win.vectorInspector; dark: win.night; onAboutToShow: machine.focus(false) }
     JobPlacementDialog { id: jobPlacementDialog; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false) }
@@ -560,6 +563,7 @@ ApplicationWindow {
                         MenuItem { objectName: "projectMetadataMenuItem"; text: "Projektangaben …"; onTriggered: projectDetails.open() }
                         MenuItem { objectName: "historyMenuItem"; text: "Bearbeitungsverlauf …"; onTriggered: historyDialog.open() }
                         MenuItem { objectName: "settingsBundleMenuItem"; text: "Bedieneinstellungen übertragen …"; onTriggered: settingsBundleDialog.open() }
+                        MenuItem { objectName: "artLibraryMenuItem"; text: "Grafikbibliothek …"; enabled: !!win.artService; onTriggered: artLibraryDialog.open() }
                         MenuItem { objectName: "vectorInspectionMenuItem"; text: "Vektorgeometrie prüfen …"; enabled: !!win.vectorInspector; onTriggered: vectorInspectionDialog.open() }
                         MenuSeparator {}
                         MenuItem { objectName: "newTemplateMenuItem"; text: "Neu aus Vorlage …"; onTriggered: win.requestAction("template") }
@@ -631,6 +635,7 @@ ApplicationWindow {
                     }
                     ActionButton { objectName: "manageDevicesButton"; text: "Geräte verwalten …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.deviceService; enabled: win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
                     ActionButton { objectName: "jobPlacementButton"; text: "Startposition & Ursprung …"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: !machine.busy && !machine.firing; onClicked: jobPlacementDialog.open() }
+                    ActionButton { objectName: "artLibraryButton"; text: "Grafikbibliothek …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.artService; enabled: !!win.artService && win.artService.blockReason.length === 0; onClicked: artLibraryDialog.open() }
                     ColumnLayout {
                         spacing: 7; Layout.fillWidth: true
                         Text { text: "Laseraufsatz / Toolkopf"; color: win.muted; font.pixelSize: 11 }
