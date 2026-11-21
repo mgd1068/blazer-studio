@@ -21,6 +21,7 @@ qt_add_library(blazer-core STATIC
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
     src/clipboard.cpp src/guides.cpp src/guide.h src/framing.cpp
     src/deviceprofile.cpp src/deviceprofile.h src/devicelibrary.cpp src/devicelibrary.h src/devicemanager.cpp src/devicemanager.h
+    src/materialtestledger.cpp src/materialtestledger.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/joboutput.cpp
     src/nativedesign.cpp src/nativedesign.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
@@ -64,6 +65,10 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-devicemanager-tests tests/devicemanager_test.cpp)
     target_link_libraries(blazer-devicemanager-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME devicemanager COMMAND blazer-devicemanager-tests -platform offscreen)
+    qt_add_executable(blazer-materialtestledger-tests tests/materialtestledger_test.cpp src/materialtestledger.cpp src/materialtestledger.h)
+    target_include_directories(blazer-materialtestledger-tests PRIVATE src)
+    target_link_libraries(blazer-materialtestledger-tests PRIVATE Qt6::Core Qt6::Test)
+    add_test(NAME materialtestledger COMMAND blazer-materialtestledger-tests)
     qt_add_executable(blazer-accessory-tests tests/accessorycontract_test.cpp)
     target_include_directories(blazer-accessory-tests PRIVATE src)
     target_link_libraries(blazer-accessory-tests PRIVATE Qt6::Core Qt6::Test)
