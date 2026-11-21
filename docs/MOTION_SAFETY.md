@@ -175,3 +175,15 @@ frame. An exception needs an explicit immutable non-emission operation type and
 fresh reported zero output; missing output-lease flags alone must never grant
 such an exception. Jog-cancel/resume semantics also need separate controller
 validation. These are remaining workflow limitations, not new output permissions.
+
+## Reset is not a physical stillstand proof
+
+The host's refusal to generate movement does not prove that controller firmware
+will remain stationary. Standard GRBL invokes stored startup blocks when its
+startup path is not alarm-locked; see the official [protocol implementation](https://raw.githubusercontent.com/gnea/grbl/master/grbl/protocol.c).
+This is a firmware behavior reference, not an observed M3 startup diagnosis.
+Initial connection and protective soft reset therefore also require separately
+verified boot/reset behavior and stored `$N` blocks during real commissioning.
+No startup blocks were read or changed on the physical device in this work.
+Software STOPP remains best effort, not a physical emergency stop or an optical
+shutdown guarantee.
