@@ -33,6 +33,16 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
         return !self || (!self->busy() && !self->firing() &&
                          (!self->session || !self->session->status().connected));
     });
+    document->addSynchronousWorkGuard([self = QPointer<Machine>(this)]() -> QString {
+        if (!self || self->simulation()) return {};
+        if (self->busy() || self->firing() || self->accessory.activeLease() ||
+            self->accessoryJobActive || self->accessoryFocusActive)
+            return "Schwere Datei- und Geometrieaktionen warten, bis die aktive Geräteaktion beendet ist. STOPP bleibt verfügbar; die automatische Sicherung wird danach nachgeholt.";
+        return {};
+    });
+    connect(this, &Simulator::changed, document, &Document::notifySynchronousWorkGuardChanged);
+    connect(this, &QObject::destroyed, document, &Document::notifySynchronousWorkGuardChanged);
+    document->notifySynchronousWorkGuardChanged();
     syncDeviceProfile();
     connect(d, &Document::deviceProfileChanged, this, &Machine::syncDeviceProfile);
     connect(this, &Simulator::changed, this, &Machine::refreshPreviewPosition);
