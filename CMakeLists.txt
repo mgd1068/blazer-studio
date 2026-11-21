@@ -28,8 +28,8 @@ qt_add_library(blazer-core STATIC
     src/vectorinspection.cpp src/vectorinspection.h src/vectorinspectionservice.cpp src/vectorinspectionservice.h
     src/materialtestledger.cpp src/materialtestledger.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/joboutput.cpp
-    src/nativedesign.cpp src/nativedesign.h src/imageexport.cpp src/imageexport.h
     src/settingsbundle.cpp src/settingsbundle.h
+    src/nativedesign.cpp src/nativedesign.h src/nativecompatibility.cpp src/nativecompatibility.h src/imageexport.cpp src/imageexport.h
     src/applicationservices.cpp src/applicationservices.h
     src/relief.cpp src/relief.h src/reliefpreview.cpp src/reliefpreview.h
     src/registration.cpp src/registration.h src/depthservice.cpp src/depthservice.h src/modelimport.cpp src/imagelimits.h src/imageprocessing.cpp src/imageprocessing.h src/importexport.cpp src/vectorutil.cpp src/vectorutil.h src/editing.cpp src/recovery.cpp src/recovery.h
@@ -75,6 +75,9 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-devicemanager-tests tests/devicemanager_test.cpp)
     target_link_libraries(blazer-devicemanager-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME devicemanager COMMAND blazer-devicemanager-tests -platform offscreen)
+    qt_add_executable(blazer-nativecompatibility-tests tests/nativecompatibility_test.cpp)
+    target_link_libraries(blazer-nativecompatibility-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME nativecompatibility COMMAND blazer-nativecompatibility-tests -platform offscreen)
     qt_add_executable(blazer-vectorinspection-tests tests/vectorinspection_test.cpp)
     target_link_libraries(blazer-vectorinspection-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME vectorinspection COMMAND blazer-vectorinspection-tests -platform offscreen)

@@ -586,5 +586,36 @@ class Reader {
 };
 } // namespace
 NativeDesign::Result NativeDesign::read(const QByteArray &bytes, bool millmage) {
-    return Reader().run(bytes, millmage);
+    return read(bytes, millmage, ReadOptions{});
+}
+NativeDesign::Result NativeDesign::read(const QByteArray &bytes, bool millmage,
+                                        ReadOptions options) {
+    auto report = compatibility(bytes, millmage, options);
+    if (report.blocked) {
+        Result rejected;
+        rejected.compatibility = std::move(report);
+        rejected.error = options.intent == ImportIntent::PreserveProjectSemantics
+                             ? "Native Projektmigration nicht unterstützt. Geprüften Grafikimport "
+                               "ausdrücklich wählen."
+                             : "Native Grafik enthält nicht unterstützte Geometrie, Ressourcen "
+                               "oder nicht freigegebene Schrift-Ersetzung.";
+        return rejected;
+    }
+    auto result = Reader().run(bytes, millmage);
+    result.compatibility = std::move(report);
+    result.compatibility.geometryValidated = result.error.isEmpty();
+    if (!result.error.isEmpty()) {
+        result.elements.clear();
+        result.compatibility.canImportGeometry = false;
+        result.compatibility.blocked = true;
+        result.compatibility.issues.append(
+            {"geometry-validation-failed",
+             "error",
+             "document",
+             {},
+             "Geometrie konnte nicht vollständig gelesen werden; kein Teilimport.",
+             -1,
+             1});
+    }
+    return result;
 }

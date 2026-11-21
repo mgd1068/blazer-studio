@@ -366,3 +366,13 @@ und den [vom Forscher bereitgestellten RDWorks-Beispielen](https://github.com/jn
 Die Byteabbildung wurde für beide Kodierungen mit allen je 256 dokumentierten
 Werten verglichen. Keine fremden Parserquellen oder Beispielgrafiken wurden
 in das Repository übernommen. F04 bleibt mit den genannten Formaten/Dialekten offen.
+
+## Strict native compatibility review (21 November 2026)
+
+The earlier native-import behavior above is historical. The native reader now
+rejects the default project import path because processing semantics are not
+migrated. An explicit reviewed geometry-only path and independent font-substitution
+permission are required. Unknown geometry options, true project mirror flags,
+external resources and unsupported units cannot be opted away. See
+[NATIVE_COMPATIBILITY.md](NATIVE_COMPATIBILITY.md) for the structured bounded loss
+report, exact source-hash binding, supported geometry scope and integration API.

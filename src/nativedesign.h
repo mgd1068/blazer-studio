@@ -1,4 +1,5 @@
 #pragma once
+#include "nativecompatibility.h"
 #include "relief.h"
 #include <QByteArray>
 #include <QList>
@@ -17,8 +18,10 @@ struct Element {
 struct Result {
     QList<Element> elements;
     QString error;
+    CompatibilityReport compatibility{};
 };
 // Geometry and non-output Tool classification only. No CNC/laser parameters,
 // device settings, or external files.
 Result read(const QByteArray &bytes, bool millmage);
+Result read(const QByteArray &bytes, bool millmage, ReadOptions options);
 } // namespace NativeDesign
