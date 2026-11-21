@@ -370,8 +370,10 @@ NativeInputIntentAdapter::consume(const QString &action) {
     }
     auto item=qobject_cast<QQuickItem *>(pending.control.data());
     auto window=qobject_cast<QQuickWindow *>(pending.window.data());
+    const auto pressed=item ? item->property("pressed") : QVariant();
     if (pending.context!=m_context || !item || !window || !window->isActive() ||
         !window->isVisible() || !item->isEnabled() || !item->isVisible() ||
+        pressed.metaType().id()!=QMetaType::Bool || !pressed.toBool() ||
         (pending.key && !item->hasActiveFocus()) ||
         item->window()!=window || m_controls.value(action)!=item ||
         nowMs()>pending.intent.expiresAtMs || !reason().isEmpty()) return {};

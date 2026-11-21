@@ -7,6 +7,9 @@ visible, enabled control before QML runs. Fake QML signals, programmatic Qt
 events, synthesized mouse input and repeated keys cannot create a candidate.
 Overlapping registered controls are ambiguous and reject. Consumption is
 one-shot and checks the original window/control/context again.
+Consumption also requires the registered control's readable boolean `pressed`
+property to be true, proving that the control actually accepted the event before
+its QML `onPressed` callback. A window stamp or signal callback alone is insufficient.
 
 The original event deadline is 250 ms, reduced by conservative clock uncertainty.
 GUI callback time never starts a new budget. `Machine.beginFocus()` consumes the

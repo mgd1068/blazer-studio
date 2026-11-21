@@ -23,7 +23,9 @@ class NativeInputIntentTestAccess {
                         bool spontaneous=true,bool repeat=false,bool synth=false) {
         a.capture(&w,time,{10,10},false,spontaneous,repeat,synth);
     }
-    static void forceSuspend(NativeInputIntentAdapter &a) { a.m_suspendGap-=1000; }
+    static void forceSuspend(NativeInputIntentAdapter &a) {
+        a.m_suspendGap+=1000; // Nonnegative baseline discontinuity, even on never-suspended hosts.
+    }
     static bool inactive(const NativeInputIntentAdapter &a) {
         return !a.m_probeTimer.isActive() && !a.m_xcb && !a.m_checkPending && a.m_compositorOwner.isEmpty();
     }
@@ -85,6 +87,7 @@ class NativeInputIntentTest : public QObject {
         QQuickWindow window; window.resize(100,100); window.show(); window.requestActivate();
         QTRY_VERIFY(window.isActive());
         QQuickItem control(window.contentItem()); control.setSize({30,30});
+        control.setProperty("pressed",true); // Private fixture models actual Button acceptance.
         a.registerControl(&control,"focus");
         auto arm=[&] {
             const auto n=NativeInputIntentTestAccess::now();
@@ -96,6 +99,10 @@ class NativeInputIntentTest : public QObject {
         QVERIFY(!a.consume("focus"));
         arm(); NativeInputIntentTestAccess::capture(a,window,1000,true,false,true);
         QVERIFY(!a.consume("focus"));
+        control.setProperty("pressed",false);
+        arm(); NativeInputIntentTestAccess::capture(a,window,1000);
+        QVERIFY(!a.consume("focus"));
+        control.setProperty("pressed",true);
         arm(); NativeInputIntentTestAccess::capture(a,window,1000);
         QVERIFY(a.consume("focus")); QVERIFY(!a.consume("focus"));
         arm(); NativeInputIntentTestAccess::capture(a,window,1000);
