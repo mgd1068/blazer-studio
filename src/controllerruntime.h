@@ -3,6 +3,7 @@
 #include "controllersession.h"
 #include "job.h"
 #include "preparedcontrollerjob.h"
+#include "nativeaction.h"
 #include <QMutex>
 #include <QThread>
 #include <atomic>
@@ -20,13 +21,21 @@ class ControllerNativePressProof final {
     friend class ControllerRuntimeTestAccess;
     ControllerNativePressProof(quint64 issuerValue, quint64 interactionValue, quint64 windowValue,
                                qint64 observed, qint64 expires, quint64 connectionValue,
-                               quint64 revocationValue, quint64 focusValue)
+                               quint64 revocationValue, quint64 focusValue,
+                               ControllerNativeAction actionValue=ControllerNativeAction::FocusHold,
+                               QByteArray digest={},std::shared_ptr<const NativeInputContextToken> token={},
+                               quint64 coordinateValue=0)
         : issuer(issuerValue), interaction(interactionValue), window(windowValue),
           observedAt(observed), expiresAt(expires), connection(connectionValue),
-          revocation(revocationValue), focusGeneration(focusValue) {}
+          revocation(revocationValue), focusGeneration(focusValue),action(actionValue),
+          payloadDigest(std::move(digest)),contextToken(std::move(token)),coordinateEpoch(coordinateValue) {}
     const quint64 issuer, interaction, window;
     const qint64 observedAt, expiresAt;
     const quint64 connection, revocation, focusGeneration;
+    const ControllerNativeAction action;
+    const QByteArray payloadDigest;
+    const std::shared_ptr<const NativeInputContextToken> contextToken;
+    const quint64 coordinateEpoch;
 };
 struct ControllerRuntimeInputStamp {
     quint64 interactionId = 0, windowEpoch = 0;
@@ -89,5 +98,11 @@ class ControllerRuntimeSession final : public ControllerSession {
     ControllerRuntimeInputStamp sealNativePress(quint64 interaction, quint64 window,
                                                 qint64 observedAt);
     void revokeFocusContext();
+    ControllerRuntimeInputStamp sealNativeAction(ControllerNativeAction action,quint64 interaction,
+        qint64 observedAt,qint64 expiresAt,const QByteArray &payload,
+        std::shared_ptr<const NativeInputContextToken> context,quint64 connection,quint64 coordinate);
+    bool submitNativeAction(ControllerNativeAction action,const ControllerRuntimeInputStamp &input,
+        double x=0,double y=0,const QVariantMap &bounds={},PreparedControllerJob::Ptr prepared={},
+        int feed=100,int power=100);
     void consumeLatest();
 };

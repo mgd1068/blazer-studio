@@ -13,6 +13,14 @@ using RuntimeTestSupport::RuntimePeer;
 
 class ControllerRuntimeTestAccess {
   public:
+    static inline quint64 sequence=0;
+    static bool start(ControllerRuntimeSession &r,PreparedControllerJob::Ptr prepared) {
+        const auto status=r.status();const auto now=RuntimePeer::monotonicNs()/1000000;
+        const auto digest=ControllerNativeDigest::request(ControllerNativeAction::StartJob,0,0,{},prepared->sourceFingerprint()+prepared->profileFingerprint());
+        const auto input=r.sealNativeAction(ControllerNativeAction::StartJob,++sequence,now,now+250,digest,
+            std::make_shared<NativeInputContextToken>(),status.connectionEpoch,status.coordinateEpoch);
+        return r.submitNativeAction(ControllerNativeAction::StartJob,input,0,0,{},std::move(prepared));
+    }
     template<class Function> static bool run(ControllerRuntimeSession &runtime,Function fn) {
         struct State { QSemaphore done; std::atomic_bool canceled{false}; bool ok=false; };
         auto state=std::make_shared<State>(); auto worker=runtime.m_worker;
@@ -147,7 +155,7 @@ class RuntimeContinuityTest : public QObject {
         QVERIFY(ControllerRuntimeTestAccess::commission(r));auto shift=ControllerRuntimeTestAccess::syntheticClock(r);QVERIFY(shift);
         auto barrier=ControllerRuntimeTestAccess::hold(r);QVERIFY(barrier);const auto before=RuntimePeer::monotonicNs();
         const auto release=qScopeGuard([barrier]{barrier->release.release();});
-        QVERIFY(r.requestStart(job()).enqueued);shift->store(1000000000LL);barrier->release.release();
+        QVERIFY(ControllerRuntimeTestAccess::start(r,job()));shift->store(1000000000LL);barrier->release.release();
         QTRY_VERIFY(!r.status().connected);QCOMPARE(powered(events(peer)),0);QVERIFY(noUnsafeAfter(events(peer),before));
         QVERIFY(!barrier->timedOut);
     }
@@ -156,7 +164,7 @@ class RuntimeContinuityTest : public QObject {
         QFETCH(bool,hold);RuntimePeer peer;QVERIFY(start(peer));RuntimeOwner owner;auto &r=*owner.runtime;
         QVERIFY(r.requestOpen(peer.port(),QByteArray(64,'d')).enqueued);QTRY_VERIFY(r.status().ready);
         QVERIFY(ControllerRuntimeTestAccess::commission(r));auto shift=ControllerRuntimeTestAccess::syntheticClock(r);QVERIFY(shift);
-        QVERIFY(r.requestStart(job()).enqueued);QTRY_VERIFY(powered(events(peer))>0);
+        QVERIFY(ControllerRuntimeTestAccess::start(r,job()));QTRY_VERIFY(powered(events(peer))>0);
         if(hold){r.pause();QTRY_VERIFY(r.status().paused);}
         const auto before=RuntimePeer::monotonicNs();shift->store(1000000000LL);
         std::this_thread::sleep_for(std::chrono::milliseconds(400));

@@ -14,6 +14,7 @@
 #include <QLibrary>
 #include <QFile>
 #include <QFileInfo>
+#include <QMetaProperty>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -272,7 +273,7 @@ NativeInputIntentAdapter::mapTimestamp(quint64 timestamp, qint64 now) {
         const auto after=nowMs();
         const auto upper=qint64(age)+2+(after-now);
         if (age<0 || after<now || upper>250 || after-upper<=m_contextStarted) return {};
-        return Intent{++m_interaction,after-upper,after-upper+250};
+        return Intent{++m_interaction,after-upper,after-upper+250,{}, {}};
     }
     if (m_domain != Domain::X11Server32 || timestamp == 0 ||
         timestamp > std::numeric_limits<quint32>::max() || m_sample.after < 0 ||
@@ -283,33 +284,88 @@ NativeInputIntentAdapter::mapTimestamp(quint64 timestamp, qint64 now) {
     const qint64 upperAge = now-m_sample.before+sampleMinusEvent+7;
     const qint64 lowerAge = now-m_sample.after+sampleMinusEvent-7;
     if (upperAge < 0 || lowerAge < -7 || upperAge > 250 || now-upperAge<=m_contextStarted) return {};
-    return Intent{++m_interaction,now-upperAge,now-upperAge+250};
+    return Intent{++m_interaction,now-upperAge,now-upperAge+250,{}, {}};
 }
-void NativeInputIntentAdapter::registerControl(QObject *control, const QString &action) {
+void NativeInputIntentAdapter::registerControl(QObject *control, const QString &action,BindingProvider binding) {
     if (action.isEmpty()) return;
+    if(!m_controls.contains(action)&&m_controls.size()>=32)return;
+    if(binding)m_holdBindings[action]=std::move(binding);
     if (m_controls.value(action) == control) return;
+    m_controls[action] = control; // Publish before focus-revocation receivers can re-register.
     const QPointer<NativeInputIntentAdapter> alive(this);
-    revoke();
-    if (!alive) return;
-    m_controls[action] = control;
+    invalidateAction(action,true);
+    if (!alive || m_controls.value(action)!=control) return;
+    const QPointer<QObject> registered(control);
     if (auto item = qobject_cast<QQuickItem *>(control)) {
-        connect(item, &QQuickItem::windowChanged, this, [this] { revoke(); });
-        connect(item, &QQuickItem::visibleChanged, this, [this] { revoke(); });
-        connect(item, &QQuickItem::enabledChanged, this, [this] { revoke(); });
-        connect(item, &QQuickItem::activeFocusChanged, this, [this,item] {
-            if (item->hasActiveFocus()) return;
-            for (const auto &pending:m_pending) {
-                if (pending.key && pending.control==item) { revoke(); return; }
-            }
+        connect(item, &QQuickItem::windowChanged, this, [this,action,registered] { if(m_controls.value(action)==registered)invalidateAction(action,true); });
+        connect(item, &QQuickItem::visibleChanged, this, [this,action,registered] { if(m_controls.value(action)==registered)invalidateAction(action,true); });
+        // Disabling the button after admitted output must not revoke that frozen
+        // request. Unconsumed press/release state is still discarded immediately.
+        connect(item, &QQuickItem::enabledChanged, this, [this,action,registered] { if(m_controls.value(action)==registered)invalidateAction(action,false); });
+        connect(item, &QQuickItem::activeFocusChanged, this, [this,item,action,registered] {
+            if (item->hasActiveFocus() || m_controls.value(action)!=registered) return;
+            for(const auto *entries:{&m_pending,&m_rawPress,&m_armed})
+                if(entries->value(action).key){invalidateAction(action,true);return;}
         });
     }
-    if (control) connect(control, &QObject::destroyed, this, [this] { revoke(); });
+    if (control) connect(control, &QObject::destroyed, this, [this,action,registered] {
+        if(m_controls.value(action)!=registered)return;
+        const QPointer<NativeInputIntentAdapter> alive(this);invalidateAction(action,true);
+        if(!alive)return;
+        if(m_controls.value(action).isNull()){m_controls.remove(action);m_clickBindings.remove(action);m_holdBindings.remove(action);m_tokens.remove(action);m_actionCutoff.remove(action);}
+    });
 }
+void NativeInputIntentAdapter::registerClickControl(QObject *control,const QString &key,BindingProvider binding) {
+    if(key=="focus"||!binding)return;
+    const QPointer<NativeInputIntentAdapter> alive(this);
+    registerControl(control,key);
+    if(!alive||m_controls.value(key)!=control)return;
+    m_clickBindings[key]=std::move(binding);
+    invalidateAction(key,true);
+    if (!control) return;
+    const auto meta=control->metaObject();
+    const auto pressed=meta->indexOfProperty("pressed");
+    const auto eligibility=meta->indexOfProperty("nativeActionEnabled");
+    if(pressed<0||eligibility<0||!meta->property(pressed).hasNotifySignal()||
+       !meta->property(eligibility).hasNotifySignal()||meta->property(pressed).metaType().id()!=QMetaType::Bool||
+       meta->property(eligibility).metaType().id()!=QMetaType::Bool){m_clickBindings[key]={};return;}
+    for (const auto pair : {qMakePair(pressed,"controlPressedChanged()"),qMakePair(eligibility,"controlEligibilityChanged()")}) {
+        if (pair.first<0 || !meta->property(pair.first).hasNotifySignal()) continue;
+        const auto slot=metaObject()->indexOfSlot(pair.second);
+        QObject::connect(control,meta->property(pair.first).notifySignal(),this,metaObject()->method(slot),Qt::UniqueConnection);
+    }
+}
+void NativeInputIntentAdapter::invalidateAction(const QString &key,bool revokeSubmitted) {
+    m_pending.remove(key);m_rawPress.remove(key);m_armed.remove(key);
+    m_actionCutoff[key]=nowMs();
+    if (revokeSubmitted) {
+        if (auto token=m_tokens.take(key)) token->valid=false;
+    }
+    if (key=="focus") emit invalidated();
+}
+void NativeInputIntentAdapter::revokeFocus() { invalidateAction("focus",true); }
 void NativeInputIntentAdapter::revoke() {
     ++m_context;
     m_contextStarted=nowMs();
-    m_pending.clear();
+    m_pending.clear();m_rawPress.clear();m_armed.clear();
+    for(const auto &token:m_tokens)token->valid=false;
+    m_tokens.clear();
     emit invalidated();
+}
+bool NativeInputIntentAdapter::eligible(QObject *control,bool click) {
+    if(!control)return false;
+    const auto property=control->property("nativeActionEnabled");
+    return !property.isValid() ? !click : property.metaType().id()==QMetaType::Bool&&property.toBool();
+}
+bool NativeInputIntentAdapter::hitControl(QObject *windowObject,QObject *control,const QPointF &scene,bool key) {
+    auto window=qobject_cast<QQuickWindow *>(windowObject);
+    auto item=qobject_cast<QQuickItem *>(control);
+    if(!window||!item||!window->isActive()||!window->isVisible()||!item->isVisible()||!item->isEnabled()||item->window()!=window)return false;
+    if(key)return item->hasActiveFocus();
+    auto hit=window->contentItem();
+    for(int depth=0;hit&&depth<64;++depth){auto point=hit->mapFromScene(scene);auto child=hit->childAt(point.x(),point.y());if(!child)break;hit=child;if(depth==63)return false;}
+    for(auto ancestor=hit;ancestor;ancestor=ancestor->parentItem())if(ancestor==item)return item->contains(item->mapFromScene(scene));
+    return false;
 }
 QString NativeInputIntentAdapter::reason() const {
     if (m_domain == Domain::Unknown) return "Native Eingabe gesperrt: Zeitdomäne dieser Plattform ist ungeprüft.";
@@ -319,8 +375,9 @@ QString NativeInputIntentAdapter::reason() const {
     return {};
 }
 void NativeInputIntentAdapter::capture(QObject *windowObject, quint64 timestamp,
-        const QPointF &scene, bool key, bool spontaneous, bool repeat, bool synthetic) {
+        const QPointF &scene, bool key, bool spontaneous, bool repeat, bool synthetic,int detail,const QInputDevice *device) {
     if (!spontaneous || repeat || synthetic) return;
+    m_rawPress.clear();m_armed.clear(); // A second press cannot inherit an older interaction.
     if (m_domain==Domain::KWinMonotonic32 && !compositorPeerStillMatches()) {
         m_domain=Domain::Unknown; m_compositorOwner.clear(); ++m_platformEpoch;
         revoke(); return;
@@ -334,27 +391,75 @@ void NativeInputIntentAdapter::capture(QObject *windowObject, quint64 timestamp,
     const auto mapped = mapTimestamp(timestamp,nowMs());
     if (!alive || !mapped) return;
     QString match;
-    QQuickItem *hit=window->contentItem();
-    if (!key) {
-        for (int depth=0; hit && depth<64; ++depth) {
-            auto child=hit->childAt(hit->mapFromScene(scene).x(),hit->mapFromScene(scene).y());
-            if (!child) break;
-            hit=child;
-            if (depth==63) return;
-        }
-    }
+    QByteArray binding;
     for (auto i=m_controls.cbegin(); i!=m_controls.cend(); ++i) {
-        auto item = qobject_cast<QQuickItem *>(i.value());
-        if (!item || item->window()!=window || !item->isVisible() || !item->isEnabled()) continue;
-        bool target=false;
-        for (auto ancestor=hit; ancestor; ancestor=ancestor->parentItem())
-            if (ancestor==item) { target=true; break; }
-        if (key ? item->hasActiveFocus() : target && item->contains(item->mapFromScene(scene))) {
+        const bool click=m_clickBindings.contains(i.key());
+        if (hitControl(window,i.value(),scene,key) && eligible(i.value(),click) &&
+            mapped->observedAtMs>m_actionCutoff.value(i.key(),-1)) {
+            const auto provider=click?m_clickBindings.value(i.key()):m_holdBindings.value(i.key());
+            const auto current=provider ? provider() : QByteArray();
+            if(!alive)return;
+            if((click&&!provider)||(provider&&current.isEmpty()))continue;
             if (!match.isEmpty()) return; // Overlapping registrations are ambiguous.
-            match=i.key();
+            match=i.key();binding=current;
         }
     }
-    if (!match.isEmpty()) m_pending[match] = {*mapped,m_controls.value(match),window,m_context,key};
+    if (!match.isEmpty()) {
+        auto token=m_tokens.value(match);
+        if(!token){token=std::make_shared<NativeInputContextToken>();m_tokens[match]=token;}
+        auto intent=*mapped;intent.binding=binding;intent.contextToken=token;
+        Pending pending{intent,m_controls.value(match),window,m_context,key,m_clickBindings.contains(match),detail,device};
+        if(pending.click)m_rawPress[match]=pending;else m_pending[match]=pending;
+    }
+}
+void NativeInputIntentAdapter::controlPressedChanged() {
+    acceptControlPress(sender());
+}
+void NativeInputIntentAdapter::acceptControlPress(QObject *control) {
+    if(!control)return;
+    const auto pressed=control->property("pressed");if(pressed.metaType().id()!=QMetaType::Bool)return;
+    for(const auto &key:m_clickBindings.keys())if(m_controls.value(key)==control) {
+        if(!pressed.toBool()){m_rawPress.remove(key);m_armed.remove(key);continue;}
+        const auto raw=m_rawPress.take(key);
+        if(raw.control==control && raw.context==m_context && eligible(control,true) &&
+            raw.intent.contextToken && raw.intent.contextToken->valid && nowMs()<=raw.intent.expiresAtMs &&
+            m_clickBindings.value(key)()==raw.intent.binding) m_armed[key]=raw;
+    }
+}
+void NativeInputIntentAdapter::controlEligibilityChanged() {
+    auto control=sender();
+    for(const auto &key:m_clickBindings.keys())if(m_controls.value(key)==control)invalidateAction(key,true);
+}
+void NativeInputIntentAdapter::release(QObject *window,quint64 timestamp,const QPointF &scene,
+        bool key,bool spontaneous,bool repeat,bool synthetic,int detail,const QInputDevice *device) {
+    if(!spontaneous||repeat||synthetic||(key&&m_domain==Domain::KWinMonotonic32))return;
+    const QPointer<NativeInputIntentAdapter> alive(this);
+    const auto mapped=mapTimestamp(timestamp,nowMs());if(!alive||!mapped)return;
+    for(const auto &name:m_armed.keys()) {
+        auto pending=m_armed.take(name);auto control=pending.control.data();
+        const auto pressed=control?control->property("pressed"):QVariant();
+        if(pending.window!=window||pending.key!=key||pending.detail!=detail||pending.device!=device||
+            pending.context!=m_context||!hitControl(window,control,scene,key)||!eligible(control,true)||
+            pressed.metaType().id()!=QMetaType::Bool||!pressed.toBool()||
+            !pending.intent.contextToken||!pending.intent.contextToken->valid||
+            nowMs()-pending.intent.observedAtMs>5000||
+            m_clickBindings.value(name)()!=pending.intent.binding)continue;
+        auto activation=*mapped;activation.binding=pending.intent.binding;activation.contextToken=pending.intent.contextToken;
+        pending.intent=activation;m_pending[name]=pending;
+    }
+}
+std::optional<NativeInputIntentAdapter::Intent> NativeInputIntentAdapter::consumeMatching(const QString &prefix,const QByteArray &binding) {
+    QString match;
+    bool candidate=false;
+    for(auto i=m_pending.cbegin();i!=m_pending.cend();++i)if(i.key().startsWith(prefix+"#")) {
+        candidate=true;if(i.value().intent.binding!=binding)continue;
+        if(!match.isEmpty()){discardMatching(prefix);return{};}match=i.key();
+    }
+    if(match.isEmpty()&&candidate)discardMatching(prefix);
+    return match.isEmpty()?std::nullopt:consume(match);
+}
+void NativeInputIntentAdapter::discardMatching(const QString &prefix) {
+    for(const auto &key:m_controls.keys())if(key.startsWith(prefix+"#"))invalidateAction(key,false);
 }
 std::optional<NativeInputIntentAdapter::Intent>
 NativeInputIntentAdapter::consume(const QString &action) {
@@ -373,7 +478,10 @@ NativeInputIntentAdapter::consume(const QString &action) {
     const auto pressed=item ? item->property("pressed") : QVariant();
     if (pending.context!=m_context || !item || !window || !window->isActive() ||
         !window->isVisible() || !item->isEnabled() || !item->isVisible() ||
-        pressed.metaType().id()!=QMetaType::Bool || !pressed.toBool() ||
+        pressed.metaType().id()!=QMetaType::Bool || pressed.toBool()==pending.click ||
+        !eligible(item,pending.click) || !pending.intent.contextToken || !pending.intent.contextToken->valid ||
+        (pending.click&&(!m_clickBindings.value(action)||m_clickBindings.value(action)()!=pending.intent.binding)) ||
+        (!pending.click&&m_holdBindings.contains(action)&&m_holdBindings.value(action)()!=pending.intent.binding) ||
         (pending.key && !item->hasActiveFocus()) ||
         item->window()!=window || m_controls.value(action)!=item ||
         nowMs()>pending.intent.expiresAtMs || !reason().isEmpty()) return {};
@@ -382,26 +490,39 @@ NativeInputIntentAdapter::consume(const QString &action) {
 bool NativeInputIntentAdapter::eventFilter(QObject *object, QEvent *event) {
     if (!qobject_cast<QQuickWindow *>(object)) return false;
     switch(event->type()) {
-    case QEvent::MouseButtonPress: {
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonDblClick: {
         auto mouse=static_cast<QMouseEvent *>(event);
         if (mouse->button()==Qt::LeftButton)
             capture(object,mouse->timestamp(),mouse->position(),false,event->spontaneous(),false,
-                mouse->source()!=Qt::MouseEventNotSynthesized);
+                mouse->source()!=Qt::MouseEventNotSynthesized,int(mouse->button()),mouse->device());
         break;
     }
     case QEvent::KeyPress: {
         auto key=static_cast<QKeyEvent *>(event);
         if (key->key()==Qt::Key_Space || key->key()==Qt::Key_Return || key->key()==Qt::Key_Enter)
-            capture(object,key->timestamp(),{},true,event->spontaneous(),key->isAutoRepeat(),false);
+            capture(object,key->timestamp(),{},true,event->spontaneous(),key->isAutoRepeat(),false,key->key(),key->device());
         break;
     }
-    case QEvent::MouseButtonRelease:
-    case QEvent::KeyRelease:
+    case QEvent::MouseButtonRelease: {
+        auto mouse=static_cast<QMouseEvent *>(event);const QPointer<NativeInputIntentAdapter> alive(this);
+        release(object,mouse->timestamp(),mouse->position(),false,event->spontaneous(),false,
+            mouse->source()!=Qt::MouseEventNotSynthesized,int(mouse->button()),mouse->device());
+        if(alive)revokeFocus();
+        break;
+    }
+    case QEvent::KeyRelease: {
+        auto key=static_cast<QKeyEvent *>(event);const QPointer<NativeInputIntentAdapter> alive(this);
+        release(object,key->timestamp(),{},true,event->spontaneous(),key->isAutoRepeat(),false,key->key(),key->device());
+        if(alive)revokeFocus();
+        break;
+    }
     case QEvent::TouchCancel:
     case QEvent::WindowDeactivate:
     case QEvent::Hide:
     case QEvent::Close:
-        revoke(); break;
+        for(const auto &control:m_controls)if(auto item=qobject_cast<QQuickItem *>(control.data());item&&item->window()==object){revoke();break;}
+        break;
     default: break;
     }
     return false;

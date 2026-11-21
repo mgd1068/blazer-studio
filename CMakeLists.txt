@@ -19,7 +19,7 @@ option(BLAZER_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer
 option(BLAZER_COVERAGE "Enable GCC coverage instrumentation" OFF)
 
 qt_add_library(blazer-core STATIC
-    src/nativeinputintent.cpp src/nativeinputintent.h
+    src/nativeinputintent.cpp src/nativeinputintent.h src/nativeaction.h
     src/plotimport.cpp src/plotimport.h src/gcodeimport.cpp src/ruidaimport.cpp
     src/artlibrary.cpp src/artlibrary.h src/geometryassetcodec.cpp src/geometryassetcodec.h
     src/artlibrarycontroller.cpp src/artlibrarycontroller.h src/documentartlibrary.cpp

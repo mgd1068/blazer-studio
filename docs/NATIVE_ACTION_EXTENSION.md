@@ -1,58 +1,53 @@
-# Proposed native action extension (not implemented)
+# Native action implementation and acceptance boundary
 
-The current implementation protects focus-on-press. Start, Jog, Home, Frame,
-WorkZero and Resume still require a separate typed action integration; registering
-a control with the collector alone does not protect those entrypoints.
+Machine now registers native controls for `start`, `jog`, `home`, `frame`, `zero`,
+`resume` and `override` through
+`registerNativeActionControl(control, action, fixedArguments={})`. Registration
+alone grants nothing. Multiple controls per action have separate control tokens.
+The control must expose readable boolean `pressed` and `nativeActionEnabled`
+properties with notify signals. Semantic eligibility is checked at press,
+release and consumption. Dynamic `nativeActionArguments` supply `{dx,dy}`,
+`{scope}`, or `{feed,power}`; fixed arguments take precedence. Missing eligibility
+or unobservable pressed/eligibility state rejects click registration.
 
-Recommended C++ contract:
+The native collector records a fresh original OS press. The actual control's
+pressed notification must accept it within the original250 ms budget before it
+can arm. An already accepted hold may last at most5 s. A fresh original OS
+release on the same control/window/device/button completes that interaction;
+the release has its own250 ms deadline. An old or never accepted press cannot
+be revived by release. Changed arguments, source, reference, eligibility,
+replacement, context loss and cancellation reject. Busy-state button disabling
+discards unused interactions but preserves an already consumed frozen request.
+Focus release stays focus-only; unrelated queued jobs are not globally revoked.
 
-```cpp
-enum class NativeAction { FocusHold, StartJob, Jog, Home, Frame, WorkZero, Resume };
-// QML registration only; this creates no intent or machine permission.
-void Machine::registerActionControl(QObject *control, NativeAction action,
-                                    QVariantMap fixedArguments);
-// No QML authorization bool. Existing Machine entrypoints consume internally.
-// Private immutable worker proof, created only after native collector validation:
-struct NativeActionProof; // action, argumentDigest, interaction, device/button,
-                         // context/connection/coordinate/revocation epochs,
-                         // original activation deadline, issuer seal
-```
+Machine consumes internally, compares a cheap current binding (document and
+selection generation, profile, prepared source and connection/reference epochs)
+and seals a private immutable action proof. No QML authorization bool is passed
+back for later use. Worker checks action, request-body digest, original deadline,
+connection/revocation/reference epochs, control context and one-shot interaction
+before dispatch, in addition to all existing motion/flow/homing/override gates.
+Reference epoch changes on WCO/known-offset/reference/homing/reset transitions.
+The sealer checks the expected epochs under the mailbox lock; it cannot silently
+adopt a newer frame between GUI validation and sealing.
 
-Registration validates fixed arguments in C++, such as finite bounded Jog deltas.
-At an accepted native press the collector freezes a small action binding from
-Machine: prepared source/profile fingerprint and start mode for Start, exact
-Jog parameters, current Frame region fingerprint, or the relevant reference
-frame identity. No full geometry scan or encoding belongs in the event filter.
-Queued preparation completion can never submit an action by itself.
+Raw unsealed runtime motion/override calls may report data admission but cannot
+write those commands. Safe FeedHold remains unconditional and is a separate
+request kind: it never toggles a delayed hold into resume. Resume requires a
+sealed Resume proof plus actual paused state and current output/motion evidence.
+The first normal write rechecks original input expiry/control revocation before
+host acceptance commits the finite transaction. After that, a frozen active job
+continues under worker status/flow/clock safety rather than an input TTL.
+Host write acceptance is not physical movement or optical emission evidence.
 
-Hold actions consume the original fresh press, as focus does today. Click actions
-need an explicit two-phase interaction: a fresh native press must first be
-accepted and arm the actual control; a later fresh native release/activation can
-complete only that same armed device/button/control/window/context interaction.
-The release must itself be within250 ms of its original OS time. A product-defined
-bounded hold duration, for example5 s, avoids an unexplained250 ms click-hold
-restriction. This would be a distinct release deadline, not a renewal of an old
-unaccepted press. Release alone, old press first delivered after a GUI stall,
-autorepeat, canceled/hidden/replaced controls and programmatic QML signals cannot
-arm or revive anything. Controls must report actual accepted pressed state at
-arm time; activation must be bound to the corresponding accepted release.
+Focus remains on-press. Wayland keyboard is still denied because the reviewed
+KWin input-method path can reuse seat timestamps; pointer trust is limited to
+the OS-compositor event time described in [the clock contract](NATIVE_INPUT_INTENT.md).
+No motion, homing, airflow or override commissioning grant is introduced.
 
-Machine recomputes the small current action binding when its entrypoint is
-called and consumes the matching one-shot activation. Any source, profile,
-arguments or coordinate-frame mismatch rejects and requires another interaction.
-It then passes the actual immutable request plus a private sealed proof to the
-worker. Worker admission must compare proof action and payload digest with the
-request kind/body, check original remaining deadline and current epochs, and
-recheck every motion/homing/flow/output preflight. Connection epoch alone is
-insufficient: reset, unexpected startup, homing and G54/WCO updates must invalidate
-or advance a separately defined coordinate/reference epoch. There is no public
-or JSON grant. Stop/Close remain unconditional priority revocations.
-
-Required independent tests include each action cross-used as another action,
-argument mutation, prepare completion after canceled input, fresh release with
-never-accepted old press, valid long hold followed by fresh release, release
-queued past its own deadline, coordinate/profile/source changes between phases,
-overlays/unpressed controls, keyboard autorepeat, window/context changes and
-STOP racing queued dispatch. Actual PTY wire output is the final oracle; GUI
-flags or proof construction alone are insufficient. Wayland keyboard stays
-unsupported until a conservative original timestamp path is established.
+Own adapter tests cover accepted long holds, rejected old/unaccepted presses,
+argument/eligibility changes, original deadlines and context revocation. Actual
+runtime continuity tests use an explicit private synthetic native proof to keep
+serial/watchdog acceptance independent of physical GUI input. Broad226/18 test
+fixture migration and independent generic action/actual Main acceptance are
+still required before integration is called complete. Private synthetic input
+must not be described as real OS input or hardware validation.

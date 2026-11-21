@@ -7,6 +7,29 @@
 #include <QCryptographicHash>
 #include <QScopedValueRollback>
 #include <QUuid>
+#include <QJSValue>
+#include <QDataStream>
+#include <cmath>
+namespace {
+std::optional<ControllerNativeAction> nativeAction(const QString &name) {
+    if(name=="start")return ControllerNativeAction::StartJob;
+    if(name=="jog")return ControllerNativeAction::Jog;
+    if(name=="home")return ControllerNativeAction::Home;
+    if(name=="frame")return ControllerNativeAction::Frame;
+    if(name=="zero")return ControllerNativeAction::WorkZero;
+    if(name=="resume")return ControllerNativeAction::Resume;
+    if(name=="override")return ControllerNativeAction::Override;
+    if(name=="focus")return ControllerNativeAction::FocusHold;
+    return {};
+}
+bool finiteInputNumber(const QVariant &value) {
+    switch(value.metaType().id()) {
+    case QMetaType::Double:case QMetaType::Float:case QMetaType::Int:case QMetaType::UInt:
+    case QMetaType::LongLong:case QMetaType::ULongLong:return std::isfinite(value.toDouble());
+    default:return false;
+    }
+}
+}
 Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     : Simulator(p), document(d), hardwareAccess(access) {
     nativeInput = new NativeInputIntentAdapter(this,hardwareAccess==HardwareAccess::Allowed);
@@ -34,9 +57,11 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     connect(this, &Simulator::changed, this, &Machine::refreshPreviewPosition);
     connect(d, &Document::changed, this, &Machine::refreshPreviewPosition);
     connect(d, &Document::changed, this, [this] {
+        ++nativeDocumentGeneration;
         if (live && !document->planningBusy())
             if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get())) runtime->prepare(document->job());
     });
+    connect(d,&Document::selectionChanged,this,[this]{++nativeDocumentGeneration;});
     refreshPreviewPosition();
 }
 void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
@@ -167,19 +192,86 @@ QString Machine::prepareReason() const { const auto runtime=dynamic_cast<Control
 QString Machine::nativeInputSafetyError() const { return live ? nativeInput->reason() : QString(); }
 void Machine::registerFocusControl(QObject *control) {
     focusControl = control;
-    nativeInput->registerControl(control,"focus");
+    nativeInput->registerControl(control,"focus",[self=QPointer<Machine>(this)] {
+        return self&&self->session?self->nativeBinding("focus",{},self->session->status()):QByteArray();
+    });
+}
+QVariantMap Machine::nativeArguments(QObject *control,const QVariantMap &fixed) const {
+    if(!fixed.isEmpty()||!control)return fixed;
+    auto value=control->property("nativeActionArguments");
+    if(value.metaType().id()==qMetaTypeId<QJSValue>())value=value.value<QJSValue>().toVariant();
+    if(!value.isValid())return {};
+    if(value.metaType().id()!=QMetaType::QVariantMap)return {{"invalid",true}};
+    const auto map=value.toMap();return map.size()<=2?map:QVariantMap{{"invalid",true}};
+}
+void Machine::registerNativeActionControl(QObject *control,const QString &action,const QVariantMap &fixedArguments) {
+    if(!control||!nativeAction(action)||action=="focus"||fixedArguments.size()>2)return;
+    const auto key=action+"#"+QString::number(quintptr(control),16);
+    nativeInput->registerClickControl(control,key,[self=QPointer<Machine>(this),target=QPointer<QObject>(control),action,fixedArguments] {
+        if(!self||!target||!self->session)return QByteArray();
+        return self->nativeBinding(action,self->nativeArguments(target,fixedArguments),self->session->status());
+    });
+}
+QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &arguments,const ControllerStatus &status) const {
+    const auto kind=nativeAction(action);if(!kind||!live||!session||!status.connected||!status.statusFresh||
+        status.opening||status.closing||status.requestPending||status.referencing||status.resetting||status.coordinateUpdatePending)return {};
+    if(action=="jog") {
+        if(arguments.size()!=2||!finiteInputNumber(arguments.value("dx"))||!finiteInputNumber(arguments.value("dy")))return {};
+    } else if(action=="frame") {
+        if(arguments.size()!=1||!QStringList{"job","selection","tools","t1","t2"}.contains(arguments.value("scope").toString()))return {};
+    } else if(action=="override") {
+        const auto f=arguments.value("feed"),p=arguments.value("power");
+        if(arguments.size()!=2||!finiteInputNumber(f)||!finiteInputNumber(p)||std::trunc(f.toDouble())!=f.toDouble()||
+            std::trunc(p.toDouble())!=p.toDouble()||f.toDouble()<10||f.toDouble()>200||p.toDouble()<10||p.toDouble()>100||!overridesReady())return {};
+    } else if(!arguments.isEmpty())return {};
+    if(action=="home") {if(status.busy||!status.homingSafetyError.isEmpty())return {};}
+    else if(action=="resume") {if(!status.paused||!processingSafetyErrors().isEmpty())return {};}
+    else if(action!="override") {
+        if(!status.ready||status.busy||status.firing||!status.verified||!status.positionReferenced||!status.motionSafetyError.isEmpty())return {};
+        if((action=="start"||action=="focus")&&!processingSafetyErrors().isEmpty())return {};
+    }
+    const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
+    PreparedControllerJob::Ptr prepared;
+    if(action=="start") {
+        if(!runtime||document->planningBusy()||document->startMode()!=Document::AbsoluteCoordinates)return {};
+        prepared=runtime->m_preparation->result(runtime->m_prepareSequence);
+        if(!prepared||!prepared->valid())return {};
+    }
+    QByteArray bytes;QDataStream stream(&bytes,QIODevice::WriteOnly);stream.setVersion(QDataStream::Qt_6_8);
+    stream<<action<<QJsonDocument::fromVariant(arguments).toJson(QJsonDocument::Compact)<<nativeDocumentGeneration
+        <<status.connectionEpoch<<status.coordinateEpoch<<session->deviceProfile().outputFingerprint()<<previewDeviceBinding;
+    if(prepared)stream<<prepared->sourceFingerprint()<<runtime->m_prepareSequence;
+    return QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);
+}
+bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,double x,double y,
+        const QVariantMap &bounds,PreparedControllerJob::Ptr prepared,int feed,int power) {
+    const auto kind=nativeAction(action);auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
+    if(!runtime||!kind)return false;
+    const auto snapshot=runtime->status();
+    const auto binding=nativeBinding(action,arguments,snapshot);
+    const auto input=binding.isEmpty()?std::nullopt:nativeInput->consumeMatching(action,binding);
+    if(!input){document->notify("Geräteaktion gesperrt: frischer nativer Druck und zugehöriges Loslassen am passenden Bedienelement fehlen.");return false;}
+    QByteArray source;if(prepared)source=prepared->sourceFingerprint()+prepared->profileFingerprint();
+    const auto digest=ControllerNativeDigest::request(*kind,action=="override"?double(feed):x,action=="override"?double(power):y,bounds,source);
+    const auto stamp=runtime->sealNativeAction(*kind,input->interaction,input->observedAtMs,input->expiresAtMs,digest,
+        input->contextToken,snapshot.connectionEpoch,snapshot.coordinateEpoch);
+    if(!stamp.proof){document->notify("Geräteaktion gesperrt: Eingabe oder Referenzrahmen inzwischen verändert.");return false;}
+    return runtime->submitNativeAction(*kind,stamp,x,y,bounds,std::move(prepared),feed,power);
 }
 void Machine::beginFocus() {
     if (!live) { Simulator::focus(true); return; }
     auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
+    const auto snapshot=runtime?runtime->status():ControllerStatus{};
     const auto input=nativeInput->consume("focus");
-    if (!runtime || !input) {
+    if (!runtime || !input || input->binding!=nativeBinding("focus",{},snapshot)) {
         const auto reason=nativeInput->reason();
         document->notify(reason.isEmpty() ? QString("Fokus gesperrt: frischer nativer Druck auf das Fokusfeld fehlt.") : reason);
         return;
     }
-    const auto stamp=runtime->sealNativePress(input->interaction,
-        runtime->m_mailbox->focusWindowEpoch.load(),input->observedAtMs);
+    const auto stamp=runtime->sealNativeAction(ControllerNativeAction::FocusHold,input->interaction,
+        input->observedAtMs,input->expiresAtMs,ControllerNativeDigest::request(ControllerNativeAction::FocusHold),
+        input->contextToken,snapshot.connectionEpoch,snapshot.coordinateEpoch);
+    if(!stamp.proof){document->notify("Fokus gesperrt: Eingabe oder Referenzrahmen inzwischen verändert.");return;}
     runtime->beginFocus(stamp);
 }
 void Machine::endFocus() { focus(false); }
@@ -202,7 +294,7 @@ void Machine::toggleConnection() {
 }
 void Machine::jog(double x, double y) {
     if (live)
-        session->jog(x, y);
+        dispatchNative("jog",{{"dx",x},{"dy",y}},x,y);
     else
         Simulator::jog(x, y);
 }
@@ -212,17 +304,17 @@ void Machine::setWorkZero() {
         document->notify("Arbeitsnullpunkt gesperrt: erst den aktiven Auftrag, Fokus oder die laufende Geräteaktion beenden.");
         return;
     }
-    session->zero();
+    dispatchNative("zero",{});
 }
 void Machine::home() {
     if (live)
-        session->home();
+        dispatchNative("home",{});
     else
         Simulator::home();
 }
 void Machine::focus(bool on) {
     if (!live) { Simulator::focus(on); return; }
-    if (!on) nativeInput->revoke(); // Revoke collector AND worker; a later begin cannot reseal it.
+    if (!on) nativeInput->revokeFocus(); // Focus-only; unrelated queued job authority is preserved.
     else beginFocus(); // Legacy true has no input authority and cannot bypass the native gate.
 }
 void Machine::frame(const QVariantMap &b) {
@@ -241,7 +333,7 @@ void Machine::frame(const QVariantMap &b) {
         return;
     }
     if (live)
-        session->frame(current);
+        dispatchNative("frame",{{"scope",current.value("scope")}},0,0,current);
     else
         Simulator::frame(current);
 }
@@ -270,7 +362,11 @@ void Machine::start() {
         return;
     }
     if (live) {
-        session->start(job);
+        auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());if(!runtime)return;
+        if(runtime->m_candidateMoves.constData()!=job.moves.constData()||runtime->m_candidateMoves.size()!=job.moves.size()||!runtime->jobPrepared()) {
+            runtime->prepare(job);return; // No completion callback can start this job.
+        }
+        dispatchNative("start",{},0,0,{},runtime->m_preparation->result(runtime->m_prepareSequence));
     } else {
         Simulator::setJob(job);
         Simulator::start();
@@ -278,13 +374,21 @@ void Machine::start() {
 }
 void Machine::pause() {
     if (live) {
-        if (paused() && !processingSafetyErrors().isEmpty()) {
-            document->notify(processingSafetyErrors().join("\n"));
-            stop(); return;
+        if (paused()) {
+            if(!processingSafetyErrors().isEmpty()) {
+                document->notify(processingSafetyErrors().join("\n"));stop();return;
+            }
+            dispatchNative("resume",{});
+        } else {
+            nativeInput->discardMatching("resume");
+            session->pause(); // A hold request can never turn into resume in the worker.
         }
-        session->pause();
     } else
         Simulator::pause();
+}
+bool Machine::setOverrides(int feed,int power) {
+    if(!overridesReady())return false;
+    return dispatchNative("override",{{"feed",feed},{"power",power}},0,0,{}, {},feed,power);
 }
 void Machine::stop() {
     const QPointer<Machine> alive(this);

@@ -7,6 +7,7 @@
 #include <memory>
 class Document;
 class NativeInputIntentAdapter;
+class PreparedControllerJob;
 class Machine : public Simulator {
     Q_OBJECT
     Q_PROPERTY(bool simulation READ simulation NOTIFY changed)
@@ -69,10 +70,7 @@ class Machine : public Simulator {
         return status.overridesSafetyError;
     }
     bool overridesReady() const { return overridesSafetyError().isEmpty(); }
-    Q_INVOKABLE bool setOverrides(int feed, int power) {
-        if (!overridesReady()) return false;
-        return session->overrides(feed, power);
-    }
+    Q_INVOKABLE bool setOverrides(int feed, int power);
 
     bool connectHardware(const QString &port);
     ControllerSubmission requestConnectHardware(const QString &port,
@@ -87,6 +85,9 @@ class Machine : public Simulator {
     QString prepareReason() const;
     QString nativeInputSafetyError() const;
     Q_INVOKABLE void registerFocusControl(QObject *control);
+    // Registration/eligibility only. Intents come exclusively from native events.
+    Q_INVOKABLE void registerNativeActionControl(QObject *control,const QString &action,
+                                                const QVariantMap &fixedArguments = {});
     Q_INVOKABLE void beginFocus();
     Q_INVOKABLE void endFocus();
     Q_INVOKABLE void useSimulator();
@@ -144,6 +145,11 @@ class Machine : public Simulator {
     NativeInputIntentAdapter *nativeInput = nullptr;
     quint64 nativeConnectionEpoch = 0;
     bool nativeSessionVerified = false;
+    quint64 nativeDocumentGeneration = 1;
+    QVariantMap nativeArguments(QObject *control,const QVariantMap &fixed) const;
+    QByteArray nativeBinding(const QString &action,const QVariantMap &arguments,const ControllerStatus &status) const;
+    bool dispatchNative(const QString &action,const QVariantMap &arguments,double x=0,double y=0,
+        const QVariantMap &bounds={},std::shared_ptr<const PreparedControllerJob> prepared={},int feed=100,int power=100);
     QStringList lastProcessingSafetyErrors;
     QByteArray previewDeviceBinding, simulatorFrameNonce, previewFrame;
     QPointF previewPoint;

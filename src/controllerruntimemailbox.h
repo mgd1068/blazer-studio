@@ -10,7 +10,9 @@ enum class ControllerRuntimeRequestKind {
     Home,
     Zero,
     Frame,
-    Pause,
+    Hold,
+    Pause = Hold, // Source compatibility only: this request can NEVER resume.
+    Resume,
     Override,
     Focus,
     FocusOff,

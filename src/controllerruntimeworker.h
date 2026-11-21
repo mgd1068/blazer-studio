@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <functional>
 #include <optional>
+struct ControllerRuntimeRequest;
 
 // Internal implementation header. No GUI caller may access these objects directly.
 class ControllerRuntimeWorker final : public QObject {
@@ -29,6 +30,12 @@ class ControllerRuntimeWorker final : public QObject {
     quint64 m_lastFocusInteraction = 0;
     PreparedControllerJob::Ptr m_activePrepared;
     quint64 m_connectionEpoch = 0, m_sequence = 0;
+    quint64 m_coordinateEpoch = 1, m_lastNativeInteraction = 0;
+    std::shared_ptr<const ControllerNativePressProof> m_dispatchProof;
+    bool m_epochKnownOffset=false,m_epochReferenced=false,m_epochHoming=false,m_epochResetting=false;
+    QPointF m_epochOffset;
+    void refreshCoordinateEpoch();
+    bool nativeActionAllowed(const ControllerRuntimeRequest &request);
     struct ClockInterval { qint64 lowNs, highNs; };
     static std::optional<ClockInterval> readClockInterval();
     // Private synthetic seam; no configuration/UI can override the real clock.

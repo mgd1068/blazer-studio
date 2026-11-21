@@ -238,7 +238,7 @@ void ControllerRuntimeSession::frame(const QVariantMap &b) {
     emit changed();
 }
 void ControllerRuntimeSession::pause() {
-    send(m_mailbox, Request{Kind::Pause});
+    send(m_mailbox, Request{Kind::Hold}); // An unsealed safe-hold request can never resume.
     emit changed();
 }
 bool ControllerRuntimeSession::overrides(int feed, int power) {
@@ -284,6 +284,39 @@ ControllerRuntimeSession::sealNativePress(quint64 interaction, quint64 window, q
         m_mailbox->latest.connectionEpoch, m_mailbox->generation.load(),
         m_mailbox->focusGeneration.load()));
     return stamp;
+}
+ControllerRuntimeInputStamp ControllerRuntimeSession::sealNativeAction(ControllerNativeAction action,
+        quint64 interaction,qint64 observedAt,qint64 expiresAt,const QByteArray &payload,
+        std::shared_ptr<const NativeInputContextToken> context,quint64 connection,quint64 coordinate) {
+    ControllerRuntimeInputStamp stamp;const auto now=nowMs();
+    if(!interaction||observedAt<=0||observedAt>now||expiresAt<now||expiresAt-observedAt>250||
+       !context||!context->valid||payload.size()!=32)return stamp;
+    QMutexLocker lock(&m_mailbox->mutex);
+    if(m_mailbox->latest.connectionEpoch!=connection||m_mailbox->latest.coordinateEpoch!=coordinate)return stamp;
+    stamp.interactionId=interaction;stamp.observedAtMs=observedAt;stamp.expiresAtMs=expiresAt;
+    stamp.windowEpoch=m_mailbox->focusWindowEpoch.load();
+    stamp.proof=std::shared_ptr<const ControllerNativePressProof>(new ControllerNativePressProof(
+        m_mailbox->inputIssuer,interaction,stamp.windowEpoch,observedAt,expiresAt,
+        connection,m_mailbox->generation.load(),m_mailbox->focusGeneration.load(),
+        action,payload,std::move(context),coordinate));
+    return stamp;
+}
+bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,const ControllerRuntimeInputStamp &input,
+        double x,double y,const QVariantMap &bounds,PreparedControllerJob::Ptr prepared,int feed,int power) {
+    Kind kind=Kind::Start;
+    switch(action){
+    case ControllerNativeAction::FocusHold:kind=Kind::Focus;break;
+    case ControllerNativeAction::StartJob:kind=Kind::Start;break;
+    case ControllerNativeAction::Jog:kind=Kind::Jog;break;
+    case ControllerNativeAction::Home:kind=Kind::Home;break;
+    case ControllerNativeAction::Frame:kind=Kind::Frame;break;
+    case ControllerNativeAction::WorkZero:kind=Kind::Zero;break;
+    case ControllerNativeAction::Resume:kind=Kind::Resume;break;
+    case ControllerNativeAction::Override:kind=Kind::Override;break;
+    }
+    Request request{kind};request.input=input;request.x=x;request.y=y;request.bounds=bounds;
+    request.prepared=std::move(prepared);request.feed=feed;request.power=power;request.id=++m_nextRequest;
+    const bool accepted=send(m_mailbox,std::move(request));emit changed();return accepted;
 }
 void ControllerRuntimeSession::revokeFocusContext() {
     m_mailbox->focusWindowEpoch.fetch_add(1);
@@ -410,6 +443,7 @@ void ControllerRuntimeWorker::initialize() {
         return !checkClockContinuity() || m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load();
     };
     m_core->dispatchPreflight = [this] { return cancelDispatch(); };
+    m_core->dispatchAccepted = [this] { m_dispatchProof.reset(); };
     connect(m_core.get(), &ControllerSession::changed, this, &ControllerRuntimeWorker::coreChanged);
     m_watchdog->start();
     checkClockContinuity();
@@ -454,9 +488,15 @@ void ControllerRuntimeWorker::drain() {
     }
     const auto retireRequest =
         qScopeGuard([&request] { retireControllerJob(std::move(request.prepared)); });
+    const auto clearAdmission=qScopeGuard([this]{m_dispatchProof.reset();});
     if (have && request.generation == m_mailbox->generation.load() &&
         nowMs() <= request.expiresAt &&
         (request.kind == Kind::Open || request.connectionEpoch == m_connectionEpoch)) {
+        if(request.kind!=Kind::Open&&request.kind!=Kind::Hold&&request.kind!=Kind::FocusOff&&
+           request.kind!=Kind::Focus&&!nativeActionAllowed(request)) {
+            m_core->append("Native Geräteaktion abgelehnt: Eingabe, Argumente, Referenzrahmen oder Frist nicht bestätigt.");
+        } else {
+        m_dispatchProof=request.input.proof;
         switch (request.kind) {
         case Kind::Open: {
             ++m_connectionEpoch;
@@ -480,8 +520,12 @@ void ControllerRuntimeWorker::drain() {
         case Kind::Frame:
             m_core->frame(request.bounds);
             break;
-        case Kind::Pause:
-            if (m_core->paused && !m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty())
+        case Kind::Hold:
+            if(!m_core->paused)m_core->pause(); // Never toggle a delayed hold into resume.
+            break;
+        case Kind::Resume:
+            if(!m_core->paused)break;
+            if (!m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty())
                 m_core->stop();
             else
                 m_core->pause();
@@ -491,14 +535,19 @@ void ControllerRuntimeWorker::drain() {
                 m_core->overrides(request.feed, request.power);
             break;
         case Kind::Focus: {
+            refreshCoordinateEpoch();
             const auto &proof = request.input.proof;
             if (!proof || proof->issuer != m_mailbox->inputIssuer ||
                 proof->window != m_mailbox->focusWindowEpoch.load() ||
                 proof->connection != m_connectionEpoch ||
                 proof->revocation != m_mailbox->generation.load() ||
                 proof->focusGeneration != m_mailbox->focusGeneration.load() ||
+                proof->action!=ControllerNativeAction::FocusHold ||
+                (proof->contextToken&&!proof->contextToken->valid) ||
+                (proof->contextToken&&(proof->coordinateEpoch!=m_coordinateEpoch||
+                    proof->payloadDigest!=ControllerNativeDigest::request(ControllerNativeAction::FocusHold))) ||
                 proof->interaction <= m_lastFocusInteraction || proof->observedAt > nowMs() ||
-                proof->expiresAt < nowMs() ||
+                proof->observedAt<=0 || proof->expiresAt < nowMs() || proof->expiresAt-proof->observedAt>250 ||
                 request.focusGeneration != m_mailbox->focusGeneration.load() || !m_core->ready() ||
                 !m_core->verified() || !m_core->positionReferenced ||
                 !m_core->motionSafetyError().isEmpty())
@@ -532,6 +581,7 @@ void ControllerRuntimeWorker::drain() {
             }
             break;
         }
+        }
     } else if (have && request.kind == Kind::Open) {
         emit openFinished(request.id, false, "Verbindungsanforderung veraltet oder widerrufen.");
     }
@@ -546,8 +596,47 @@ void ControllerRuntimeWorker::retirePrepared() {
         return;
     retireControllerJob(std::move(m_activePrepared));
 }
+void ControllerRuntimeWorker::refreshCoordinateEpoch() {
+    if(!m_core)return;
+    const bool resetting=m_core->awaitingReset||m_core->handshaking;
+    if(m_epochKnownOffset!=m_core->knownOffset||m_epochReferenced!=m_core->positionReferenced||
+       m_epochHoming!=m_core->homingPending||m_epochResetting!=resetting||
+       (m_core->knownOffset&&m_epochOffset!=m_core->offset))++m_coordinateEpoch;
+    m_epochKnownOffset=m_core->knownOffset;m_epochReferenced=m_core->positionReferenced;
+    m_epochHoming=m_core->homingPending;m_epochResetting=resetting;m_epochOffset=m_core->offset;
+}
+bool ControllerRuntimeWorker::nativeActionAllowed(const Request &request) {
+    refreshCoordinateEpoch();ControllerNativeAction action=ControllerNativeAction::StartJob;
+    double x=request.x,y=request.y;QByteArray source;
+    switch(request.kind){
+    case Kind::Start:action=ControllerNativeAction::StartJob;
+        if(!request.prepared)return false;
+        source=request.prepared->sourceFingerprint()+request.prepared->profileFingerprint();break;
+    case Kind::Jog:action=ControllerNativeAction::Jog;break;
+    case Kind::Home:action=ControllerNativeAction::Home;break;
+    case Kind::Frame:action=ControllerNativeAction::Frame;break;
+    case Kind::Zero:action=ControllerNativeAction::WorkZero;break;
+    case Kind::Resume:action=ControllerNativeAction::Resume;break;
+    case Kind::Override:action=ControllerNativeAction::Override;x=request.feed;y=request.power;break;
+    default:return false;
+    }
+    const auto &proof=request.input.proof;const auto now=nowMs();
+    if(!proof||proof->issuer!=m_mailbox->inputIssuer||proof->action!=action||
+       proof->connection!=m_connectionEpoch||proof->revocation!=m_mailbox->generation.load()||
+       proof->coordinateEpoch!=m_coordinateEpoch||proof->interaction<=m_lastNativeInteraction||
+       proof->observedAt<=0||proof->observedAt>now||proof->expiresAt<now||proof->expiresAt-proof->observedAt>250||!proof->contextToken||!proof->contextToken->valid||
+       proof->payloadDigest!=ControllerNativeDigest::request(action,x,y,request.bounds,source))return false;
+    m_lastNativeInteraction=proof->interaction;return true;
+}
 bool ControllerRuntimeWorker::cancelDispatch() {
     if (!checkClockContinuity()) return true;
+    if(m_dispatchProof && (m_dispatchProof->expiresAt<nowMs()||
+       (m_dispatchProof->contextToken&&!m_dispatchProof->contextToken->valid)||
+       (m_dispatchProof->action==ControllerNativeAction::FocusHold&&
+        m_dispatchProof->focusGeneration!=m_mailbox->focusGeneration.load()))) {
+        m_mailbox->revoke(false);
+        return true;
+    }
     if (m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load())
         return true;
     if (!m_core || m_core->handshaking || m_core->awaitingReset || m_core->homingPending)
@@ -624,9 +713,10 @@ void ControllerRuntimeWorker::watchdog() {
 void ControllerRuntimeWorker::publish(bool finishDispatch) {
     if (!m_core)
         return;
-    auto status = m_core->status();
+    refreshCoordinateEpoch();auto status = m_core->status();
     const auto now = nowMs();
     status.connectionEpoch = m_connectionEpoch;
+    status.coordinateEpoch=m_coordinateEpoch;
     status.sequence = ++m_sequence;
     status.opening = m_core->awaitingReset || m_core->handshaking;
     status.accessoryLeaseActive = m_accessory.activeLease();

@@ -5,6 +5,19 @@
 #include <QtTest>
 #include <time.h>
 
+class TestAcceptedButton final : public QQuickItem {
+    Q_OBJECT
+    Q_PROPERTY(bool pressed READ pressed WRITE setPressed NOTIFY pressedChanged)
+    Q_PROPERTY(bool nativeActionEnabled READ eligible WRITE setEligible NOTIFY eligibilityChanged)
+  public:
+    explicit TestAcceptedButton(QQuickItem *parent):QQuickItem(parent){setSize({30,30});}
+    bool pressed()const{return m_pressed;} bool eligible()const{return m_eligible;}
+    void setPressed(bool v){if(v!=m_pressed){m_pressed=v;emit pressedChanged();}}
+    void setEligible(bool v){if(v!=m_eligible){m_eligible=v;emit eligibilityChanged();}}
+  signals:void pressedChanged();void eligibilityChanged();
+  private:bool m_pressed=false,m_eligible=true;
+};
+
 class NativeInputIntentTestAccess {
   public:
     static void x11(NativeInputIntentAdapter &a, quint32 server, qint64 before, qint64 after) {
@@ -22,6 +35,13 @@ class NativeInputIntentTestAccess {
     static void capture(NativeInputIntentAdapter &a,QQuickWindow &w,quint64 time,
                         bool spontaneous=true,bool repeat=false,bool synth=false) {
         a.capture(&w,time,{10,10},false,spontaneous,repeat,synth);
+    }
+    static quint32 current(NativeInputIntentAdapter &a) {
+        const auto n=now();a.m_domain=NativeInputIntentAdapter::Domain::X11Server32;
+        a.sample(quint32(n),n-1,n);return quint32(n);
+    }
+    static void release(NativeInputIntentAdapter &a,QQuickWindow &w,quint64 time) {
+        a.release(&w,time,{10,10},false,true,false,false,0,nullptr);
     }
     static void forceSuspend(NativeInputIntentAdapter &a) {
         a.m_suspendGap+=1000; // Nonnegative baseline discontinuity, even on never-suspended hosts.
@@ -89,6 +109,7 @@ class NativeInputIntentTest : public QObject {
         QQuickItem control(window.contentItem()); control.setSize({30,30});
         control.setProperty("pressed",true); // Private fixture models actual Button acceptance.
         a.registerControl(&control,"focus");
+        QTest::qWait(20); // The synthetic native press must be newer than control registration.
         auto arm=[&] {
             const auto n=NativeInputIntentTestAccess::now();
             NativeInputIntentTestAccess::x11(a,1000,n-5,n-4);
@@ -119,6 +140,43 @@ class NativeInputIntentTest : public QObject {
         NativeInputIntentTestAccess::forceSuspend(*a);
         connect(a,&NativeInputIntentAdapter::invalidated,a,[a]{delete a;});
         QVERIFY(!NativeInputIntentTestAccess::map(*a,1000,NativeInputIntentTestAccess::now()));
+    }
+    void acceptedLongHoldUsesFreshRelease() {
+        NativeInputIntentAdapter a(nullptr,false);QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();QTRY_VERIFY(window.isActive());
+        TestAcceptedButton button(window.contentItem());a.registerClickControl(&button,"start#one",[]{return QByteArray("source-A");});QTest::qWait(20);
+        NativeInputIntentTestAccess::capture(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(true);
+        QTest::qSleep(350); // Press deadline expired, but an already-accepted bounded hold is legitimate.
+        NativeInputIntentTestAccess::release(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(false);
+        const auto intent=a.consumeMatching("start","source-A");QVERIFY(intent);QVERIFY(intent->contextToken&&intent->contextToken->valid);
+        QVERIFY(intent->expiresAtMs-NativeInputIntentTestAccess::now()<=250);QVERIFY(!a.consumeMatching("start","source-A"));
+    }
+    void oldOrUnacceptedPressCannotRevive_data() {
+        QTest::addColumn<bool>("old");QTest::newRow("old-press")<<true;QTest::newRow("unaccepted-press")<<false;
+    }
+    void oldOrUnacceptedPressCannotRevive() {
+        QFETCH(bool,old);NativeInputIntentAdapter a(nullptr,false);QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();QTRY_VERIFY(window.isActive());
+        TestAcceptedButton button(window.contentItem());a.registerClickControl(&button,"start#one",[]{return QByteArray("A");});QTest::qWait(20);
+        auto stamp=NativeInputIntentTestAccess::current(a);NativeInputIntentTestAccess::capture(a,window,old?quint32(stamp-400):stamp);
+        if(old)button.setPressed(true); // Fresh release cannot arm a rejected old press.
+        NativeInputIntentTestAccess::release(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(false);
+        QVERIFY(!a.consumeMatching("start","A"));
+    }
+    void eligibilityAndArgumentsCannotChangeBetweenPhases() {
+        NativeInputIntentAdapter a(nullptr,false);QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();QTRY_VERIFY(window.isActive());
+        TestAcceptedButton button(window.contentItem());QByteArray binding="A";a.registerClickControl(&button,"jog#one",[&]{return binding;});QTest::qWait(20);
+        NativeInputIntentTestAccess::capture(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(true);binding="B";
+        NativeInputIntentTestAccess::release(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(false);QVERIFY(!a.consumeMatching("jog","B"));
+        button.setEligible(false);QTest::qWait(20);NativeInputIntentTestAccess::capture(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(true);
+        button.setEligible(true);NativeInputIntentTestAccess::release(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(false);QVERIFY(!a.consumeMatching("jog","B"));
+    }
+    void enablingBusyStateDoesNotRevokeSubmittedButContextDoes() {
+        NativeInputIntentAdapter a(nullptr,false);QQuickWindow window;window.resize(100,100);window.show();window.requestActivate();QTRY_VERIFY(window.isActive());
+        TestAcceptedButton button(window.contentItem());a.registerClickControl(&button,"start#one",[]{return QByteArray("A");});QTest::qWait(20);
+        NativeInputIntentTestAccess::capture(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(true);
+        NativeInputIntentTestAccess::release(a,window,NativeInputIntentTestAccess::current(a));button.setPressed(false);
+        auto intent=a.consumeMatching("start","A");QVERIFY(intent);
+        button.setEnabled(false);QVERIFY(intent->contextToken->valid);a.revokeFocus();QVERIFY(intent->contextToken->valid);
+        a.revoke();QVERIFY(!intent->contextToken->valid);
     }
 };
 QTEST_MAIN(NativeInputIntentTest)

@@ -58,15 +58,11 @@ denied on this backend because InputMethod can reuse prior seat time. Generic
 Wayland is not assumed to share CLOCK_MONOTONIC. Proc mappings may be inaccessible for nondumpable KWin;
 this adapter never elevates privileges to inspect them.
 
-The collector already supports action-keyed `registerControl(control, action)`
-and `consume(action)`. Further Start/Jog/Home/Frame/Zero integration must consume
-inside the corresponding Machine entrypoint, then seal an action-specific
-worker proof and original deadline. Returning an authorization bool to QML and
-later dispatching independently would separate the evidence from its action and
-is not a suitable extension. Registration alone does not protect those other
-entrypoints in this focus-only slice. Their existing real commissioning gates
-remain closed. A release-based action also requires a deliberately specified
-press/release binding: this hold adapter revokes on release.
+Generic click actions now use [the typed native action contract](NATIVE_ACTION_EXTENSION.md).
+They require an already accepted fresh press and its matching fresh release,
+original deadlines, actual control eligibility and a private action/body-bound
+worker proof. Registration is multi-control and never an authorization bool.
+All existing real commissioning gates remain independent and closed by default.
 
 Primary sources: [Qt event timestamps](https://doc.qt.io/qt-6.10/qinputevent.html#timestamp),
 [Qt native-event filtering](https://doc.qt.io/qt-6.10/qabstractnativeeventfilter.html),

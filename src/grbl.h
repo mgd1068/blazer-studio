@@ -86,6 +86,7 @@ class GrblSession : public ControllerSession {
     friend class ControllerRuntimeTestAccess;
     std::function<bool()> dispatchCancelled;
     std::function<bool()> dispatchPreflight;
+    std::function<void()> dispatchAccepted; // Host write acceptance, never physical movement proof.
     QTimer ackTimeout;
     QElapsedTimer ackClock;
     QList<qint64> ackDue;

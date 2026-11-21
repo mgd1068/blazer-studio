@@ -37,6 +37,7 @@ struct ControllerStatus {
     QString connectionPhase = "closed";
     bool accessoryLeaseActive = false, accessoryJobActive = false, accessoryFocusActive = false;
     QString extractionSafetyError{};
+    quint64 coordinateEpoch = 0; // Reference/WCO/reset identity; never motion authority.
 };
 class ControllerSession : public QObject {
     Q_OBJECT

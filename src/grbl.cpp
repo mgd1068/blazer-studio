@@ -1064,6 +1064,7 @@ void GrblSession::pump() {
             fail("Serieller Schreibfehler.", ControllerDiagnostics::FaultCause::WriteFailure);
             return;
         }
+        if(dispatchAccepted)dispatchAccepted();
         // Conservative host policy, NOT a proven GRBL planner-full bound.
         // Status traffic must never renew an outstanding command's deadline.
         for (int line = 0; line < bytes.count('\n'); ++line)
@@ -1207,7 +1208,9 @@ void GrblSession::pause() {
         state = "Pausiert";
     } else {
         resumeAckDeadline();
-        diagnostic.realtime(ControllerDiagnostics::Command::CycleResume, serial.write("~") == 1);
+        const bool accepted=serial.write("~")==1;
+        diagnostic.realtime(ControllerDiagnostics::Command::CycleResume,accepted);
+        if(accepted&&dispatchAccepted)dispatchAccepted();
         state = "Läuft";
         if (waitingAck || waitingIdle)
             timeout.start(waitingIdle ? 30000 : 10000);
@@ -1451,6 +1454,7 @@ bool GrblSession::overrides(int feed, int power) {
         return false;
     const bool accepted = serial.write(bytes) == bytes.size();
     if (accepted) {
+        if(dispatchAccepted)dispatchAccepted();
         overrideReadbackPending = true;
         requestedFeedOverride = feed;
         requestedPowerOverride = power;
