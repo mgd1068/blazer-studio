@@ -6,6 +6,13 @@ package_dir="$(cd -- "$1" && pwd)"
     echo 'This test installs/removes packages; use BLAZER_DISPOSABLE_CONTAINER=1 in a disposable container.' >&2
     exit 2
 }
+[[ -f /.dockerenv || -f /run/.containerenv ]] || {
+    echo 'Disposable-container marker missing; refusing package changes.' >&2; exit 2;
+}
+. /etc/os-release
+[[ "$ID" == ubuntu && "$VERSION_ID" == 26.04 && "$(dpkg --print-architecture)" == amd64 && "$EUID" == 0 ]] || {
+    echo 'Runtime test requires root inside disposable Ubuntu 26.04 amd64.' >&2; exit 2;
+}
 (cd "$package_dir" && sha256sum -c SHA256SUMS)
 # Ubuntu's container image excludes documentation by default. Preserve this package's notices.
 printf '%s\n' 'path-include=/usr/share/doc/blazer-studio/*' >> /etc/dpkg/dpkg.cfg.d/excludes
@@ -19,8 +26,36 @@ runuser -u beta -- sh -c 'echo preserve > /home/beta/.local/share/BlazerStudio/p
 # All CLI exports below force HardwareAccessDisabled; no device is mounted here.
 user_data() {
     runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-        XDG_RUNTIME_DIR=/home/beta/runtime python3 - "$1" <<'FIXTURE'
+        XDG_RUNTIME_DIR=/home/beta/runtime python3 - "$1" "$package_dir/BUILD-MANIFEST.json" <<'FIXTURE'
 import hashlib, json, pathlib, subprocess, sys
+
+def runtime_expected_program(mode, identity, manifest):
+    """Exact source-version oracle: historical auxiliary output is not optional."""
+    assert identity['selfTest'] == 'passed' and identity['simulation'] is True
+    assert identity['hardwareTested'] is False
+    if mode == 'current':
+        assert identity['version'] == manifest['version'], (identity, manifest)
+        assert identity['revision'] == manifest['revision'], (identity, manifest)
+        auxiliary = False  # Current source has no verified enclosure-output mapping.
+    elif mode == 'previous':
+        historical = {
+            ('0.9.0-beta.5', '26e1464dd0d1ec13081c76011fb3bbeebec6f240'): False,
+            ('0.9.0-beta.5.1', 'f7ebbf9537023a03f01227a005ea54e7e2473437'): False,
+            ('0.9.0-beta.5.2-local', '5e66eb1c8bdea14f14218866c035d2e159be2469'): True,
+        }
+        key = (identity['version'], identity['revision'])
+        assert key in historical, 'Unreviewed previous package identity: ' + repr(key)
+        auxiliary = historical[key]
+    else:
+        raise AssertionError('Unsupported GCode oracle phase')
+    expected = ('M5\n(Blazer Studio: GRBL laser mode, $30=1000, $32=1, G54)\n'
+                'G21\nG90\nG54\nG17\nG94\nS0\nG0 X65.000 Y55.000\nM4 S800\n'
+                'G1 X102.000 Y55.000 F600.000\nG1 X102.000 Y85.000\n'
+                'G1 X65.000 Y85.000\nG1 X65.000 Y55.000\nM5 S0\nG0\n')
+    if auxiliary:
+        # Historical software behavior only: this did NOT establish real fan operation.
+        expected = expected.replace('S0\nG0 X65', 'S0\nM8\nG0 X65').replace('M5 S0\nG0\n', 'M5 S0\nM9\nG0\n')
+    return expected.encode()
 home = pathlib.Path('/home/beta')
 docs = home / 'Documents'
 settings = home / '.config/BlazerStudio/Blazer Studio.conf'
@@ -51,12 +86,11 @@ else:
     for name, digest in json.loads(record.read_text()).items():
         assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest() == digest, name
     if mode != 'preserved':
-        expected = ('M5\n(Blazer Studio: GRBL laser mode, $30=1000, $32=1, G54)\n'
-                    'G21\nG90\nG54\nG17\nG94\nS0\nG0 X65.000 Y55.000\nM4 S800\n'
-                    'G1 X102.000 Y55.000 F600.000\nG1 X102.000 Y85.000\n'
-                    'G1 X65.000 Y85.000\nG1 X65.000 Y55.000\nM5 S0\nG0\n')
-        if mode == 'current':
-            expected = expected.replace('S0\nG0 X65', 'S0\nM8\nG0 X65').replace('M5 S0\nG0\n', 'M5 S0\nM9\nG0\n')
+        identity = json.loads(subprocess.check_output(['blazer-studio', '--self-test'], text=True, timeout=60))
+        manifest = json.loads(pathlib.Path(sys.argv[2]).read_text())
+        expected = runtime_expected_program(mode, identity, manifest)
+        installed = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'blazer-studio'], text=True)
+        assert installed == identity['version'].replace('-', '~'), (installed, identity)
         sources = [('--open-project', 'legacy.blazer')]
         if mode == 'current':
             sources.append(('--new-from-template', 'reusable.blazertemplate'))
@@ -64,8 +98,8 @@ else:
             target = home / 'runtime' / (name + '.gcode')
             target.unlink(missing_ok=True)
             subprocess.run(['blazer-studio', option, str(docs / name),
-                            '--export-gcode', str(target)], check=True)
-            assert target.read_bytes() == expected.encode(), (name, target.read_text())
+                            '--export-gcode', str(target)], check=True, timeout=60)
+            assert target.read_bytes() == expected, (name, target.read_text())
         for name, digest in json.loads(record.read_text()).items():
             assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest() == digest, name
 print('USER DATA CHECK PASSED:', mode)
@@ -75,7 +109,7 @@ fixture_prepared=0
 if [[ -n "${BLAZER_PREVIOUS_PACKAGE:-}" ]]; then
     apt-get install --no-install-recommends -y "$BLAZER_PREVIOUS_PACKAGE"
     runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-        XDG_RUNTIME_DIR=/home/beta/runtime blazer-studio --self-test
+        XDG_RUNTIME_DIR=/home/beta/runtime timeout 60s blazer-studio --self-test
     user_data prepare
     user_data previous
     fixture_prepared=1
@@ -99,7 +133,7 @@ python3 /usr/share/blazer-studio/tools/check-doc-links.py /usr/share/doc/blazer-
 test -f /usr/share/blazer-studio/tools/photo_depth.py
 self_test() {
     runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-        XDG_RUNTIME_DIR=/home/beta/runtime blazer-studio --self-test > /tmp/blazer-self-test.json
+        XDG_RUNTIME_DIR=/home/beta/runtime timeout 60s blazer-studio --self-test > /tmp/blazer-self-test.json
     python3 - "$package_dir/BUILD-MANIFEST.json" /tmp/blazer-self-test.json <<'PY'
 import json, subprocess, sys
 manifest, actual = [json.load(open(path)) for path in sys.argv[1:]]
@@ -115,6 +149,18 @@ print(json.dumps(actual))
 PY
 }
 self_test
+# Explicit transient rendering uses HardwareAccess::Disabled too; no host display.
+runuser -u beta -- env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+    XDG_RUNTIME_DIR=/home/beta/runtime timeout 30s blazer-studio \
+    --screenshot /home/beta/runtime/package-render.png
+python3 - <<'PNG'
+import pathlib, struct
+image = pathlib.Path('/home/beta/runtime/package-render.png').read_bytes()
+assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 1024
+width, height = struct.unpack('>II', image[16:24])
+assert width >= 640 and height >= 480, (width, height)
+print('TRANSIENT SCREENSHOT PASSED:', width, height)
+PNG
 # Exercise the desktop entry's no-file command too (a missing %f must not make it exit).
 [[ "$(sed -n 's/^Exec=//p' /usr/share/applications/blazer-studio.desktop)" == 'blazer-studio %f' ]]
 set +e
@@ -130,4 +176,4 @@ user_data current
 apt-get remove -y blazer-studio
 test "$(cat /home/beta/.local/share/BlazerStudio/package-test-sentinel)" == preserve
 user_data preserved
-echo 'PACKAGE RUNTIME TEST PASSED (install, non-root launch, codecs, project roundtrip, render, reinstall, removal).'
+echo 'PACKAGE RUNTIME TEST PASSED (install/optional verified upgrade, non-root transient self-test and screenshot, exact source-bound GCode, data preservation, reinstall, removal).'
