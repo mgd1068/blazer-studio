@@ -36,7 +36,7 @@ struct ControllerStatus {
     quint64 connectionEpoch = 0, sequence = 0;
     QString connectionPhase = "closed";
     bool accessoryLeaseActive = false, accessoryJobActive = false, accessoryFocusActive = false;
-    QString extractionSafetyError;
+    QString extractionSafetyError{};
 };
 class ControllerSession : public QObject {
     Q_OBJECT
