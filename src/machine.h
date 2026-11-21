@@ -66,10 +66,7 @@ class Machine : public Simulator {
     bool connectHardware(const QString &port);
     Q_INVOKABLE void useSimulator();
     Q_INVOKABLE void refreshPorts() { emit changed(); }
-    Q_INVOKABLE void setWorkZero() {
-        if (live && session)
-            session->zero();
-    }
+    Q_INVOKABLE void setWorkZero();
     bool ready() const override { return live ? session->status().ready : Simulator::ready(); }
     bool positionReferenced() const override {
         return live ? session->status().positionReferenced : Simulator::positionReferenced();
@@ -88,12 +85,12 @@ class Machine : public Simulator {
     bool paused() const override {
         if (!live) return Simulator::paused();
         const auto status = session->status();
-        return status.paused && !status.referencing && !status.resetting;
+        return status.paused && !status.referencing && !status.resetting && !status.coordinateUpdatePending;
     }
     bool running() const override {
         if (!live) return Simulator::running();
         const auto status = session->status();
-        return status.executing && !status.paused && !status.referencing && !status.resetting;
+        return status.executing && !status.paused && !status.referencing && !status.resetting && !status.coordinateUpdatePending;
     }
     QStringList log() const override { return live ? session->logEntries() : Simulator::log(); }
     void toggleConnection() override;

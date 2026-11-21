@@ -185,6 +185,14 @@ void Machine::jog(double x, double y) {
     else
         Simulator::jog(x, y);
 }
+void Machine::setWorkZero() {
+    if (!live || !session) return;
+    if (busy() || firing() || accessory.activeLease() || accessoryJobActive || accessoryFocusActive) {
+        document->notify("Arbeitsnullpunkt gesperrt: erst den aktiven Auftrag, Fokus oder die laufende Geräteaktion beenden.");
+        return;
+    }
+    session->zero();
+}
 void Machine::home() {
     if (live)
         session->home();
