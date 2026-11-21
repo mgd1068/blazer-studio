@@ -37,7 +37,14 @@ GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
     });
     ackClock.start();
     ackTimeout.setSingleShot(true);
+    ackTimeout.setTimerType(Qt::PreciseTimer);
     connect(&ackTimeout, &QTimer::timeout, this, [this] {
+        if (ackDue.isEmpty() || ackPausedAt >= 0)
+            return;
+        if (ackClock.elapsed() < ackDue.first()) {
+            armAckDeadline();
+            return;
+        }
         fail("GRBL-Quittierung überschreitet die begrenzte Host-Wartezeit; Auftrag verworfen.",
              ControllerDiagnostics::FaultCause::Timeout);
     });
