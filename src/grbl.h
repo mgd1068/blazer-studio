@@ -32,7 +32,7 @@ class GrblSession : public ControllerSession {
                 motionSafetyError(),
                 homingSafetyError(),
                 homingPending,
-                awaitingReset || handshaking};
+                awaitingReset};
     }
     QStringList logEntries() const override { return log; }
     QVariantMap diagnosticSnapshot() const override;

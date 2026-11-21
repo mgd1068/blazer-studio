@@ -209,6 +209,71 @@ class GrblTest : public QObject {
                                           "virtual airflow fixture", now, now));
     }
   private slots:
+    void adapterInitiatedResumeAbortWithOutputLeaseRequestsExactlyOneReset() {
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        controller.autoAck = false;
+        machine.start();
+        QVERIFY(machine.accessoryJobActive);
+        auto grbl = static_cast<GrblSession *>(machine.session.get());
+        grbl->pause();
+        controller.status = "Hold";
+        controller.report();
+        QTRY_VERIFY(grbl->paused && controller.realtime.contains('!'));
+        QVERIFY(!machine.accessory.releaseAfterSafeClearance(true));
+        controller.respondToStatus = false;
+        controller.respondToReset = false;
+        const auto resets = controller.realtime.count(char(0x18));
+        const auto cut = controller.commands.size();
+        grbl->knownOffset =
+            false; // Loss after any facade preflight, while its output lease is active.
+        grbl->pause();
+        QTest::qWait(180);
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+        QVERIFY(!machine.accessoryJobActive);
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!machine.extractionSafetyError().isEmpty());
+        QVERIFY(!controller.realtime.contains('~'));
+        for (const auto &line : controller.commands.mid(cut))
+            QVERIFY(!line.startsWith("G1 ") && !line.startsWith("M4"));
+    }
+    void unsolicitedStartupDuringOutputLeaseStillRequiresAHostStop() {
+        Controller controller;
+        Document document;
+        document.setBackgroundPlanning(false);
+        document.newProject();
+        document.addShape("rect");
+        Machine machine(&document);
+        QVERIFY(machine.connectHardware(controller.port));
+        QTRY_VERIFY(machine.ready());
+        requireReference(machine);
+        controller.autoAck = false;
+        machine.start();
+        QVERIFY(machine.accessoryJobActive);
+        QTest::qWait(20); // Drain the accepted initial RX window.
+        controller.respondToStatus = false;
+        controller.respondToReset = false;
+        const auto resets = controller.realtime.count(char(0x18));
+        machine.accessoryWatchdog.stop(); // Order session feedback before watchdog evaluation.
+        controller.reply("Grbl 1.3a ['$' for help]\r\n");
+        QTest::qWait(10);
+        controller.reply("ok\r\n"); // Fresh handshake M5 ACK triggers changed, not a host reset.
+        QTest::qWait(20);
+        machine.accessoryWatchdog.start(50);
+        QTest::qWait(100);
+        QCOMPARE(controller.realtime.count(char(0x18)), resets + 1);
+        QVERIFY(!machine.accessoryJobActive);
+        QVERIFY(!machine.positionReferenced());
+        QVERIFY(!machine.extractionSafetyError().isEmpty());
+        QVERIFY(!controller.realtime.contains('~'));
+    }
     void rawReportedMachineBoundsAreCheckedBeforeStatusCanContinueStreaming_data() {
         QTest::addColumn<QRectF>("envelope");
         QTest::addColumn<QPointF>("offset");
