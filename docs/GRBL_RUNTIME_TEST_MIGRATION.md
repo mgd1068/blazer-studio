@@ -62,3 +62,11 @@ software protocol/lifetime regressions, not physical machine/fan acceptance.
 Current full normal/SAN results are reported separately after completion. Root
 owns CMake integration; this file replaces the existing tests/grbl_test.cpp target
 without requiring a new production/test-mode build option.
+
+Completed independent validation on the exact 29d59ab source plus the retained
+precision regression rows: **226/226 normal, 60229 ms** and **226/226 ASan/UBSan,
+66240 ms**, with zero skips and no Qt warning/fatal output in either run.
+ASAN_OPTIONS=detect_leaks=0; this is not a leak-freedom claim. Test implementation
+is commit 93fb6e4; raw-core tests stay raw and Machine/factory tests execute the
+actual worker. Logs and source/test identities are retained under
+`blazer-controller-runtime-tests-20261121/accessory-lane/`.
