@@ -123,3 +123,19 @@ Sobald mindestens eines der beiden Auswahlflags wahr ist, verwendet das Projekt 
 Die unabhängigen `placementdocument`-Regressionen enthalten literal erwartete Ausgabe-/Bezugsrechtecke für alle drei Modi, neun Anker und beide Bezugsarten, wirklichen GCode-Dateiexport, leere/falsche Auswahl, T1/T2/hidden/disabled/andere Blätter, unveränderte Motionparameter, Frame- und Worker-Staleness, Undo ohne Proof-Restauration und striktes Format 14. Das prüft die Softwarekette; eine vollständige UI- oder physische Abnahme des neuen Auswahlworkflows ist damit nicht behauptet.
 
 Prüfstand des Auswahl-Backends am 21.11.2026: `placementdocument` **91 QtTest-Ergebnisse, 0 Fehler, 0 übersprungen** (4,268 s), einschließlich aller drei maskierten/unmaskierten Rasterüberlaufvarianten. Die bestehenden CTest-Gruppen `placementdocument`, `jobplacement`, `deviceworkspace`, `release`, `core`, `expansion` und `job` bestanden 7/7 in 20,39 s vor der abschließenden Ergänzung der beiden weiteren maskierten Überlaufvarianten; danach wurde `placementdocument` erneut vollständig ausgeführt. Evidenz: `/home/mathias/benslab/analysis/blazer-rebuild-20261121/agent-selected-output/`. Kein Main-/Machine-/CMake-Eingriff und keine Hardwareaktion.
+
+## beta.9: gesonderter lokaler Handstart
+
+Der oben beschriebene Offlinevertrag erteilt weiterhin keine Gerätefreigabe.
+beta.9 ergänzt dafür einen eigenen [Handstart-Ablauf](MANUAL_START.md) mit
+getrennter [lokaler Controllerautorität](OPERATOR_LOCAL_FRAME.md). CurrentPosition
+und neun Anker werden nach nichtbewegender lokaler Aufnahme sowie vollständiger
+Raw-/tatsächlicher-Wire-Restwegprüfung ausdrücklich freigebbar. Die globale Referenz
+bleibt unbekannt; Benutzerursprung und aktive Print-and-Cut-Registrierung werden
+in diesem lokalen Pfad nicht übernommen. Mechanische Restwege sind echte gemessene
+Operatorangaben, keine aus alten Zählern oder Profilmaßen erzeugten Werte.
+
+Nach einem Job kann der Kopf am letzten Bearbeitungspunkt stehen bleiben. Eine
+neue CurrentPosition-Planung verwendet die dann frisch lokal nachgeführte Lage;
+eine neue Wegeprüfung und Bestätigung sind erforderlich. Die gesonderte Rahmenfahrt
+kehrt zu ihrem eigenen Ausgangspunkt zurück und wird dafür separat geprüft.

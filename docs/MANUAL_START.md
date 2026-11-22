@@ -51,10 +51,15 @@ Absaugung und Aufsicht für den konkreten Vorgang separat bestätigen. Ein Modus
 Luftstromsensor setzt tatsächlich unabhängig laufende und am Gerät geprüfte
 Absaugung voraus. Er schaltet den ungeklärten Gehäuse-Fan-Port nicht ein.
 
-Erst **Auftrag am Handstartpunkt starten** startet den vorbereiteten Auftrag.
+Erst **Auftrag ab angezeigter lokaler Lage starten** startet den vorbereiteten Auftrag.
 Berechnung und Codierung erfolgen vor der Startfreigabe. Nach Pause verlangt
 Fortsetzen einen eigenen bewussten Tastendruck und die jeweils nötigen aktuellen
 Bestätigungen. **STOPP** bleibt erreichbar.
+
+Nach dem Auftrag kann der Kopf am letzten Bearbeitungspunkt stehen. Ein weiterer
+Auftrag ab **Aktueller Position** wird an dieser dann angezeigten lokalen Lage neu
+geplant und benötigt eine neue Wegeprüfung und Bestätigung; eine automatische
+Rückfahrt nach Auftragsende wird nicht eingeschaltet.
 
 Nach erneutem Handverschieben, Reset, Trennung, Türereignis oder Verlust einer
 benötigten Controllerbestätigung muss der lokale Bezug neu eingerichtet werden.

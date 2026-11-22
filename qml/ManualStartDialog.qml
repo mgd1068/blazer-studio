@@ -107,6 +107,7 @@ Dialog {
                 onClicked:dialog.modelMachine.captureOperatorLocalFrame()
             }
             Label { objectName:"manualLocalPosition"; Layout.fillWidth:true; wrapMode:Text.WordWrap; color:dialog.ink; text:dialog.positioned ? "Lokale Lage ab Handstartpunkt: X "+dialog.mm(dialog.state.localX)+" · Y "+dialog.mm(dialog.state.localY)+". Die globale Maschinenreferenz bleibt unbekannt." : "Lokaler Startpunkt noch nicht bestätigt." }
+            Label { Layout.fillWidth:true; visible:dialog.positioned; wrapMode:Text.WordWrap; color:dialog.muted; text:"Ein neuer Auftrag wird an der angezeigten lokalen Lage verankert. Nach Auftragsende erfolgt keine automatische Rückfahrt." }
             ColumnLayout {
                 Layout.fillWidth:true; visible:dialog.positioned
                 SectionLabel { text:"MOTIVANKER AM KOPF"; dark:dialog.dark }
@@ -158,7 +159,7 @@ Dialog {
                 Label { objectName:"manualFrameReason"; Layout.fillWidth:true; visible:!!dialog.state.frameReason; wrapMode:Text.WordWrap; textFormat:Text.PlainText; color:dialog.muted; text:dialog.state.frameReason || "" }
                 ActionButton {
                     id:start; objectName:"startLocalJob"; property bool nativeActionEnabled:dialog.visible && !dialog.beginPending && dialog.positioned
-                    text:"Auftrag am Handstartpunkt starten"; dark:dialog.dark; primary:true
+                    text:"Auftrag ab angezeigter lokaler Lage starten"; dark:dialog.dark; primary:true
                     enabled:dialog.idle && !dialog.beginPending && !!dialog.state.startReady
                     Component.onCompleted:dialog.register(start,"localStart")
                     onClicked:dialog.modelMachine.startLocalJob()
