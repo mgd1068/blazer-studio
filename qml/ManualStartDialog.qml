@@ -19,6 +19,7 @@ Dialog {
     readonly property color muted: dark ? "#adc0ce" : "#5f7687"
     property bool controlsReady: false
     property bool beginPending: false
+    property double beginRevision: -1
     property bool cancelledHere: false
     function stages(values) { return values.indexOf(phase) >= 0 }
     function number(field) {
@@ -46,6 +47,9 @@ Dialog {
         if(stages(["reading","positioning","invalid","inactive"]))beginPending=false
         if(stages(["invalid","inactive"]))resetWitnesses()
     }
+    onStateChanged: {
+        if(controlsReady && beginPending && typeof state.resultRevision === "number" && state.resultRevision>beginRevision && state.lastRequestAccepted===false) beginPending=false
+    }
     onClosed: {
         if(supported && !cancelledHere && (beginPending || (!positioned && phase!=="inactive"))) modelMachine.cancelOperatorLocalFrame()
         beginPending=false
@@ -68,7 +72,7 @@ Dialog {
             ActionButton {
                 objectName:"beginManualPlacement"; text:dialog.positioned ? "Kopf von Hand neu setzen …" : "Handpositionierung beginnen"; dark:dialog.dark
                 enabled:dialog.idle && !dialog.beginPending && !!dialog.modelProject && !!dialog.modelMachine.connected
-                onClicked: { dialog.beginPending=true; dialog.resetDraft(); dialog.modelProject.setStartMode(1); dialog.modelMachine.beginManualPlacement() }
+                onClicked: { dialog.beginRevision=typeof dialog.state.resultRevision === "number" ? dialog.state.resultRevision : -1; dialog.beginPending=true; dialog.resetDraft(); dialog.modelProject.setStartMode(1); dialog.modelMachine.beginManualPlacement() }
             }
             ColumnLayout {
                 Layout.fillWidth:true; visible:dialog.stages(["positioning","captureReady"])
