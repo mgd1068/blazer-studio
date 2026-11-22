@@ -50,7 +50,7 @@ void ControllerRuntimeWorker::operatorData(const QVariantMap &data) {
            m_accessory.releaseAfterSafeClearance(true)) {
             discardOperatorWitness();m_operatorReason=m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorAttendedExternal
                 ?"Sicheren Zustand und Abzug der Dämpfe menschlich bestätigt. Vor Ausgabe erneut attestieren."
-                :"Tatsächlichen Gerätezustand menschlich geklärt. Vor Ausgabe Anwesenheit erneut bestätigen.";
+                :"Sicheren Zustand am Gerät menschlich geklärt. Vor Ausgabe Anwesenheit erneut bestätigen.";
         } else m_operatorReason="Sichere Freigabe erst im freien Idle/S0 ohne aktive Ausgabe möglich.";
         return;
     }
