@@ -58,6 +58,7 @@ QVariantMap ControllerRuntimeWorker::localFrameSnapshot() const {
         {"motorIdleDelayMs",m_core->setupReadback.settings.contains(1)?m_core->setupReadback.settings.value(1):-1.},
         {"doorSubstate",m_core->doorSubstate}};
     result["frameReady"]=known && m_localCandidate && !m_localCandidate->frameLines().isEmpty() &&
+        sameLocal(m_localCandidate->headAnchor(),m_core->position) &&
         (f.phase=="travelReview"||f.phase=="ready") && m_core->ready() && m_core->verified() && !m_accessory.activeLease();
     result["frameReason"]=m_localCandidate?m_localCandidate->frameError():QString("Lokalen Auftrag zuerst vorbereiten.");
     result["resumeReady"]=known && f.phase=="paused" && m_core->paused && m_core->controllerState=="Hold" && m_core->verified() &&
@@ -65,6 +66,7 @@ QVariantMap ControllerRuntimeWorker::localFrameSnapshot() const {
     if(m_localCandidate)result["requiredActualWire"]=distances(m_localCandidate->requiredUnion());
     else result["requiredActualWire"]=QVariantMap{};
     result["startReady"]=known && f.phase=="ready" && result["approved"].toBool() && m_core->ready() && m_core->verified() &&
+        m_localCandidate && sameLocal(m_localCandidate->headAnchor(),m_core->position) &&
         m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty() && !m_accessory.activeLease();
     return result;
 }
