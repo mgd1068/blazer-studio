@@ -25,7 +25,7 @@ qt_add_library(blazer-core STATIC
     src/artlibrarycontroller.cpp src/artlibrarycontroller.h src/documentartlibrary.cpp
     src/documentplacement.cpp
     src/placedjobplanning.cpp src/placedjobplanning.h
-    src/jobplacement.cpp src/jobplacement.h
+    src/jobplacement.cpp src/jobplacement.h src/manualtravelcheck.cpp src/manualtravelcheck.h
     src/barcode.cpp src/barcode.h
     src/clipboard.cpp src/guides.cpp src/guide.h src/framing.cpp
     src/deviceprofile.cpp src/deviceprofile.h src/devicelibrary.cpp src/devicelibrary.h src/devicemanager.cpp src/devicemanager.h
@@ -92,6 +92,9 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-extractionsupervisionui-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME extractionsupervisionui COMMAND blazer-extractionsupervisionui-tests -platform offscreen)
     set_tests_properties(extractionsupervisionui PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic" TIMEOUT 90)
+    qt_add_executable(blazer-manualtravelcheck-tests tests/manualtravelcheck_test.cpp)
+    target_link_libraries(blazer-manualtravelcheck-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME manualtravelcheck COMMAND blazer-manualtravelcheck-tests)
     qt_add_executable(blazer-operator-extraction-tests tests/operator_extraction_test.cpp)
     target_include_directories(blazer-operator-extraction-tests PRIVATE src)
     target_link_libraries(blazer-operator-extraction-tests PRIVATE Qt6::Core Qt6::Test)
