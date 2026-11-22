@@ -33,7 +33,7 @@ qt_add_library(blazer-core STATIC
     src/materialtestledger.cpp src/materialtestledger.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/grblwirenumbers.h src/joboutput.cpp
     src/preparedcontrollerjob.cpp src/preparedcontrollerjob.h
-    src/preparedlocaljob.cpp src/preparedlocaljob.h src/operatorlocalframe.h
+    src/preparedlocaljob.cpp src/preparedlocaljob.h src/operatorlocalframe.h src/operatorlocalframe.cpp
     src/controllerjobpreparation.cpp src/controllerjobpreparation.h src/controllerjobpreparation_p.h
     src/settingsbundle.cpp src/settingsbundle.h
     src/nativedesign.cpp src/nativedesign.h src/nativecompatibility.cpp src/nativecompatibility.h src/imageexport.cpp src/imageexport.h
@@ -104,6 +104,11 @@ if(BUILD_TESTING)
     target_compile_definitions(blazer-manualstartui-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME manualstartui COMMAND blazer-manualstartui-tests -platform offscreen)
     set_tests_properties(manualstartui PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic" TIMEOUT 90)
+    qt_add_executable(blazer-operatorlocalframe-tests tests/operatorlocalframe_test.cpp)
+    target_link_libraries(blazer-operatorlocalframe-tests PRIVATE blazer-core Qt6::Test)
+    target_compile_definitions(blazer-operatorlocalframe-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME operatorlocalframe COMMAND blazer-operatorlocalframe-tests -platform offscreen)
+    set_tests_properties(operatorlocalframe PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic" TIMEOUT 120)
     qt_add_executable(blazer-operator-extraction-tests tests/operator_extraction_test.cpp)
     target_include_directories(blazer-operator-extraction-tests PRIVATE src)
     target_link_libraries(blazer-operator-extraction-tests PRIVATE Qt6::Core Qt6::Test)
