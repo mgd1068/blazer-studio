@@ -1,5 +1,8 @@
 # Bekannte Einschränkungen des Testkandidaten
 
+Der neue [Handstart](../MANUAL_START.md) benötigt vier tatsächlich gemessene Restwege. Ohne Encoder kann die Software eine Verschiebung von Hand nicht selbst erkennen oder automatisch die verbleibenden mechanischen Wege messen. Nach erneutem Handverschieben ist der lokale Bezug neu einzurichten. Ein bestandener Test mit simuliertem Controller ist keine reale Geräteabnahme.
+
+
 **Realer Fehler vom 20.11.2026 in der lokalen beta.5.2-local:** Ein Auftrag begann am tatsächlichen Kopfstandort statt am Figurenanfang und fuhr am Ende der ersten Linie in die Begrenzung. Der Gehäuselüfter blieb aus. Diese Fassung ist damit nicht als sicherer Hardwarebetrieb bestätigt. beta.8-dev bietet dafür einen geführten Einrichtungsweg und getrennte Absaugungsbestätigungen. Deren Softwaretests sind keine physische Abnahme; den damaligen Fehler nicht durch eine ungeprüfte Wiederholungsfahrt nachstellen.
 
 - beta.8-dev ergänzt die geführte M3-Einrichtung: Controllerdaten, Mechanikbestätigung, ausdrückliches Homing, gemessene 1-mm-Schritte, Innenfahrraum, vier Ecken und Arbeitsnull-Zuordnung. Erst die abgeschlossene Einrichtung ermöglicht die weiteren passenden Geräteaktionen; Absaugungs-/Materialprüfung bleiben getrennt. Die Einrichtung gilt nur für die aktuelle Sitzung und entfällt bei STOPP, Reset, Fehler, Trennung oder Konfigurationswechsel. Keine automatische Kalibrierung, keine bereits erfolgte physische Abnahme. [Ablauf](START.md#geräteanschluss). Abweichende bekannte GRBL-XY-Projekte bleiben offline nutzbar; der neue Weg ist keine Freigabe weiterer Laser.

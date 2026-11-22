@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.8-dev
+# Blazer Studio – Einstieg in beta.9-dev
 
 **Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.8-dev ergänzt eine geführte, nur für die aktuelle Verbindung geltende M3-Einrichtung und einen ausdrücklich bestätigten Absaugmodus ohne Sensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
@@ -49,6 +49,10 @@ Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Ger
 6. Die geprüfte Ursprungsecke ausdrücklich als Arbeitsnull setzen und anschließend die angezeigte Maschinen-/Arbeitskoordinaten-Zuordnung prüfen und bestätigen. Der Dialog startet danach keinen Laserauftrag. Das Design muss vollständig innerhalb des geprüften Innenraums liegen.
 
 Die Einrichtung gilt nur für diese Gerätesitzung. STOPP, Reset, Trennung, Fehler oder Änderungen an Firmware/Einstellungen entwerten sie; anschließend erneut einrichten. Ein Projekt speichert keine Gerätefreigabe. Bei falscher Richtung oder unerwartetem Verhalten sofort STOPP beziehungsweise den Not-Aus am Gerät verwenden. Siehe [Einrichtungsvertrag](../M3_SESSION_COMMISSIONING.md).
+
+### Stattdessen ab Handposition starten
+
+**Start ab Handposition …** bietet einen eigenen lokalen Ablauf: den Kopf bei tatsächlich freien Achsen von Hand setzen, vier reale Restwege messen, den lokalen Startpunkt übernehmen und alle geplanten Fahrwege einschließlich Anfahrt und Rasterüberlauf prüfen. Eine globale Maschinenreferenz wird daraus nicht abgeleitet. Die [Schritt-für-Schritt-Anleitung](../MANUAL_START.md) beschreibt Bestätigungen, Rahmenfahrt, Start und Grenzen. Die Absaugung bleibt separat erforderlich.
 
 ### Absaugung bestätigen und ersten Auftrag starten
 
