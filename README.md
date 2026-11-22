@@ -2,7 +2,7 @@
 
 Linux-Anwendung zum Vorbereiten und Steuern von Laserjobs auf Mathias’ BlazerX. Die Oberfläche orientiert sich an Aufbau und Bediengefühl von OrcaSlicer.
 
-**Entwicklungsstand:** beta.8-dev in Vorbereitung für Ubuntu 26.04 / x86_64. Blazer Studio erfüllt noch nicht den vollständigen Funktionsumfang von LightBurn 2.2.01. Die [Abnahmematrix](docs/FUNCTION_ACCEPTANCE.md) trennt vorhandene Softwarefunktionen, unabhängige Tests und verbleibende Lücken. Die lokal installierte und veröffentlichte Fassung ist im [beta.7-Lieferbericht](docs/beta/BETA7_SOFTWARE_ACCEPTANCE.md) mit Prüfumfang und Artefaktidentität dokumentiert.
+**Entwicklungsstand:** beta.8-dev ist als Software-Betakandidat für Ubuntu 26.04 / x86_64 veröffentlicht und lokal installiert. Der [beta.8-Lieferbericht](docs/beta/BETA8_SOFTWARE_ACCEPTANCE.md) dokumentiert Quellstand, Paket und Prüfungen. Die reale M3-Abnahme und die Steuerung des Gehäuse-Fan-Ports sind offen. Blazer Studio erfüllt noch nicht den vollständigen Funktionsumfang von LightBurn 2.2.01; die [Abnahmematrix](docs/FUNCTION_ACCEPTANCE.md) nennt verbleibende Lücken.
 
 beta.8-dev ergänzt einen [geführten M3-Einrichtungsweg](docs/beta/START.md#geräteanschluss) mit Controllerdaten, mechanischen Beobachtungen, Referenzfahrt, gemessenen Prüfschritten, Innenfahrraum und Arbeitsnull. Der Grundworkflow soll damit beaufsichtigte M3-Aufträge ermöglichen; Einrichtung und Bestätigungen gelten nur für die aktuelle Sitzung. Der zusätzliche Absaugmodus ohne Sensor setzt tatsächlich unabhängig laufende Absaugung voraus und misst keinen Luftstrom. Die Steuerung des Gehäuse-Fan-Ports bleibt ungeklärt. Das ist keine physische Abnahme und keine vollständige LightBurn-Parität. Simulator, Planung, Editor und Datei-Export bleiben verfügbar.
 
