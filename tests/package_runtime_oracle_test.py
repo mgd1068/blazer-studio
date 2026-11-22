@@ -40,6 +40,7 @@ class PackageRuntimeOracleTest(unittest.TestCase):
             ("0.9.0-beta.5", "26e1464dd0d1ec13081c76011fb3bbeebec6f240", False),
             ("0.9.0-beta.5.1", "f7ebbf9537023a03f01227a005ea54e7e2473437", False),
             ("0.9.0-beta.5.2-local", "5e66eb1c8bdea14f14218866c035d2e159be2469", True),
+            ("0.9.0-beta.7-dev", "9a6abbc72af8ac7ebbf6523c53e0f91b4176a90b", False),
         ]
         baseline = ORACLE("current", self.identity(), self.identity())
         for version, revision, auxiliary in cases:
