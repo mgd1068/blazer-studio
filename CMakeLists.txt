@@ -33,6 +33,7 @@ qt_add_library(blazer-core STATIC
     src/materialtestledger.cpp src/materialtestledger.h
     src/controlleradapter.cpp src/controlleradapter.h src/grblencoder.cpp src/grblwirenumbers.h src/joboutput.cpp
     src/preparedcontrollerjob.cpp src/preparedcontrollerjob.h
+    src/preparedlocaljob.cpp src/preparedlocaljob.h src/operatorlocalframe.h
     src/controllerjobpreparation.cpp src/controllerjobpreparation.h src/controllerjobpreparation_p.h
     src/settingsbundle.cpp src/settingsbundle.h
     src/nativedesign.cpp src/nativedesign.h src/nativecompatibility.cpp src/nativecompatibility.h src/imageexport.cpp src/imageexport.h
@@ -68,7 +69,7 @@ endif()
 
 set(blazer_qml
     qml/NativeImportDialog.qml qml/VectorInspectionDialog.qml qml/TechnicalDiagnosticsDialog.qml qml/ArtLibraryDialog.qml qml/JobPlacementDialog.qml qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
-    qml/ExtractionSupervisionPanel.qml qml/M3CommissioningDialog.qml qml/ManualRegistrationDialog.qml qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
+    qml/ExtractionSupervisionPanel.qml qml/M3CommissioningDialog.qml qml/ManualStartDialog.qml qml/ManualRegistrationDialog.qml qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml qml/ProjectDialog.qml qml/RecentProjectsDialog.qml qml/HistoryDialog.qml)
 qt_add_executable(blazer-studio src/main.cpp)
 qt_add_qml_module(blazer-studio URI BlazerStudio VERSION 1.0 QML_FILES ${blazer_qml})
@@ -95,6 +96,9 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-manualtravelcheck-tests tests/manualtravelcheck_test.cpp)
     target_link_libraries(blazer-manualtravelcheck-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME manualtravelcheck COMMAND blazer-manualtravelcheck-tests)
+    qt_add_executable(blazer-preparedlocaljob-tests tests/preparedlocaljob_test.cpp)
+    target_link_libraries(blazer-preparedlocaljob-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME preparedlocaljob COMMAND blazer-preparedlocaljob-tests)
     qt_add_executable(blazer-operator-extraction-tests tests/operator_extraction_test.cpp)
     target_include_directories(blazer-operator-extraction-tests PRIVATE src)
     target_link_libraries(blazer-operator-extraction-tests PRIVATE Qt6::Core Qt6::Test)

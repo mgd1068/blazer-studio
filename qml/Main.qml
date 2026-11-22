@@ -12,6 +12,10 @@ ApplicationWindow {
     title: (project.dirty ? "● " : "") + project.title + " — Blazer Studio"
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
+    readonly property var manualStartState: typeof machine.operatorLocalFrame !== "undefined" ? machine.operatorLocalFrame : ({phase:"inactive"})
+    readonly property bool manualStartSupported: typeof machine.beginManualPlacement === "function"
+    readonly property bool manualStartSelected: !simulationMode && manualStartSupported && (project.startMode === 1 || manualStartState.phase !== "inactive")
+    readonly property bool manualStartCanOpen: !controllerClosePending && !simulationMode && manualStartSupported && machine.connected && !machine.busy && !machine.firing && !controllerRequestPending
     readonly property bool controllerRequestPending: typeof machine.requestPending !== "undefined" && machine.requestPending
     readonly property bool runtimeOccupied: (typeof machine.occupied !== "undefined" ? machine.occupied : !simulationMode) || controllerRequestPending || machine.busy || machine.firing
     readonly property string controllerConnectionPhase: typeof machine.connectionPhase !== "undefined" ? machine.connectionPhase : "closed"
@@ -97,10 +101,11 @@ ApplicationWindow {
     property url lastProjectSaveFolder
     readonly property bool textInputFocused: activeFocusItem !== null && typeof activeFocusItem.copy === "function" && typeof activeFocusItem.selectAll === "function"
     readonly property bool clipboardDialogActive: projectDialogActive || importDialog.visible || imageDialog.visible || reliefDialog.visible || cameraPhoto.visible || photoDepth.visible || universalImport.visible || vectorExport.visible || imageExport.visible || gcodeDialog.visible || csvImport.visible || csvDirectory.visible || diagnosticsDialog.visible || technicalDiagnosticsPreview.visible || onboarding.visible || betaHelp.visible || manufacturerDialog.visible || materialEditor.visible || deleteMaterialDialog.visible || materialTestDialog.visible
-    readonly property bool projectDialogActive: controllerClosePending || startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || commissioningDialog.visible || connectionSafetyDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || manualRegistrationDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible || artLibraryDialog.visible
+    readonly property bool projectDialogActive: controllerClosePending || startupSafety.visible || historyDialog.visible || recoveryDialog.visible || discardDialog.visible || projectDetails.visible || recentProjects.visible || projectMenu.visible || (saveDialog && saveDialog.visible) || openDialog.visible || saveTemplateDialog.visible || openTemplateDialog.visible || deviceDialog.visible || commissioningDialog.visible || manualStartDialog.visible || connectionSafetyDialog.visible || barcodeDialog.visible || materialRecordDialog.visible || settingsBundleDialog.visible || jobPlacementDialog.visible || manualRegistrationDialog.visible || nativeImportReview.visible || vectorInspectionDialog.visible || technicalDiagnosticsPreview.visible || artLibraryDialog.visible
     readonly property string lengthUnit: typeof appServices!=="undefined" && appServices && appServices.lengthUnit==="in" ? "in" : "mm"
     // Same readiness checks as the start action, with a visible explanation.
     readonly property string startBlockReason: {
+        if (manualStartSelected) return "Handstart öffnen: gemessene Restwege, Startpunkt und vollständige Wegeprüfung im Handstart-Dialog bestätigen. " + (manualStartState.reason || "");
         if (!simulationMode && (controllerRequestPending || controllerConnectionPhase === "opening" || controllerConnectionPhase === "closing")) return "Verbindungs- oder Geräteanfrage läuft. Bestätigten Abschluss abwarten; STOPP bleibt verfügbar.";
         if (!simulationMode && !controllerStatusFresh) return "Controllerdaten fehlen oder sind veraltet. Keine aktuelle Bereitschaft bestätigt; Datenalter: " + controllerStatusAge + ".";
         if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
@@ -234,6 +239,7 @@ ApplicationWindow {
     JobPlacementDialog { id: jobPlacementDialog; document: project; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false) }
     ManualRegistrationDialog { id: manualRegistrationDialog; document: project; service: win.registrationService; dark: win.night; onAboutToShow: machine.focus(false) }
     M3CommissioningDialog { id: commissioningDialog; modelMachine: machine; dark: win.night; onAboutToShow: machine.focus(false) }
+    ManualStartDialog { id: manualStartDialog; modelMachine: machine; modelProject: project; dark: win.night }
     Dialog {
         id: connectionSafetyDialog; objectName: "connectionSafetyDialog"
         title: "Reales Gerät verbinden"; anchors.centerIn: parent; modal: true; focus: true
@@ -727,9 +733,9 @@ ApplicationWindow {
                 ActionButton { objectName: "saveProjectButton"; enabled: win.synchronousWorkReady; text: "Speichern"; dark: win.night; compact: true; onClicked: win.showSaveDialog() }
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
-                    id: startJobControl; objectName: "startJobButton"; property bool nativeActionEnabled: win.page > 0; Component.onCompleted: machine.registerNativeActionControl(startJobControl,"start"); text: win.page === 0 ? "Vorschau  →" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
-                    primary: true; compact: true; enabled: !win.controllerClosePending && (win.page === 0 || win.startBlockReason.length === 0); hint: win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason
-                    onClicked: { if (win.page === 0) win.page = 1; else { win.page = 2; machine.start() } }
+                    id: startJobControl; objectName: "startJobButton"; property bool nativeActionEnabled: win.page > 0 && !win.manualStartSelected; Component.onCompleted: machine.registerNativeActionControl(startJobControl,"start"); text: win.page === 0 ? "Vorschau  →" : win.manualStartSelected ? "Handstart öffnen …" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
+                    primary: true; compact: true; enabled: !win.controllerClosePending && (win.page === 0 || (win.manualStartSelected ? win.manualStartCanOpen : win.startBlockReason.length === 0)); hint: win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason
+                    onClicked: { if (win.page === 0) win.page = 1; else if(win.manualStartSelected) manualStartDialog.open(); else { win.page = 2; machine.start() } }
                 }
             }
         }
@@ -1158,7 +1164,8 @@ ApplicationWindow {
                                     text: typeof machine.processingSafetyErrors !== "undefined" ? machine.processingSafetyErrors.join("\n") : ""
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
-                                ExtractionSupervisionPanel { Layout.fillWidth: true; visible: !win.simulationMode; modelMachine: machine; dark: win.night; commissioningComplete: win.setupState.stage === "complete" }
+                                ActionButton { objectName:"openManualStart"; text:"Start ab Handposition …"; dark:win.night; Layout.fillWidth:true; enabled:win.manualStartCanOpen; onClicked:manualStartDialog.open() }
+                                ExtractionSupervisionPanel { Layout.fillWidth: true; visible: !win.simulationMode; modelMachine: machine; dark: win.night; setupReady: win.setupState.stage === "complete" || !!win.manualStartState.localPositionKnown }
                                 Rectangle {
                                     Layout.fillWidth: true; Layout.preferredHeight: Math.max(233, positionControls.implicitHeight + 44); radius: 9; color: win.panel; border.color: win.line
                                     RowLayout {
