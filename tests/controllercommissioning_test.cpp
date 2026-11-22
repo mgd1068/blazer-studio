@@ -67,7 +67,24 @@ private slots:
         }
         const auto plant=peer.snapshot().object;QCOMPARE(plant.value("actual").toArray(),QJsonArray({-190.0,-140.0}));
         QCOMPARE(count(peer,"collision"),0);QCOMPARE(count(peer,"powered"),0);
-        QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupZero));QTRY_COMPARE(stage(r),QString("workCoordinates"));QTRY_VERIFY(std::abs(r.status().position.x())<0.001);
+        const auto beforeZero=r.status();
+        QCOMPARE(beforeZero.commissioning.value("stage").toString(),QString("workCoordinates"));
+        QVERIFY(std::abs(beforeZero.position.x())>0.001);QVERIFY(std::abs(beforeZero.position.y())>0.001);
+        // G10 changes the reported WPos before the transaction's final modal
+        // ACK/readback. Hold that ACK deterministically in the independent peer:
+        // separate old-stage and new-position waits would falsely look complete.
+        QVERIFY(peer.control({{"action","plantConfig"},{"holdZeroModalAck",true}}).ok);
+        QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupZero));
+        const auto zeroPositionWhilePending=[&]{const auto s=r.status();return s.coordinateUpdatePending && s.commissioning.value("stage")=="zeroPending" && std::abs(s.position.x())<0.001 && std::abs(s.position.y())<0.001;};
+        QTRY_VERIFY(zeroPositionWhilePending());QCOMPARE(count(peer,"zeroAckHeld"),1);
+        // The production boundary correctly refuses this deliberately early
+        // attestation; observing zero counters is not transaction completion.
+        QVERIFY(data(r,"coordinatesObserved"));
+        QTRY_VERIFY(!r.status().requestPending && r.status().commissioning.value("reason").toString().startsWith("Aktion erst"));
+        QVERIFY(zeroPositionWhilePending());
+        const auto released=peer.control({{"action","releaseZeroAck"}});QVERIFY(released.ok && released.object.value("accepted").toBool());
+        const auto zeroComplete=[&]{const auto s=r.status();return s.sequence>beforeZero.sequence && s.commissioning.value("stage")=="workCoordinates" && !s.coordinateUpdatePending && !s.requestPending && !s.busy && s.ready && s.verified && std::abs(s.position.x())<0.001 && std::abs(s.position.y())<0.001;};
+        QTRY_VERIFY(zeroComplete());QCOMPARE(count(peer,"zeroAckReleased"),1);
         QVERIFY(data(r,"coordinatesObserved"));QTRY_COMPARE(stage(r),QString("complete"));QVERIFY(r.status().motionSafetyError.isEmpty());
         QCOMPARE(r.status().commissioning.value("workMinX").toDouble(),0.0);QCOMPARE(r.status().commissioning.value("workMaxX").toDouble(),180.0);
         // Homing intentionally invalidates accessory knowledge. Never clear that
