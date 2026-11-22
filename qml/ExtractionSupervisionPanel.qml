@@ -11,7 +11,9 @@ ColumnLayout {
     readonly property var state: modelMachine && typeof modelMachine.extractionSupervision !== "undefined" ? modelMachine.extractionSupervision : ({mode:"sensorVerified",notice:"Absaugung noch nicht eingerichtet.",reason:"",pendingAction:"",remainingMs:0,activeLease:false})
     readonly property bool attended: state.mode === "operatorAttendedExternal"
     readonly property bool jobPaused: modelMachine ? modelMachine.paused : false
-    onJobPausedChanged: actionChoice.currentIndex = jobPaused ? 2 : 0
+    property bool controlsReady: false
+    Component.onCompleted: controlsReady = true
+    onJobPausedChanged: if (controlsReady) actionChoice.currentIndex = jobPaused ? 2 : 0
     readonly property bool idle: modelMachine && !modelMachine.requestPending && !modelMachine.busy && !modelMachine.firing
     readonly property color ink: dark ? "#e2eaf0" : "#263b4a"
     readonly property color muted: dark ? "#adc0ce" : "#5f7687"
