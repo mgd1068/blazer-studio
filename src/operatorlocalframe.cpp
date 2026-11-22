@@ -45,6 +45,11 @@ QVariantMap ControllerRuntimeWorker::localFrameSnapshot() const {
     const auto delta=known?m_core->reportedMachinePosition-f.counterAtCapture:QPointF();
     const ManualTravelCheck::Distances usable{a.negativeX-2,a.positiveX-2,a.negativeY-2,a.positiveY-2};
     const ManualTravelCheck::Distances atHead{a.negativeX+delta.x(),a.positiveX-delta.x(),a.negativeY+delta.y(),a.positiveY-delta.y()};
+    const bool sensorMode=m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::SensorVerified;
+    const auto actionWitnessReady=[&](const QString &action,const QByteArray &source){
+        return sensorMode || (m_operatorWitness && m_operatorAction==action && m_operatorSource==source &&
+            m_operatorWitnessCoordinate==m_coordinateEpoch && m_operatorSession==supervisionBinding());
+    };
     QVariantMap result{{"phase",f.phase},{"reason",f.reason},{"frameId",QString::fromLatin1(f.frameId)},
         {"approvalId",QString::fromLatin1(f.approvalId)},{"coordinateEpoch",QVariant::fromValue(m_coordinateEpoch)},
         {"sourceFingerprint",m_localCandidate?QString::fromLatin1(m_localCandidate->sourceFingerprint().toHex()):QString()},
@@ -62,11 +67,13 @@ QVariantMap ControllerRuntimeWorker::localFrameSnapshot() const {
         (f.phase=="travelReview"||f.phase=="ready") && m_core->ready() && m_core->verified() && !m_accessory.activeLease();
     result["frameReason"]=m_localCandidate?m_localCandidate->frameError():QString("Lokalen Auftrag zuerst vorbereiten.");
     result["resumeReady"]=known && f.phase=="paused" && m_core->paused && m_core->controllerState=="Hold" && m_core->verified() &&
-        ((m_localFrameRun && m_localActive && !m_localActive->frameLines().isEmpty() && m_core->knownOutput && m_core->reportedOutput==0 && !m_accessory.activeLease()) || (m_operatorWitness && m_operatorAction=="resume" && m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty()));
+        ((m_localFrameRun && m_localActive && !m_localActive->frameLines().isEmpty() && m_core->knownOutput && m_core->reportedOutput==0 && !m_accessory.activeLease()) ||
+        (!m_localFrameRun && m_activePrepared && actionWitnessReady("resume",m_activePrepared->sourceFingerprint()+m_activePrepared->profileFingerprint()) && m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty()));
     if(m_localCandidate)result["requiredActualWire"]=distances(m_localCandidate->requiredUnion());
     else result["requiredActualWire"]=QVariantMap{};
     result["startReady"]=known && f.phase=="ready" && result["approved"].toBool() && m_core->ready() && m_core->verified() &&
         m_localCandidate && sameLocal(m_localCandidate->headAnchor(),m_core->position) &&
+        actionWitnessReady("start",m_localCandidate->sourceFingerprint()+m_localCandidate->profileFingerprint()) &&
         m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty() && !m_accessory.activeLease();
     return result;
 }
@@ -122,7 +129,7 @@ void ControllerRuntimeWorker::localData(const ControllerRuntimeRequest &request)
     }
     if(op=="approve" && f.phase=="travelReview" && m_localCandidate && data.value("approvalId").toByteArray()==f.approvalId && !f.approvalId.isEmpty()) {
         if(!m_core->ready()||!m_core->verified()||!m_core->localMotionSafetyError().isEmpty()||!sameLocal(m_core->position,m_localCandidate->headAnchor())){reject("Lokaler Startpunkt oder Controllerzustand nicht aktuell bestätigt.");return;}
-        f.approvedArtifact=m_localCandidate->fingerprint();f.phase="ready";f.reason="Lokaler Plan und Restwege bestätigt; Absaugung/Aufsicht separat bestätigen, dann ausdrücklich starten.";return;
+        f.approvedArtifact=m_localCandidate->fingerprint();f.phase="ready";f.reason="Lokaler Plan und Restwege bestätigt; Anwesenheit für den gewählten Gerätebetrieb bestätigen, dann ausdrücklich starten.";return;
     }
     reject("Dieser lokale Einrichtungsschritt ist in der aktuellen Phase nicht zulässig.");
 }

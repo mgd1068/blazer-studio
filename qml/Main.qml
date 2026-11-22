@@ -74,7 +74,7 @@ ApplicationWindow {
     onSynchronousWorkReadyChanged: if (synchronousWorkReady) refreshFraming()
     readonly property var setupState: typeof machine.commissioning !== "undefined" ? machine.commissioning : ({})
     readonly property var extractionState: typeof machine.extractionSupervision !== "undefined" ? machine.extractionSupervision : ({mode:"sensorVerified",pendingAction:""})
-    function supervisionAllows(action) { return simulationMode || extractionState.mode !== "operatorAttendedExternal" || extractionState.pendingAction === action }
+    function supervisionAllows(action) { return simulationMode || (extractionState.mode !== "operatorAttendedExternal" && extractionState.mode !== "operatorSupervisedDeviceCycle") || extractionState.pendingAction === action }
     readonly property string liveAreaError: {
         if(simulationMode || setupState.stage !== "complete" || !outputFrameRegion.valid)return ""
         const keys=["workMinX","workMinY","workMaxX","workMaxY"]
@@ -113,7 +113,7 @@ ApplicationWindow {
         if (!simulationMode && (controllerJobPreparing || !controllerJobPrepared)) return controllerPrepareReason || "Controllerauftrag wird vorbereitet. Nach Abschluss erneut ausdrücklich starten.";
         if (!simulationMode && project.startMode !== 0) return "Die M3-Beta verwendet am realen Gerät absolute Zeichnungskoordinaten. Unter Startposition und Ursprung auf Absolut wechseln.";
         if (liveAreaError.length>0) return liveAreaError;
-        if (!supervisionAllows("start")) return "Absaugung und Aufsicht für diesen Auftrag im Bereich Gerät bestätigen.";
+        if (!supervisionAllows("start")) return extractionState.mode === "operatorSupervisedDeviceCycle" ? "Anwesenheit für diesen Auftrag im Bereich Gerät bestätigen." : "Absaugung und Aufsicht für diesen Auftrag im Bereich Gerät bestätigen.";
         if (!simulationMode && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0) return machine.processingSafetyErrors.join("\n");
         if (!simulationMode && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length > 0) return machine.motionSafetyError;
         if (!simulationMode && !machine.positionReferenced) return "Maschinenreferenz fehlt. Die aktuelle Position ist noch kein verlässlicher Nullpunkt. Referenzfahrt und Arbeitsnullpunkt im Bereich »Gerät« prüfen; nach einer Kollision keinen neuen Versuch starten.";

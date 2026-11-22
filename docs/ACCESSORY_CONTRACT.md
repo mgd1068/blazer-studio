@@ -1,5 +1,16 @@
 # Accessory output and extraction contract
 
+## Current supervised device cycle
+
+The explicit `OperatorSupervisedDeviceCycle` mode requires a fresh one-shot
+presence witness for the specific start/focus/resume operation. It does not
+require, command or manufacture evidence for an external extraction appliance.
+Both enclosure and laser-module fan observations remain unknown/not read back;
+no independent fan-output mapping is claimed. The normal dynamic GRBL job cycle
+is retained across laser-free G0 moves. See [device-cycle scope](DEVICE_CYCLE.md).
+The sensor and external-appliance contracts below remain separate opt-in modes.
+
+
 The real M3 enclosure fan remains unresolved. The failed 20 November hardware
 acceptance is not superseded by these software changes. Neither a successful
 controller ACK nor an enabled Air Assist checkbox proves that extraction is

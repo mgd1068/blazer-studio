@@ -57,7 +57,7 @@ Frame besitzt ein bereits vorbereitetes, separat validiertes, eingefrorenes
 S0-Programm und eigenen NativeIntent. Es kann bei passendem Plan vor der
 Jobapproval gefahren werden. Framefehler verhindern den Job nicht automatisch.
 Jobstart benötigt genaue Approval-ID, passende immutable Quelle/Frameepoch,
-frische separate Absaugungs-/Aufsichtswitness und einen neuen localStart-Intent.
+frische separate, zum ausdrücklich gewählten Betriebsmodus passende Aufsichtswitness und einen neuen localStart-Intent.
 Keine vorbereitete Berechnung oder Datenattestierung startet automatisch.
 
 Die tatsächliche lokale Ausführung verwendet einen eigenen Autoritätstyp in

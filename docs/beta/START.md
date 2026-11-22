@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.9-dev
+# Blazer Studio – Einstieg in beta.10-dev
 
 **Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.8-dev ergänzt eine geführte, nur für die aktuelle Verbindung geltende M3-Einrichtung und einen ausdrücklich bestätigten Absaugmodus ohne Sensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
@@ -54,7 +54,15 @@ Die Einrichtung gilt nur für diese Gerätesitzung. STOPP, Reset, Trennung, Fehl
 
 **Start ab Handposition …** bietet einen eigenen lokalen Ablauf: den Kopf bei tatsächlich freien Achsen von Hand setzen, vier reale Restwege messen, den lokalen Startpunkt übernehmen und alle geplanten Fahrwege einschließlich Anfahrt und Rasterüberlauf prüfen. Eine globale Maschinenreferenz wird daraus nicht abgeleitet. Die [Schritt-für-Schritt-Anleitung](../MANUAL_START.md) beschreibt Bestätigungen, Rahmenfahrt, Start und Grenzen. Die Absaugung bleibt separat erforderlich.
 
-### Absaugung bestätigen und ersten Auftrag starten
+### Beaufsichtigter Gerätebetrieb und erster Auftrag
+
+Unter **Gerätelüfter und Aufsicht** den tatsächlichen Gerätezustand klären, falls eine vorherige Störung angezeigt wird, und **Beaufsichtigten Gerätebetrieb verwenden** wählen. Den konkreten Vorgang wählen, die eigene Anwesenheit am Gerät wahrheitsgemäß bestätigen und **Für diesen Vorgang bereit** betätigen. Dies startet keine Bewegung. Innerhalb der angezeigten 30 Sekunden die zugehörige Start-/Fortsetzen-Taste selbst betätigen. Nach Pause oder Quellenänderung gilt keine alte Bestätigung weiter.
+
+Die externe Absaugung liegt in diesem Modus außerhalb der Programmsteuerung und wird nicht als Pflichtgerät oder Sensor abgefragt. Beide tatsächlichen Gerätelüfter müssen beim ersten realen Auftrag beobachtet werden. Die Software meldet keinen gemessenen Lüfterlauf und bietet keine unbelegten getrennten Lüfterausgänge an. Der dynamische Gerätezyklus bleibt bei internen G0-Leerfahrten aktiv; G0 unter geprüftem GRBL-Lasermodus ist laserfrei. Am Ende wird M5/S0 angefordert. Firmwareabhängige Lüfterwirkung und Nachlauf sind nicht durch ein ACK bewiesen.
+
+### Optionale externe Absaugungsanlage
+
+Der folgende ältere Zusatzmodus ist nur für eine ausdrücklich gewählte externe Anlage vorgesehen; er ist keine Voraussetzung für den oben beschriebenen Gerätebetrieb.
 
 Nach erfolgreicher Einrichtung die Laserfreigabe am Gerät erst für die beaufsichtigte Materialprobe wiederherstellen. Material, Fokus, geschlossene Einhausung und freien Arbeitsraum prüfen; eigene Materialwerte beziehungsweise einen geeigneten kleinen Materialversuch verwenden.
 

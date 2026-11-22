@@ -47,9 +47,11 @@ nicht automatisch, dass die gesonderte Rahmenfahrt verfügbar ist.
 
 ## Start, Pause und Ende
 
-Absaugung und Aufsicht für den konkreten Vorgang separat bestätigen. Ein Modus ohne
-Luftstromsensor setzt tatsächlich unabhängig laufende und am Gerät geprüfte
-Absaugung voraus. Er schaltet den ungeklärten Gehäuse-Fan-Port nicht ein.
+Unter **Gerätelüfter und Aufsicht** den beaufsichtigten Gerätebetrieb wählen und die
+Anwesenheit für den konkreten Vorgang bestätigen. Eine externe Absaugung wird in
+diesem Modus nicht gesteuert und nicht als Pflichtgerät abgefragt. Gehäuse- und
+Lasermodullüfter beim ersten realen Auftrag tatsächlich beobachten; die Software
+kann deren Lauf nicht rücklesen oder als gemessen bestätigen.
 
 Erst **Auftrag ab angezeigter lokaler Lage starten** startet den vorbereiteten Auftrag.
 Berechnung und Codierung erfolgen vor der Startfreigabe. Nach Pause verlangt
