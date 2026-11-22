@@ -228,7 +228,7 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
         else if(action=="setupCorner") {if(stage!="cornerReady"||arguments.size()!=1||arguments.value("index").toInt()!=setup.value("cornerIndex").toInt())return {};}
         else return {};
         QByteArray data;QDataStream stream(&data,QIODevice::WriteOnly);
-        stream<<action<<arguments<<setup.value("fingerprint").toString()<<stage<<status.connectionEpoch<<status.coordinateEpoch;
+        stream<<action<<QJsonDocument::fromVariant(arguments).toJson(QJsonDocument::Compact)<<setup.value("fingerprint").toString()<<stage<<status.connectionEpoch<<status.coordinateEpoch;
         return QCryptographicHash::hash(data,QCryptographicHash::Sha256);
     }
     if(status.commissioning.value("active").toBool() && status.commissioning.value("stage").toString()!="complete")return {};
