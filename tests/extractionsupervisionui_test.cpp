@@ -247,6 +247,35 @@ class ExtractionSupervisionUiTest : public QObject {
         for (const auto &name : witnesses)
             QVERIFY(!h.item(name)->property("checked").toBool());
     }
+    void focusChoiceSurvivesUnrelatedModelChanges_data() { workflow_data(); }
+    void focusChoiceSurvivesUnrelatedModelChanges() {
+        QFETCH(bool, compact);
+        Harness h;
+        QVERIFY2(h.create(compact), qPrintable(h.error));
+        h.panel->setProperty("commissioningComplete", true);
+        QVERIFY(h.press("selectAttendedExtraction"));
+        QVERIFY(!h.model.paused);
+        QVERIFY(h.selectAction(1)); // Actual ComboBox mouse/keyboard choice, not setProperty.
+        auto *choice = h.item("extractionActionChoice");
+        QCOMPARE(choice->property("currentIndex").toInt(), 1);
+        for (int remaining : {29000, 17000, 0}) {
+            h.model.state["remainingMs"] = remaining;
+            h.model.state["reason"] = QString("Status aktualisiert: %1").arg(remaining);
+            h.model.update(); // Machine uses a shared NOTIFY for unrelated readonly properties.
+            QTest::qWait(20);
+            QVERIFY(!h.model.paused);
+            QCOMPARE(choice->property("currentIndex").toInt(), 1);
+        }
+        for (const auto &name : witnesses)
+            QVERIFY(h.press(name));
+        QVERIFY(h.press("attestExternalExtraction"));
+        QCOMPARE(h.model.attests, 1);
+        QCOMPARE(h.model.actions, QStringList{"focus"});
+        QCOMPARE(h.model.outputStarts, 0);
+        QCOMPARE(choice->property("currentIndex").toInt(), 1);
+        for (const auto &name : witnesses)
+            QVERIFY(!h.item(name)->property("checked").toBool());
+    }
     void inhibitedStates_data() {
         QTest::addColumn<QString>("state");
         for (const auto &s : {"pending", "busy", "firing"})
