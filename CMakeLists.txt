@@ -68,7 +68,7 @@ endif()
 
 set(blazer_qml
     qml/NativeImportDialog.qml qml/VectorInspectionDialog.qml qml/TechnicalDiagnosticsDialog.qml qml/ArtLibraryDialog.qml qml/JobPlacementDialog.qml qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
-    qml/ManualRegistrationDialog.qml qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
+    qml/ExtractionSupervisionPanel.qml qml/M3CommissioningDialog.qml qml/ManualRegistrationDialog.qml qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml qml/ProjectDialog.qml qml/RecentProjectsDialog.qml qml/HistoryDialog.qml)
 qt_add_executable(blazer-studio src/main.cpp)
 qt_add_qml_module(blazer-studio URI BlazerStudio VERSION 1.0 QML_FILES ${blazer_qml})
@@ -82,6 +82,15 @@ if(BUILD_TESTING)
     qt_add_executable(blazer-wire-profile-tests tests/wire_profile_test.cpp)
     target_link_libraries(blazer-wire-profile-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME wire_profile COMMAND blazer-wire-profile-tests)
+    qt_add_executable(blazer-commissioningui-tests tests/commissioningui_test.cpp)
+    target_link_libraries(blazer-commissioningui-tests PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+    target_compile_definitions(blazer-commissioningui-tests PRIVATE BLAZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME commissioningui COMMAND blazer-commissioningui-tests -platform offscreen)
+    set_tests_properties(commissioningui PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic" TIMEOUT 90)
+    qt_add_executable(blazer-operator-extraction-tests tests/operator_extraction_test.cpp)
+    target_include_directories(blazer-operator-extraction-tests PRIVATE src)
+    target_link_libraries(blazer-operator-extraction-tests PRIVATE Qt6::Core Qt6::Test)
+    add_test(NAME operator_extraction COMMAND blazer-operator-extraction-tests)
     qt_add_executable(blazer-offline-machine-tests tests/offline_machine_test.cpp)
     target_link_libraries(blazer-offline-machine-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME offline_machine COMMAND blazer-offline-machine-tests -platform offscreen)

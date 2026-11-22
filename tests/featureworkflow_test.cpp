@@ -136,6 +136,12 @@ class FeatureWorkflowTest : public QObject {
         QVERIFY(connect);
         QTRY_VERIFY(connect->isEnabled());
         QVERIFY(click(window, connect));
+        QTRY_VERIFY(object("connectionSafetyDialog")->property("visible").toBool());
+        QVERIFY(!item("confirmInitialConnection")->isEnabled());
+        QVERIFY(click(window,item("safeInitialConnection")));
+        QTRY_VERIFY(item("confirmInitialConnection")->isEnabled());
+        QVERIFY(click(window,item("confirmInitialConnection")));
+        QTRY_VERIFY(!object("connectionSafetyDialog")->property("visible").toBool());
         QTRY_VERIFY_WITH_TIMEOUT(!machine.simulation() && machine.connected(), 3000);
         QVERIFY(!machine.connectionVerified());
         QVERIFY(!window->property("grblVerified").toBool());
