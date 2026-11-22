@@ -10,6 +10,8 @@ ColumnLayout {
     property bool commissioningComplete: false
     readonly property var state: modelMachine && typeof modelMachine.extractionSupervision !== "undefined" ? modelMachine.extractionSupervision : ({mode:"sensorVerified",notice:"Absaugung noch nicht eingerichtet.",reason:"",pendingAction:"",remainingMs:0,activeLease:false})
     readonly property bool attended: state.mode === "operatorAttendedExternal"
+    readonly property bool jobPaused: modelMachine ? modelMachine.paused : false
+    onJobPausedChanged: actionChoice.currentIndex = jobPaused ? 2 : 0
     readonly property bool idle: modelMachine && !modelMachine.requestPending && !modelMachine.busy && !modelMachine.firing
     readonly property color ink: dark ? "#e2eaf0" : "#263b4a"
     readonly property color muted: dark ? "#adc0ce" : "#5f7687"
@@ -32,7 +34,7 @@ ColumnLayout {
             id: actionChoice; objectName: "extractionActionChoice"; Layout.fillWidth: true; dark: panel.dark
             textRole: "label"; valueRole: "action"
             model: [{label:"Neuen Auftrag starten",action:"start"},{label:"Fokuspunkt prüfen",action:"focus"},{label:"Pausierten Auftrag fortsetzen",action:"resume"}]
-            currentIndex: panel.modelMachine && panel.modelMachine.paused ? 2 : 0
+            Component.onCompleted: currentIndex = panel.jobPaused ? 2 : 0
             enabled: !panel.modelMachine || !panel.modelMachine.requestPending
         }
         Witness { id: running; objectName: "externalExtractionOnWitness"; text: "Die tatsächliche Absaugung läuft und ist am Gerät geprüft." }
