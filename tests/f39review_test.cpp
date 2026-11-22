@@ -8,9 +8,11 @@
 #include "reliefpreview.h"
 #include "workspace.h"
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QPainter>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -46,21 +48,44 @@ bool click(QQuickWindow *window, QQuickItem *item) {
     window->requestActivate();
     if (!QTest::qWaitForWindowActive(window, 1000))
         return false;
-    for (auto *parent = item->parentItem(); parent; parent = parent->parentItem()) {
-        if (!parent->property("contentY").isValid())
-            continue;
-        const auto p = item->mapToItem(parent, QPointF());
-        const double delta = p.y() < 5 ? p.y() - 5
-                             : p.y() + item->height() > parent->height() - 5
-                                 ? p.y() + item->height() - parent->height() + 5
-                                 : 0;
-        parent->setProperty("contentY",
-                            std::clamp(parent->property("contentY").toDouble() + delta, 0.,
+    QElapsedTimer deadline;
+    deadline.start();
+    QPoint point;
+    bool reached = false;
+    do {
+        // User mode inserts wrapped origin/status rows before the Capture button.
+        // Let polish/deferred updates run before measuring, and remeasure after
+        // scrolling: a changed contentHeight can move the target again.
+        QTest::qWait(20);
+        for (auto *parent = item->parentItem(); parent; parent = parent->parentItem()) {
+            if (!parent->property("contentY").isValid())
+                continue;
+            const auto p = item->mapToItem(parent, QPointF());
+            const double delta = p.y() < 5 ? p.y() - 5
+                                 : p.y() + item->height() > parent->height() - 5
+                                     ? p.y() + item->height() - parent->height() + 5
+                                     : 0;
+            parent->setProperty(
+                "contentY", std::clamp(parent->property("contentY").toDouble() + delta, 0.,
                                        std::max(0., parent->property("contentHeight").toDouble() -
                                                         parent->height())));
-    }
-    QTest::qWait(30);
-    const auto point = item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint();
+        }
+        QTest::qWait(20);
+        const auto center = item->boundingRect().center();
+        reached =
+            item->isVisible() && item->isEnabled() &&
+            QRectF(0, 0, window->width(), window->height()).contains(item->mapToScene(center));
+        for (auto *parent = item->parentItem(); reached && parent; parent = parent->parentItem())
+            if (parent->clip())
+                reached = QRectF(0, 0, parent->width(), parent->height())
+                              .contains(item->mapToItem(parent, center));
+        if (reached) {
+            point = item->mapToScene(center).toPoint();
+            break;
+        }
+    } while (deadline.elapsed() < 1000);
+    if (!reached)
+        return false; // Never report success for an offscreen or clipped click.
     QTest::mouseClick(window, Qt::LeftButton, {}, point);
     return true;
 }
@@ -72,6 +97,44 @@ class F39ReviewTest : public QObject {
         QQuickStyle::setStyle("Basic");
         qmlRegisterType<Workspace>("BlazerStudio", 1, 0, "Workspace");
         qmlRegisterType<ReliefPreview>("BlazerStudio", 1, 0, "ReliefPreview");
+    }
+    void clickRemeasuresDeferredClippedLayout() {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(R"(
+            import QtQuick
+            import QtQuick.Controls
+            ApplicationWindow {
+                width:480; height:320; visible:true
+                property int deliveredClicks:0
+                Flickable {
+                    id:viewport; x:20; y:20; width:440; height:260
+                    contentWidth:440; contentHeight:1000; clip:true
+                    property bool shifted:false
+                    onContentYChanged: if(!shifted && contentY>0) {
+                        shifted=true
+                        Qt.callLater(() => { target.y=900; viewport.contentHeight=1200 })
+                    }
+                    Button {
+                        id:target; objectName:"deferredClickTarget"
+                        x:10; y:700; width:200; height:40
+                        text:"Capture origin"
+                        onClicked: deliveredClicks++
+                    }
+                }
+            }
+        )",
+                          QUrl());
+        std::unique_ptr<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.get());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *target = find(window->contentItem(), "deferredClickTarget");
+        QVERIFY(target);
+        QVERIFY(click(window, target));
+        QCOMPARE(target->y(), 900.); // Deferred layout happened during reveal, not after the test.
+        QCOMPARE(window->property("deliveredClicks").toInt(), 1);
     }
     void renderedWorkspaceUsesPlacedMovesRatherThanEditorBounds() {
         Document document;
@@ -439,7 +502,13 @@ class F39ReviewTest : public QObject {
             QVERIFY(mode(startMode));
             QTRY_COMPARE(int(project.startMode()), startMode);
             if (startMode == 2) {
-                QVERIFY(click(window, item("captureJobUserOrigin")));
+                auto *capture = item("captureJobUserOrigin");
+                QVERIFY(capture);
+                QSignalSpy captureClicks(capture, SIGNAL(clicked()));
+                QVERIFY(captureClicks.isValid());
+                QVERIFY(click(window, capture));
+                QCOMPARE(captureClicks.count(),
+                         1); // A helper success must mean actual UI dispatch.
                 QTRY_VERIFY(project.placementSummary()["originConfirmed"].toBool());
                 machine.jog(5, 5); // Actual approach and stored User target now differ.
             }
