@@ -79,3 +79,47 @@ verschobener Kopf bei 0,0004 mm und lokaler Offset 0,0044 mm kann ein globales
 Ausgabeziel 0,005 mm erzeugen. Dieses Helper-Ergebnis bestätigt einen solchen
 verschobenen Encoder deshalb nicht. Die Vereinigung aus Roh- und tatsächlichen
 Wirewegen des späteren Adapters bleibt dessen separater autoritativer Vertrag.
+
+## Unveränderliche tatsächliche Ausgabe: PreparedLocalJob
+
+`PreparedLocalJob::prepare(plan, request, cancel)` ergänzt den reinen Baustein um
+`PreparedControllerJob` und eine enge Prüfung seiner **tatsächlich ausgegebenen**
+GCode-Ziele. Der Eingabeplan ist bereits vollständig in virtuellen G54-Koordinaten
+platziert, einschließlich des gewählten Current-Position-Ankers. Der Aufrufer
+liefert als `headAnchor` den frisch nach seiner G10-Transaktion bestätigten WPos;
+eine eingegebene Wunschposition ist kein Ersatz. Das erste `from` muss exakt passen.
+Dieser Helper kann Herkunft und physische Richtigkeit dieser Daten nicht beweisen.
+Er platziert nichts erneut, verändert kein Profil und ergänzt keine Fahrten.
+
+Die erste Beta verlangt exakt **2 mm Reserve je Richtung**. Der Bedarf ist die
+konservative Vereinigung aus allen rohen `from/to`-Punkten, der bisherigen lokalen
+ABS-Rundungsprüfung und `parsedAbsoluteWireTarget - confirmedHead`. Auch erste
+laserfreie Anfahrt, Overscan und eine bereits im Plan vorhandene Rückfahrt zählen.
+Ein Ziel bei 0,0048 mm wird beispielsweise als 0,005 ausgegeben: bei bestätigtem
+Kopf 0,0004 beträgt dessen tatsächlicher Abstand 0,0046 mm, obwohl die rohe lokale
+Differenz nur 0,0044 mm ist. Eine verfügbare Strecke von 2,0045 mm reicht mit Reserve
+also nicht. Weder Kopf noch Differenz werden zum Bestehen der Prüfung gerundet.
+
+Die private Wireprüfung akzeptiert ausschließlich den bekannten aktuellen
+GRBL-XY-Encoder mit G21/G90/G54/G17/G94, laserfreier erster G0-Anfahrt und expliziten
+G0/G1-XY-Zielen. Andere Modi, Teilziele, G53, G91, Z, unbekannte Wörter oder
+überschrittene Zeilen-/Bewegungsbudgets werden abgelehnt. Bekannte Kommentare und
+das abschließende zielose `G0` sind keine Bewegungen. Ein neuer Encoder benötigt
+eine neue ausdrücklich geprüfte Anpassung, keinen permissiven GCode-Import.
+
+Das Ergebnis besitzt nur const-Lesezugriff: `prepared()` liefert ausschließlich
+bei Erfolg den unveränderten Streaming-Snapshot, sonst `nullptr`. Getrennt lesbar
+sind Roh-, tatsächlicher Wire- und vereinigter Richtungsbedarf, verfügbare/nutzbare
+Wege, Roh-/Wirebounds, erste Anfahrt und `firstNonzeroMotionLineIndex()` (nullbasiert
+in `prepared()->lines()`, −1 ohne Zieländerung). Dieser Index beschreibt allein
+eine Anforderung, keinen Nachweis erfolgter Bewegung oder einer Zeitgarantie.
+
+`sourceFingerprint()` und `profileFingerprint()` entsprechen dem vorbereiteten
+Controllerauftrag; `manualTravelSourceFingerprint()` bindet beide gemeinsam.
+`requestFingerprint()` bindet alle Restweg-/Kopfdaten samt Quelle.
+`localFrameFingerprint()` bezeichnet **nur die Messdatenidentität**, keine
+bestätigte Geräte-Frame-Autorität. Der Worker muss zusätzlich seine eigene frische
+Session-/Frame-Nonce, passende Koordinaten, Bedienabsicht und Absaugung binden.
+`matches(plan, request, cancel)` prüft denselben unveränderten Quellplan und Request
+außerhalb des Echtzeitpfads. Keine dieser Hashes erlaubt reale Bewegung oder setzt
+die globale Maschinenreferenz auf bekannt.
