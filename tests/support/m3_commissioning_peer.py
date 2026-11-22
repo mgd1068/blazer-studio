@@ -18,7 +18,7 @@ class Plant(Peer):
         self.absolute = True
         self.power = 0.0
         self.spindle = 5
-        self.settings = {3:5,5:0,13:0,20:0,21:1,22:1,23:7,24:800,25:2000,
+        self.settings = {1:25,3:5,5:0,13:0,20:0,21:1,22:1,23:7,24:800,25:2000,
                          26:30,27:2,30:1000,31:0,32:1,100:80,101:80,110:7000,
                          111:7000,120:800,121:240,130:200,131:150}
         self.startup = ['', '']
@@ -60,8 +60,9 @@ class Plant(Peer):
                 if k=='S':self.power=n
             if self.spindle in (3,4) and self.power>0:self.event('powered',self.power)
             if 10 in codes:
-                if line!='G10 L20 P1 X0 Y0':raise ValueError('unexpected G10')
-                self.offset=[a+b for a,b in zip(self.actual,self.bias)]
+                if not re.fullmatch(r'G10 L20 P1 X[+-]?[0-9.]+ Y[+-]?[0-9.]+',line):raise ValueError('unexpected G10')
+                requested={k:float(v) for k,v in words if k in ('X','Y')}
+                self.offset=[a+b-requested[k] for a,b,k in zip(self.actual,self.bias,('X','Y'))]
                 self.zero_seen=True
             elif any(k in ('X','Y') for k,v in words):
                 target=list(self.actual)
@@ -71,7 +72,9 @@ class Plant(Peer):
                     target[i]=float(v)*self.units+self.offset[i]-self.bias[i] if self.absolute else target[i]+float(v)*self.units
                 if not (-200<=target[0]<=0 and -150<=target[1]<=0):
                     self.event('collision',target);self.reply('ALARM:1\r\n');return
-                self.actual=target;self.event('physicalMove',target)
+                moved=target!=self.actual
+                self.actual=target
+                if moved:self.event('physicalMove',target)
             if self.state!='Alarm':self.state='Idle'
         if self.ack_enabled:
             if line=='$G' and self.zero_seen and self.hold_zero_modal_ack:
@@ -104,6 +107,14 @@ class Plant(Peer):
             self.pending_zero_modal_ack=False;self.reply('ok\r\n');self.event('ack');self.event('zeroAckReleased')
             return {'accepted':True}
         if request.get('action')=='plantConfig':
+            if 'manualPosition' in request:
+                target=request['manualPosition']
+                if len(target)!=2:raise ValueError('manual fixture XY')
+                reported=[a+b for a,b in zip(self.actual,self.bias)]
+                self.actual=list(target);self.bias=[r-a for r,a in zip(reported,self.actual)];self.event('handRelocated',self.actual)
+            if 'doorSubstate' in request:
+                sub=request['doorSubstate']
+                self.state='Idle' if sub is None else 'Door:'+str(int(sub))
             if 'holdZeroModalAck' in request:self.hold_zero_modal_ack=bool(request['holdZeroModalAck'])
             if 'alarmAfterReset' in request:self.alarm_after_reset=bool(request['alarmAfterReset'])
             if 'startup' in request:self.startup[0]=request['startup']
