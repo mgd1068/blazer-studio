@@ -565,6 +565,49 @@ class ManualStartUiTest : public QObject {
         QCOMPARE(h.item("manualStartReason")->property("text").toString(), reason);
         QCOMPARE(h.actor.outputs(), 0);
     }
+    void beginDenialRequiresNewerResultRevision_data() { workflow_data(); }
+    void beginDenialRequiresNewerResultRevision() {
+        QFETCH(bool, compact);
+        ManualStartHarness h;
+        QVERIFY2(h.create(compact), qPrintable(h.error));
+        h.captured();
+        h.actor.publish(
+            {{"phase", "ready"}, {"resultRevision", 10}, {"lastRequestAccepted", true}});
+        QVERIFY(h.press("beginManualPlacement"));
+        QCOMPARE(h.actor.count("beginManualPlacement"), 1);
+        QCOMPARE(h.dialog->property("beginRevision").toDouble(), 10.);
+        QVERIFY(h.dialog->property("beginPending").toBool());
+        QVERIFY(!h.item("beginManualPlacement")->isEnabled());
+        QVERIFY(!h.item("frameLocalJob")->isEnabled());
+        QVERIFY(!h.item("frameLocalJob")->property("nativeActionEnabled").toBool());
+        QVERIFY(h.press("beginManualPlacement", false));
+        QCOMPARE(h.actor.count("beginManualPlacement"), 1);
+        // A repeated snapshot is not the outcome of the newly submitted Begin.
+        h.actor.publish(
+            {{"phase", "ready"}, {"resultRevision", 10}, {"lastRequestAccepted", false}});
+        QVERIFY(h.dialog->property("beginPending").toBool());
+        QVERIFY(!h.item("beginManualPlacement")->isEnabled());
+        // An older source/result cannot release the local fence either.
+        h.actor.publish({{"phase", "ready"},
+                         {"resultRevision", 9},
+                         {"sourceFingerprint", "older-source"},
+                         {"lastRequestAccepted", false}});
+        QVERIFY(h.dialog->property("beginPending").toBool());
+        QVERIFY(!h.item("beginManualPlacement")->isEnabled());
+        QVERIFY(!h.item("frameLocalJob")->isEnabled());
+        QCOMPARE(h.actor.outputs(), 0);
+        // The worker can reject Begin without changing the existing Ready phase.
+        h.actor.publish({{"phase", "ready"},
+                         {"resultRevision", 11},
+                         {"sourceFingerprint", "source-A"},
+                         {"lastRequestAccepted", false},
+                         {"reason", "Begin abgelehnt; bisheriger lokaler Bezug bleibt bestehen."}});
+        QTRY_VERIFY(!h.dialog->property("beginPending").toBool());
+        QVERIFY(h.item("beginManualPlacement")->isEnabled());
+        QCOMPARE(h.dialog->property("phase").toString(), QString("ready"));
+        QCOMPARE(h.actor.count("beginManualPlacement"), 1);
+        QCOMPARE(h.actor.outputs(), 0);
+    }
     void closePreservesCapturedFrameButCancelsUncapturedSetup() {
         {
             ManualStartHarness h;
