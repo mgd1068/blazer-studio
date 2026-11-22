@@ -12,6 +12,10 @@
 #include <cmath>
 namespace {
 std::optional<ControllerNativeAction> nativeAction(const QString &name) {
+    if(name=="localCapture")return ControllerNativeAction::LocalCapture;
+    if(name=="localStart")return ControllerNativeAction::LocalStart;
+    if(name=="localFrame")return ControllerNativeAction::LocalFrame;
+    if(name=="localResume")return ControllerNativeAction::LocalResume;
     if(name=="setupZero")return ControllerNativeAction::SetupZero;
     if(name=="setupHome")return ControllerNativeAction::SetupHome;
     if(name=="setupProbe")return ControllerNativeAction::SetupProbe;
@@ -62,6 +66,9 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     connect(d, &Document::changed, this, &Machine::refreshPreviewPosition);
     connect(d, &Document::changed, this, [this] {
         ++nativeDocumentGeneration;
+        if(live && operatorLocalFrame().value("phase").toString()!="inactive" && !operatorLocalFrame().isEmpty()) {
+            const QPointer<Machine> alive(this);nativeInput->revoke();if(!alive)return;
+        }
         if (live && !document->planningBusy())
             if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get())) runtime->prepare(document->job());
     });
@@ -84,8 +91,14 @@ void Machine::refreshPreviewPosition() {
     if (updatingPreview) return;
     QScopedValueRollback<bool> guard(updatingPreview, true);
     if (live) {
-        document->clearPreviewPosition(); // Never reuse simulated coordinates for hardware.
-        return;
+        const auto local=operatorLocalFrame();
+        if(!local.value("localPositionKnown").toBool()) {document->clearPreviewPosition();return;}
+        if(busy()||firing())return;
+        const auto profile=document->deviceProfile().outputFingerprint();
+        const auto frame=QCryptographicHash::hash(QByteArray("operator-local-preview:")+local.value("frameId").toByteArray()+profile+previewDeviceBinding,QCryptographicHash::Sha256).toHex();
+        const QPointF point(local.value("planHeadX").toDouble(),local.value("planHeadY").toDouble());
+        if(!previewPositionRevision||previewFrame!=frame||previewPoint!=point){++previewPositionRevision;previewFrame=frame;previewPoint=point;}
+        document->setPreviewPosition({point,true,profile,frame,previewPositionRevision});return;
     }
     // Freeze the job's start snapshot during simulation or a focus indication.
     if (busy() || firing()) return;
@@ -219,6 +232,20 @@ void Machine::registerNativeActionControl(QObject *control,const QString &action
 QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &arguments,const ControllerStatus &status) const {
     const auto kind=nativeAction(action);if(!kind||!live||!session||!status.connected||!status.statusFresh||
         status.opening||status.closing||status.requestPending||status.referencing||status.resetting||status.coordinateUpdatePending)return {};
+    if(action.startsWith("local")) {
+        if(!arguments.isEmpty())return {};
+        const auto f=status.operatorLocalFrame;const auto phase=f.value("phase").toString();
+        if(action=="localCapture") {if(phase!="captureReady"||status.busy||status.firing||status.accessoryLeaseActive)return {};}
+        else if(action=="localResume") {if(phase!="paused"||!f.value("resumeReady").toBool())return {};}
+        else if(action=="localFrame") {if(!f.value("frameReady").toBool())return {};}
+        else if(action=="localStart") {if(!f.value("startReady").toBool())return {};}
+        else return {};
+        if((action=="localStart"||action=="localFrame") && (document->startMode()!=Document::CurrentPosition||document->manualRegistrationEnabled()||document->planningBusy()))return {};
+        QByteArray bytes;QDataStream stream(&bytes,QIODevice::WriteOnly);
+        stream<<action<<f.value("frameId").toString()<<f.value("approvalId").toString()<<nativeDocumentGeneration<<status.connectionEpoch<<status.coordinateEpoch<<previewDeviceBinding;
+        return QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);
+    }
+    if(!status.operatorLocalFrame.isEmpty() && status.operatorLocalFrame.value("phase").toString()!="inactive")return {};
     if(action.startsWith("setup")) {
         const auto setup=status.commissioning;const auto stage=setup.value("stage").toString();
         if(status.busy||status.firing||status.accessoryLeaseActive||status.accessoryJobActive||status.accessoryFocusActive)return {};
@@ -279,6 +306,39 @@ bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,
         input->contextToken,snapshot.connectionEpoch,snapshot.coordinateEpoch);
     if(!stamp.proof){document->notify("Geräteaktion gesperrt: Eingabe oder Referenzrahmen inzwischen verändert.");return false;}
     return runtime->submitNativeAction(*kind,stamp,x,y,bounds,std::move(prepared),feed,power);
+}
+void Machine::beginManualPlacement(){
+    if(auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&r){
+        const QPointer<Machine> alive(this);nativeInput->revoke();if(!alive)return;
+        const bool accepted=r->localData({{"op","begin"}});if(!alive)return;
+        if(!accepted)document->notify("Manuelle Vorbereitung abgelehnt: aktive oder ausstehende Geräteaktion zuerst beenden.");
+    }
+}
+void Machine::setManualTravel(double nx,double px,double ny,double py){if(auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&r)r->localData({{"op","travel"},{"negativeX",nx},{"positiveX",px},{"negativeY",ny},{"positiveY",py}});}
+void Machine::attestManualPlacement(bool motors,bool measured,bool stationary,bool closed){if(auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&r)r->localData({{"op","attest"},{"frameId",operatorLocalFrame().value("frameId")},{"motorsFree",motors},{"measuredClear",measured},{"headStationary",stationary},{"lidClosed",closed}});}
+void Machine::captureOperatorLocalFrame(){dispatchLocalNative("localCapture");}
+void Machine::prepareLocalJob(){
+    if(!live||!session)return;auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());if(!r)return;
+    if(document->startMode()!=Document::CurrentPosition||document->manualRegistrationEnabled()){const QPointer<Machine> alive(this);r->localData({{"op","invalidateCandidate"}});if(alive)document->notify("Lokaler manueller Start benötigt Aktuelle Position ohne Print-and-Cut-Registrierung.");return;}
+    if(!document->planningBusy())r->prepare(document->job());
+}
+void Machine::approveLocalTravel(const QString &id){if(auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&r)r->localData({{"op","approve"},{"approvalId",id}});}
+void Machine::startLocalJob(){dispatchLocalNative("localStart");}
+void Machine::frameLocalJob(){dispatchLocalNative("localFrame");}
+void Machine::resumeLocalJob(){dispatchLocalNative("localResume");}
+void Machine::cancelOperatorLocalFrame(){if(auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&r){const QPointer<Machine> alive(this);if(busy()||firing())r->stop();if(!alive)return;r->localData({{"op","cancel"}});}}
+bool Machine::dispatchLocalNative(const QString &action){
+    auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());const auto kind=nativeAction(action);if(!live||!r||!kind)return false;
+    const auto status=r->status();const auto binding=nativeBinding(action,{},status);const QPointer<Machine> alive(this);
+    const auto input=binding.isEmpty()?std::nullopt:nativeInput->consumeMatching(action,binding);if(!alive)return false;
+    if(!input){document->notify("Lokale Aktion gesperrt: aktuelle Vorbereitung und frischer nativer Druck mit Loslassen fehlen.");return false;}
+    PreparedLocalJob::Ptr p;if(action=="localStart"||action=="localFrame")p=r->m_preparation->localResult(r->m_prepareSequence);
+    if((action=="localStart"||action=="localFrame")&&(!p||!p->valid()))return false;
+    const QVariantMap bounds{{"frameId",status.operatorLocalFrame.value("frameId")},{"approvalId",status.operatorLocalFrame.value("approvalId")}};
+    auto source=p?p->fingerprint():QByteArray();if(p&&action=="localFrame")source+=p->frameFingerprint();
+    const auto digest=ControllerNativeDigest::request(*kind,0,0,bounds,source);
+    const auto proof=r->sealNativeAction(*kind,input->interaction,input->observedAtMs,input->expiresAtMs,digest,input->contextToken,status.connectionEpoch,status.coordinateEpoch);
+    if(!proof.proof)return false;return r->submitNativeAction(*kind,proof,0,0,bounds,{},100,100,std::move(p));
 }
 void Machine::selectAttendedExtraction(){
     if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)runtime->operatorData({{"op","select"}});

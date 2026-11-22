@@ -276,20 +276,24 @@ bool GrblSession::checkWorkZeroStatus(bool hasMachine, bool offsetReported) {
              ControllerDiagnostics::FaultCause::CoordinateMismatch);
         return false;
     };
+    const bool local=workZero->operatorLocal;
+    const auto expectedOffset=workZero->machine-workZero->targetWork;
     if (controllerState != "Idle" || !knownOutput || reportedOutput != 0 || activeInputs ||
-        !configurationValid() || !reportMm || !commissionedModalContract || !positionReferenced ||
+        !configurationValid() || !reportMm ||
+        (local?(!setupReadback.valid || !setupReadback.operatorLocal || positionReferenced):(!commissionedModalContract || !positionReferenced)) ||
         (overrideFeedback && powerOverride > 100) || !knownReportedMachinePosition ||
         !same(reportedMachinePosition, workZero->machine) || (!hasMachine && !offsetReported))
         return reject();
     if (offsetReported &&
         (!knownOffset || (!same(offset, workZero->previousOffset) &&
-                          !(workZero->g10Dispatched && same(offset, workZero->machine)))))
+                          !(workZero->g10Dispatched && same(offset, expectedOffset)))))
         return reject();
     if (workZero->phase != WorkZeroTransaction::Phase::Readback || !workZero->queryArmed)
         return true; // ACK-phase observations never complete a work-zero transaction.
-    if (!offsetReported || !knownPosition || !knownOffset || !same(position, {}) ||
-        !same(offset, workZero->machine) || !insideReportedMachineBed())
+    if (!offsetReported || !knownPosition || !knownOffset || !same(position, workZero->targetWork) ||
+        !same(offset, expectedOffset) || (!local && !insideReportedMachineBed()))
         return reject();
+    if(local)localCaptureResult=LocalCaptureResult{reportedMachinePosition,position,offset};
     clearWorkZero();
     waitingIdle = false;
     timeout.stop();
@@ -444,15 +448,17 @@ bool GrblSession::setupReadyForAttestation() const {
         knownOffset && knownOutput && reportedOutput==0 && !activeInputs &&
         (!overrideFeedback || powerOverride<=100);
 }
-bool GrblSession::beginSetupReadback() {
-    if(!setupReadyForAttestation()) return false;
+bool GrblSession::beginSetupReadback(bool operatorLocal) {
+    const bool localReadable=operatorLocal && connected() && !busy() && !firing && !paused && statusFresh() &&
+        knownOutput && reportedOutput==0 && (controllerState=="Idle" || controllerState=="Door");
+    if(!setupReadyForAttestation() && !localReadable) return false;
     const bool alarm=controllerState=="Alarm";
-    setupReadback = {}; setupReadback.pending=true;
+    setupReadback = {}; setupReadback.pending=true;setupReadback.operatorLocal=operatorLocal;
     commissionedEnvelope.reset();
     commissionedModalContract=commissionedHomingContract=commissionedOverrideContract=false;
     positionReferenced=false;
     poll.stop(); handshaking=true; connectionVerified=false;
-    queue=alarm?QStringList{"$I","$$","$G","$#","$N"}:QStringList{"M5 S0","G21 G90 G54","$I","$$","$G","$#","$N"};
+    queue=(alarm||operatorLocal)?QStringList{"$I","$$","$G","$#","$N"}:QStringList{"M5 S0","G21 G90 G54","$I","$$","$G","$#","$N"};
     queueHead=0;total=queue.size();acked=0;waitingAck=waitingIdle=false;
     state="Inbetriebnahme: Controllerdaten lesen";
     pump(); return true;
@@ -465,7 +471,7 @@ void GrblSession::captureSetupReadback(const QByteArray &s) {
         const auto parts=s.mid(1).split('=');bool keyOk=false,valueOk=false;
         const int key=parts.value(0).toInt(&keyOk);const double value=parts.value(1).toDouble(&valueOk);
         static const QSet<int> required{3,5,13,20,21,22,23,24,25,26,27,30,31,32,100,101,110,111,120,121,130,131};
-        if(keyOk && required.contains(key)) {
+        if(keyOk && (required.contains(key) || (r.operatorLocal && key==1))) {
             if(parts.size()!=2 || !valueOk || !std::isfinite(value) || r.settings.contains(key))malformed();
             else r.settings[key]=value;
         }
@@ -502,18 +508,20 @@ void GrblSession::captureSetupReadback(const QByteArray &s) {
 void GrblSession::finishSetupReadback() {
     auto &r=setupReadback;r.pending=false;r.complete=true;
     r.valid=r.error.isEmpty() && r.version && r.modal && r.g54Known && r.g92Known && r.tloKnown &&
-        r.g92==QPointF() && r.tlo==0 && r.startup.size()==2 && r.settings.size()==22 && configurationValid();
+        r.g92==QPointF() && r.tlo==0 && r.startup.size()==2 && r.settings.size()==(r.operatorLocal?23:22) && configurationValid();
     if(r.valid) {
         for(const int key:{3,23})r.valid=r.valid && r.settings[key]>=0 && r.settings[key]<=7 && std::trunc(r.settings[key])==r.settings[key];
         for(const int key:{5,13,20,21,22,32})r.valid=r.valid && (r.settings[key]==0 || r.settings[key]==1);
         for(const int key:{24,25,27,100,101,110,111,120,121,130,131})r.valid=r.valid && r.settings[key]>0;
         r.valid=r.valid && r.settings[26]>=0;
+        if(r.operatorLocal)r.valid=r.valid && r.settings[1]>=0 && r.settings[1]<=255 && std::trunc(r.settings[1])==r.settings[1];
     }
     if(!r.valid) {r.error="Vollständige Controllerdaten erforderlich: Einstellungen, G54/G92/TLO, G21/G90/M5/S0 und zwei leere Startupblöcke.";return;}
     QByteArray data;QDataStream stream(&data,QIODevice::WriteOnly);stream<<r.settings<<r.firmware<<m_deviceProfile.outputFingerprint();
     r.fingerprint=QCryptographicHash::hash(data,QCryptographicHash::Sha256);
 }
 void GrblSession::handshake() {
+    operatorLocalPermit.reset();localCaptureResult.reset();localExecutionActive=false;localExecutionKind=LocalExecutionKind::None;
     setupReadback = {};
     clearAckDeadline();
     clearWorkZero();
@@ -549,6 +557,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    operatorLocalPermit.reset();localCaptureResult.reset();localExecutionActive=false;localExecutionKind=LocalExecutionKind::None;
     setupReadback = {};
     clearAckDeadline();
     clearWorkZero();
@@ -588,6 +597,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause cause) {
+    operatorLocalPermit.reset();localCaptureResult.reset();localExecutionActive=false;localExecutionKind=LocalExecutionKind::None;
     clearAckDeadline();
     clearWorkZero();
     knownReportedMachinePosition = false;
@@ -693,6 +703,7 @@ void GrblSession::line(const QByteArray &s) {
         return;
     }
     if (s.startsWith("Grbl ")) {
+        ++startupSequence;
         diagnostic.startupObserved();
         version = s.startsWith("Grbl 1.1") || s.startsWith("Grbl 1.3a");
         if (!version) {
@@ -848,6 +859,9 @@ void GrblSession::line(const QByteArray &s) {
     if (s.startsWith('<') && s.endsWith('>')) {
         auto fields = s.mid(1, s.size() - 2).split('|');
         controllerState = QString::fromLatin1(fields.first()).section(':', 0, 0);
+        doorSubstate=-1;
+        if(controllerState=="Door") {bool ok;const int sub=fields.first().mid(5).toInt(&ok);if(ok&&sub>=0&&sub<=3)doorSubstate=sub;}
+
         const auto previousOffset = offset;
         const bool hadOffset = knownOffset;
         QPointF machine, work;
@@ -964,8 +978,15 @@ void GrblSession::line(const QByteArray &s) {
             overrideReadbackPending = false;
         if (workZero && !checkWorkZeroStatus(hasMachine, offsetField))
             return;
+        if(operatorLocalPermit && !localMotionSafetyError().isEmpty() && !workZero && !handshaking && !awaitingReset) {
+            fail("Lokaler Startpunkt/Fahrraum verloren: "+localMotionSafetyError(),ControllerDiagnostics::FaultCause::CoordinateMismatch);return;
+        }
         if (rejectUnsafeReportedMachinePosition())
             return;
+        if(controllerState=="Door" && setupReadback.pending && setupReadback.operatorLocal) {
+            commissionedOverrideContract=commissionedModalContract=commissionedHomingContract=false;
+            positionReferenced=false;connectionVerified=false;state="Haube: lokale Datenprüfung";emit changed();return;
+        }
         if (controllerState == "Alarm" || controllerState == "Door") {
             commissionedOverrideContract = commissionedModalContract = commissionedHomingContract =
                 false;
@@ -1159,7 +1180,7 @@ void GrblSession::pump() {
         if (buffering && rxBytes + bytes.size() > 100)
             break;
         if (workZero) {
-            if (queue[index] == "G10 L20 P1 X0 Y0")
+            if (queue[index].startsWith("G10 L20 P1 "))
                 workZero->g10Dispatched = true;
             if (queue[index] == "$G")
                 workZero->modalRequested = true;
@@ -1208,6 +1229,48 @@ bool GrblSession::commands(const QStringList &lines, bool buffered) {
     pump();
     emit changed();
     return connected() && busy();
+}
+QString GrblSession::localMotionSafetyError() const {
+    if(!operatorLocalPermit || positionReferenced)return "Eigenständiger lokaler Rahmen fehlt.";
+    const auto &p=*operatorLocalPermit;
+    if(!setupReadback.valid || !setupReadback.operatorLocal || setupReadback.fingerprint!=p.settingsFingerprint ||
+       setupReadback.settings.value(20)!=0)return "Lokale Controller-/Softlimitdaten verändert.";
+    if(!statusFresh()||!knownReportedMachinePosition||!knownOffset||!configurationValid()||!reportMm||activeInputs)return "Lokale Positions-/Controllerdaten fehlen oder sind veraltet.";
+    if(offset!=p.wco)return "Lokaler G54-Offset verändert.";
+    const auto delta=reportedMachinePosition-p.counterAtCapture;
+    const auto r=p.usableDisplacement;
+    if(!std::isfinite(delta.x())||!std::isfinite(delta.y())||delta.x()<r.left()||delta.x()>r.right()||delta.y()<r.top()||delta.y()>r.bottom())return "Gemeldete lokale Lage außerhalb der gemessenen Restwege.";
+    if(localExecutionActive&&localExecutionKind==LocalExecutionKind::FrozenS0Frame&&knownOutput&&reportedOutput!=0)return "Unerwartete gemeldete Leistung in eingefrorenem S0-Rahmenprogramm.";
+    if(!QStringList{"Idle","Run","Hold"}.contains(controllerState))return "Haube/Controllerzustand sperrt lokale Ausgabe.";
+    return {};
+}
+bool GrblSession::localTargetAllowed(QPointF work) const {
+    if(!operatorLocalPermit || !std::isfinite(work.x())||!std::isfinite(work.y()))return false;
+    const auto &p=*operatorLocalPermit;const auto r=p.usableDisplacement;
+    const QPointF actual(GrblWireNumbers::coordinate(work.x())+offset.x()-p.counterAtCapture.x(),
+                         GrblWireNumbers::coordinate(work.y())+offset.y()-p.counterAtCapture.y());
+    return std::isfinite(actual.x())&&std::isfinite(actual.y())&&actual.x()>=r.left()&&actual.x()<=r.right()&&actual.y()>=r.top()&&actual.y()<=r.bottom();
+}
+bool GrblSession::beginLocalCoordinateCapture(QPointF head) {
+    if(!ready()||!verified()||!setupReadback.valid||!setupReadback.operatorLocal||setupReadback.settings.value(20)!=0 ||
+       !knownReportedMachinePosition||positionReferenced||overrideReadbackPending||serial.bytesToWrite()!=0 ||
+       !std::isfinite(head.x())||!std::isfinite(head.y()))return false;
+    head={GrblWireNumbers::coordinate(head.x()),GrblWireNumbers::coordinate(head.y())};
+    localCaptureResult.reset();operatorLocalPermit.reset();localExecutionActive=false;
+    workZero=WorkZeroTransaction{reportedMachinePosition,offset};workZero->operatorLocal=true;workZero->targetWork=head;
+    diagnostic.beginStream(false,diagnosticState());inFlight.clear();sent=rxBytes=0;buffering=false;queueHead=0;
+    queue={"M5 S0","G21","G90",QString("G10 L20 P1 X%1 Y%2").arg(GrblWireNumbers::format(head.x()),GrblWireNumbers::format(head.y())),"G54","$G"};
+    total=queue.size();acked=0;progress=0;state="Lokalen Kopfpunkt bestätigen";workZeroDeadline.start();pump();emit changed();return connected()&&workZero.has_value();
+}
+bool GrblSession::startLocalPrepared(const PreparedControllerJob &job) {
+    if(!ready()||!verified()||!localMotionSafetyError().isEmpty()||!job.valid() ||
+       job.profileFingerprint()!=m_deviceProfile.outputFingerprint()||job.driverId()!=m_deviceProfile.driverId()||job.transport()!=m_deviceProfile.transport()||job.mediaType()!="text/x-gcode")return false;
+    for(const auto p:{job.workBounds().topLeft(),job.workBounds().topRight(),job.workBounds().bottomLeft(),job.workBounds().bottomRight(),job.firstApproach()})if(!localTargetAllowed(p))return false;
+    localExecutionKind=LocalExecutionKind::Job;localExecutionActive=true;return commands(job.lines(),true);
+}
+bool GrblSession::frameLocalPrepared(const QStringList &lines) {
+    if(!ready()||!verified()||!localMotionSafetyError().isEmpty()||lines.isEmpty())return false;
+    localExecutionKind=LocalExecutionKind::FrozenS0Frame;localExecutionActive=true;return commands(lines,true);
 }
 bool GrblSession::startPrepared(const PreparedControllerJob &job) {
     diagnostic.request(ControllerDiagnostics::Action::Start);
@@ -1293,10 +1356,10 @@ void GrblSession::pause() {
     if (paused) {
         if ((dispatchCancelled && dispatchCancelled()) || (dispatchPreflight && dispatchPreflight()))
             return;
-        const auto error = motionSafetyError();
+        const auto error = localExecutionActive?localMotionSafetyError():motionSafetyError();
         const bool verifiedState = verified();
-        const bool inside = insideMachineBed(position);
-        if (!error.isEmpty() || !verifiedState || !positionReferenced || !inside) {
+        const bool inside = localExecutionActive?localTargetAllowed(position):insideMachineBed(position);
+        if (!error.isEmpty() || !verifiedState || (!localExecutionActive&&!positionReferenced) || !inside) {
             diagnostic.deny(ControllerDiagnostics::Action::Dispatch,
                             !error.isEmpty() ? diagnosticMotionDenial()
                             : !inside        ? ControllerDiagnostics::Denial::PhysicalBounds
@@ -1326,6 +1389,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    operatorLocalPermit.reset();localCaptureResult.reset();localExecutionActive=false;localExecutionKind=LocalExecutionKind::None;
     setupReadback = {};
     clearAckDeadline();
     clearWorkZero();

@@ -99,6 +99,24 @@ class GrblSession : public ControllerSession {
     void pauseAckDeadline();
     void resumeAckDeadline();
     int queueHead = 0;
+    struct OperatorLocalPermit {
+        QByteArray frameId, settingsFingerprint;
+        QPointF counterAtCapture, capturedHead, wco;
+        QRectF usableDisplacement;
+    };
+    std::optional<OperatorLocalPermit> operatorLocalPermit;
+    struct LocalCaptureResult { QPointF counter, head, wco; };
+    std::optional<LocalCaptureResult> localCaptureResult;
+    enum class LocalExecutionKind {None,Job,FrozenS0Frame};
+    LocalExecutionKind localExecutionKind=LocalExecutionKind::None;
+    bool localExecutionActive=false;
+    quint64 startupSequence=0;
+    int doorSubstate=-1;
+    QString localMotionSafetyError() const;
+    bool localTargetAllowed(QPointF work) const;
+    bool beginLocalCoordinateCapture(QPointF workHead);
+    bool startLocalPrepared(const PreparedControllerJob &job);
+    bool frameLocalPrepared(const QStringList &lines);
     bool startPrepared(const PreparedControllerJob &job);
     bool commands(const QStringList &lines, bool buffered = false);
     bool statusFresh() const;
@@ -115,7 +133,7 @@ class GrblSession : public ControllerSession {
     struct SetupReadback {
         QMap<int,double> settings;
         QSet<int> startup;
-        bool pending=false, complete=false, valid=false, version=false, modal=false;
+        bool pending=false, complete=false, valid=false, version=false, modal=false, operatorLocal=false;
         bool g54Known=false, g92Known=false, tloKnown=false;
         QPointF g54, g92;
         double tlo=0;
@@ -123,7 +141,7 @@ class GrblSession : public ControllerSession {
         QString error;
     } setupReadback;
     bool setupReadyForAttestation() const;
-    bool beginSetupReadback();
+    bool beginSetupReadback(bool operatorLocal=false);
     void captureSetupReadback(const QByteArray &line);
     void finishSetupReadback();
     std::optional<QRectF> commissionedEnvelope;
@@ -144,6 +162,9 @@ class GrblSession : public ControllerSession {
         enum class Phase { Acknowledgements, Readback } phase = Phase::Acknowledgements;
         bool g10Dispatched = false, modalRequested = false, modalReadback = false;
         bool queryArmed = false;
+        bool operatorLocal = false;
+        QPointF targetWork;
+
     };
     std::optional<WorkZeroTransaction> workZero;
     quint64 workZeroEpoch = 0;

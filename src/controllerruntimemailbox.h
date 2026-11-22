@@ -17,6 +17,7 @@ enum class ControllerRuntimeRequestKind {
     Focus,
     FocusOff,
     Start,
+    LocalData, LocalCapture, LocalStart, LocalFrame, LocalResume,
     SetupData,
     OperatorData,
     SetupHome,
@@ -38,9 +39,11 @@ struct ControllerRuntimeRequest {
     QVariantMap bounds;
     ControllerRuntimeInputStamp input;
     PreparedControllerJob::Ptr prepared;
+    PreparedLocalJob::Ptr localPrepared;
 };
 void retireControllerRequests(std::deque<ControllerRuntimeRequest> requests);
 void retireControllerJob(PreparedControllerJob::Ptr job);
+void retireLocalJob(PreparedLocalJob::Ptr job);
 struct ControllerRuntimeMailbox {
     QMutex mutex;
     QObject *context = nullptr;
@@ -88,8 +91,10 @@ struct ControllerRuntimeMailbox {
                 accepted = true;
             }
         }
-        if (!accepted)
+        if (!accepted) {
             retireControllerJob(std::move(request.prepared));
+            retireLocalJob(std::move(request.localPrepared));
+        }
         return accepted;
     }
     void revoke(bool closing, bool final = false) {

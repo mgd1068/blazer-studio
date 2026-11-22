@@ -10,7 +10,9 @@ struct OperatorLocalFrameState {
     QByteArray frameId, approvalId, approvedArtifact;
     ManualTravelCheck::Distances available;
     QPointF confirmedHead, counterAtCapture, offsetAtCapture;
-    quint64 connectionEpoch=0, frameEpoch=0;
+    quint64 connectionEpoch=0, frameEpoch=0, startupSequence=0, resultRevision=0;
+    QByteArray settingsFingerprint;
+    bool lastRequestAccepted=true;
     bool hasTravel=false, attested=false, captureReset=false, readingAfterReset=false;
     qint64 deadline=-1;
     static constexpr double safetyMarginMm=2.;

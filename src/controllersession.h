@@ -40,6 +40,8 @@ struct ControllerStatus {
     quint64 coordinateEpoch = 0; // Reference/WCO/reset identity; never motion authority.
     QVariantMap commissioning{};
     QVariantMap extractionSupervision{};
+    QVariantMap operatorLocalFrame{};
+    int doorSubstate = -1;
     bool holdConfirmed = false; // Fresh controller Hold report, not physical standstill proof.
 };
 class ControllerSession : public QObject {

@@ -29,10 +29,17 @@ class ControllerJobPreparationRunner final : public QThread {
                 work = m_state->work;
             }
             PreparedControllerJob::Ptr result, obsolete;
+            PreparedLocalJob::Ptr localResult,obsoleteLocal;
             QString error;
             try {
-                result = work(request->plan, request->cancel);
-                if (!result || !result->valid())
+                if(request->local) {
+                    auto input=*request->local;
+                    if(input.expectedSourceFingerprint.isEmpty())input.expectedSourceFingerprint=ManualTravelCheck::sourceFingerprint(request->plan,request->cancel);
+                    localResult=PreparedLocalJob::prepare(request->plan,input,request->cancel);
+                    result=localResult?localResult->prepared():PreparedControllerJob::Ptr{};
+                    if(localResult && !localResult->valid())error=localResult->errors().join("; ");
+                } else result = work(request->plan, request->cancel);
+                if ((!result || !result->valid()) && error.isEmpty())
                     error = result ? result->errors().join("; ") : QString("Controllerausgabe konnte nicht vorbereitet werden.");
             } catch (...) {
                 error = "Controllerausgabe konnte nicht vorbereitet werden.";
@@ -44,6 +51,8 @@ class ControllerJobPreparationRunner final : public QThread {
                 if (!m_state->closed && request->epoch == m_state->epoch &&
                     !isCancelled(request->cancel)) {
                     obsolete.swap(m_state->completed);
+                    obsoleteLocal.swap(m_state->completedLocal);
+                    m_state->completedLocal=std::move(localResult);
                     m_state->completed = std::move(result);
                     m_state->completedEpoch = request->epoch;
                     m_state->error = std::move(error);
@@ -73,12 +82,15 @@ ControllerJobPreparation::~ControllerJobPreparation() {
     close();
 }
 
-bool ControllerJobPreparation::prepare(const JobPlan &plan, quint64 generation) {
+bool ControllerJobPreparation::prepare(const JobPlan &plan,quint64 generation){return prepareImpl(plan,generation,{});}
+bool ControllerJobPreparation::prepareLocal(const JobPlan &plan,const ManualTravelCheck::Request &request,quint64 generation){return prepareImpl(plan,generation,request);}
+bool ControllerJobPreparation::prepareImpl(const JobPlan &plan, quint64 generation,std::optional<ManualTravelCheck::Request> local) {
     if (thread() != QThread::currentThread() || !generation) return false;
     auto snapshot = plan;
     snapshot.previews.clear(); // Encoding does not need raster preview ownership.
     std::optional<ControllerJobPreparationRequest> superseded;
     PreparedControllerJob::Ptr obsolete;
+    PreparedLocalJob::Ptr obsoleteLocal;
     bool startExecutor = false;
     {
         QMutexLocker lock(&m_state->mutex);
@@ -87,11 +99,12 @@ bool ControllerJobPreparation::prepare(const JobPlan &plan, quint64 generation) 
         if (m_state->latest) m_state->latest->cancel->store(true);
         superseded.swap(m_state->latest);
         obsolete.swap(m_state->completed);
+        obsoleteLocal.swap(m_state->completedLocal);
         m_state->completedEpoch = 0;
         m_state->error.clear(); m_state->cancelled = false;
         m_state->newestGeneration = generation;
         m_state->latest.emplace(ControllerJobPreparationRequest{
-            generation, ++m_state->epoch, std::move(snapshot), std::make_shared<std::atomic_bool>(false)});
+            generation, ++m_state->epoch, std::move(snapshot), std::make_shared<std::atomic_bool>(false),std::move(local)});
         startExecutor = !m_state->executorStarted;
         m_state->executorStarted = true;
         m_state->wake.wakeOne();
@@ -110,6 +123,7 @@ void ControllerJobPreparation::cancel() {
     if (thread() != QThread::currentThread()) return;
     std::optional<ControllerJobPreparationRequest> superseded;
     PreparedControllerJob::Ptr obsolete;
+    PreparedLocalJob::Ptr obsoleteLocal;
     {
         QMutexLocker lock(&m_state->mutex);
         if (m_state->closed) return;
@@ -119,6 +133,7 @@ void ControllerJobPreparation::cancel() {
         if (m_state->latest) m_state->latest->cancel->store(true);
         superseded.swap(m_state->latest);
         obsolete.swap(m_state->completed);
+        obsoleteLocal.swap(m_state->completedLocal);
         m_state->completedEpoch = 0;
         m_state->error.clear();
     }
@@ -127,6 +142,7 @@ void ControllerJobPreparation::cancel() {
 void ControllerJobPreparation::close() {
     std::optional<ControllerJobPreparationRequest> superseded;
     PreparedControllerJob::Ptr obsolete;
+    PreparedLocalJob::Ptr obsoleteLocal;
     {
         QMutexLocker lock(&m_state->mutex);
         if (m_state->closed) return;
@@ -136,6 +152,7 @@ void ControllerJobPreparation::close() {
         if (m_state->latest) m_state->latest->cancel->store(true);
         superseded.swap(m_state->latest);
         obsolete.swap(m_state->completed);
+        obsoleteLocal.swap(m_state->completedLocal);
         m_state->completedEpoch = 0;
         m_state->wake.wakeOne();
     }
@@ -165,6 +182,11 @@ PreparedControllerJob::Ptr ControllerJobPreparation::result(quint64 expected) co
         m_state->completedEpoch != m_state->epoch || m_state->latest ||
         (m_state->active && m_state->activeEpoch == m_state->epoch)) return {};
     return m_state->completed;
+}
+PreparedLocalJob::Ptr ControllerJobPreparation::localResult(quint64 expected) const {
+    QMutexLocker lock(&m_state->mutex);
+    if(m_state->closed||m_state->cancelled||expected!=m_state->newestGeneration||m_state->completedEpoch!=m_state->epoch||m_state->latest||(m_state->active&&m_state->activeEpoch==m_state->epoch))return {};
+    return m_state->completedLocal;
 }
 void ControllerJobPreparation::deliver() {
     {

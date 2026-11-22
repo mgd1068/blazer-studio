@@ -11,6 +11,7 @@ struct ControllerJobPreparationRequest {
     quint64 generation = 0, epoch = 0;
     JobPlan plan;
     Cancellation cancel;
+    std::optional<ManualTravelCheck::Request> local{};
 };
 struct ControllerJobPreparationState {
     QMutex mutex;
@@ -21,6 +22,7 @@ struct ControllerJobPreparationState {
     quint64 newestGeneration = 0, epoch = 0, activeEpoch = 0, completedEpoch = 0;
     quint64 deliveredEpoch = 0;
     PreparedControllerJob::Ptr completed;
+    PreparedLocalJob::Ptr completedLocal;
     QString error;
     bool closed = false, active = false, executorStarted = false, executorStopped = false;
     bool notificationPending = false, cancelled = false;

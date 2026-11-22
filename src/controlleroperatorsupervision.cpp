@@ -8,6 +8,11 @@ QByteArray contextHash(const QByteArray &source,quint64 epoch,quint64 attempt,co
     return QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex();
 }
 }
+QByteArray ControllerRuntimeWorker::supervisionBinding() const {
+    if(m_core->operatorLocalPermit && m_core->operatorLocalPermit->frameId==m_local.frameId)
+        return contextHash(m_local.frameId+m_local.settingsFingerprint,m_connectionEpoch,0,m_profile.outputFingerprint());
+    return contextHash(m_commissioning.fingerprint,m_connectionEpoch,0,m_profile.outputFingerprint());
+}
 void ControllerRuntimeWorker::discardOperatorWitness(){
     m_operatorWitness.reset();m_operatorAction.clear();m_operatorSource.clear();m_operatorWitnessCoordinate=0;
     m_accessory.discardOperatorWitness();
@@ -36,20 +41,21 @@ void ControllerRuntimeWorker::operatorData(const QVariantMap &data) {
         } else m_operatorReason="Sichere Freigabe erst im freien Idle/S0 ohne aktive Ausgabe möglich.";
         return;
     }
-    if(m_commissioning.stage!="complete" || !m_core->verified() || !m_core->positionReferenced || !m_core->motionSafetyError().isEmpty()) {
+    const bool local=m_core->operatorLocalPermit && m_core->operatorLocalPermit->frameId==m_local.frameId && m_core->localMotionSafetyError().isEmpty();
+    if(!m_core->verified() || (!local && (m_commissioning.stage!="complete" || !m_core->positionReferenced || !m_core->motionSafetyError().isEmpty()))) {
         m_operatorReason="Zuerst diese Gerätesitzung vollständig einrichten und referenzieren.";return;
     }
     refreshCoordinateEpoch();
     if(op=="select") {
         if(!m_core->ready() || m_accessory.activeLease() || m_jobActive || m_focusActive)return;
-        const auto binding=contextHash(m_commissioning.fingerprint,m_connectionEpoch,0,m_profile.outputFingerprint());
+        const auto binding=supervisionBinding();
         if(m_accessory.selectOperatorAttendedExternal(binding)) {
             m_operatorSession=binding;discardOperatorWitness();m_operatorReason=m_accessory.supervisionNotice();
         } else m_operatorReason="Moduswechsel benötigt freien sicheren Zustand und gegebenenfalls ausdrücklich bestätigte Clearance.";
         return;
     }
     if(op!="attest" || m_accessory.supervisionMode()!=AccessoryContract::SupervisionMode::OperatorAttendedExternal)return;
-    if(m_operatorSession!=contextHash(m_commissioning.fingerprint,m_connectionEpoch,0,m_profile.outputFingerprint())) {
+    if(m_operatorSession!=supervisionBinding()) {
         discardOperatorWitness();m_operatorReason="Absaugungsmodus gehört zu einer anderen Geräte-/Settingssitzung; ausdrücklich neu auswählen.";return;
     }
     discardOperatorWitness();
@@ -82,7 +88,7 @@ bool ControllerRuntimeWorker::beginAccessory(AccessoryContract::OperatorAction a
     if(m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::SensorVerified)
         return action==AccessoryContract::OperatorAction::Resume?m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty():m_accessory.begin(m_accessoryClock.elapsed());
     refreshCoordinateEpoch();
-    if(m_operatorSession!=contextHash(m_commissioning.fingerprint,m_connectionEpoch,0,m_profile.outputFingerprint())) {
+    if(m_operatorSession!=supervisionBinding()) {
         discardOperatorWitness();return false;
     }
     auto source=requestedSource;

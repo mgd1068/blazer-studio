@@ -29,6 +29,7 @@ class Machine : public Simulator {
     Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
     Q_PROPERTY(QString prepareReason READ prepareReason NOTIFY changed)
     Q_PROPERTY(QString nativeInputSafetyError READ nativeInputSafetyError NOTIFY changed)
+    Q_PROPERTY(QVariantMap operatorLocalFrame READ operatorLocalFrame NOTIFY changed)
     Q_PROPERTY(QVariantMap extractionSupervision READ extractionSupervision NOTIFY changed)
     Q_PROPERTY(QVariantMap commissioning READ commissioning NOTIFY changed)
     Q_PROPERTY(bool holdConfirmed READ holdConfirmed NOTIFY changed)
@@ -94,6 +95,17 @@ class Machine : public Simulator {
     // Registration/eligibility only. Intents come exclusively from native events.
     Q_INVOKABLE void registerNativeActionControl(QObject *control,const QString &action,
                                                 const QVariantMap &fixedArguments = {});
+    QVariantMap operatorLocalFrame() const {return live&&session?session->status().operatorLocalFrame:QVariantMap{};}
+    Q_INVOKABLE void beginManualPlacement();
+    Q_INVOKABLE void setManualTravel(double negativeX,double positiveX,double negativeY,double positiveY);
+    Q_INVOKABLE void attestManualPlacement(bool motorsFree,bool axesTravelMeasuredAndClear,bool headStationary,bool lidClosed);
+    Q_INVOKABLE void captureOperatorLocalFrame();
+    Q_INVOKABLE void prepareLocalJob();
+    Q_INVOKABLE void approveLocalTravel(const QString &approvalId);
+    Q_INVOKABLE void startLocalJob();
+    Q_INVOKABLE void frameLocalJob();
+    Q_INVOKABLE void resumeLocalJob();
+    Q_INVOKABLE void cancelOperatorLocalFrame();
     QVariantMap extractionSupervision() const { return live && session ? session->status().extractionSupervision : QVariantMap{}; }
     Q_INVOKABLE void selectAttendedExtraction();
     Q_INVOKABLE void attestExternalExtraction(const QString &action,bool extractionOn,bool operatorPresent);
@@ -173,6 +185,7 @@ class Machine : public Simulator {
     quint64 nativeDocumentGeneration = 1;
     QVariantMap nativeArguments(QObject *control,const QVariantMap &fixed) const;
     QByteArray nativeBinding(const QString &action,const QVariantMap &arguments,const ControllerStatus &status) const;
+    bool dispatchLocalNative(const QString &action);
     bool dispatchNative(const QString &action,const QVariantMap &arguments,double x=0,double y=0,
         const QVariantMap &bounds={},std::shared_ptr<const PreparedControllerJob> prepared={},int feed=100,int power=100);
     QStringList lastProcessingSafetyErrors;

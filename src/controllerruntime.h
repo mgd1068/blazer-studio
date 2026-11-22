@@ -77,6 +77,7 @@ class ControllerRuntimeSession final : public ControllerSession {
     void endFocus();
     bool commissioningData(const QVariantMap &data);
     bool operatorData(const QVariantMap &data);
+    bool localData(const QVariantMap &data);
 
   private:
     friend class ControllerRuntimeTestAccess;
@@ -96,6 +97,9 @@ class ControllerRuntimeSession final : public ControllerSession {
     QByteArray m_candidateProfile;
     quint64 m_prepareSequence = 0;
     ControllerJobPreparation *m_preparation = nullptr;
+    QByteArray m_candidateLocalFrame;
+    QString m_localAdmissionError;
+    quint64 m_localAdmissionRevision=0;
     QTimer *m_uiAgeTicker = nullptr; // Read-only projection, never a safety deadline.
     ControllerRuntimeInputStamp sealNativePress(quint64 interaction, quint64 window,
                                                 qint64 observedAt);
@@ -105,6 +109,6 @@ class ControllerRuntimeSession final : public ControllerSession {
         std::shared_ptr<const NativeInputContextToken> context,quint64 connection,quint64 coordinate);
     bool submitNativeAction(ControllerNativeAction action,const ControllerRuntimeInputStamp &input,
         double x=0,double y=0,const QVariantMap &bounds={},PreparedControllerJob::Ptr prepared={},
-        int feed=100,int power=100);
+        int feed=100,int power=100,PreparedLocalJob::Ptr local={});
     void consumeLatest();
 };

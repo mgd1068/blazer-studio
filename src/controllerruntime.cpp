@@ -40,6 +40,9 @@ void retireControllerJob(PreparedControllerJob::Ptr job) {
     if (job)
         retirementPool().start([job = std::move(job)] {});
 }
+void retireLocalJob(PreparedLocalJob::Ptr job) {
+    if(job)retirementPool().start([job=std::move(job)]{});
+}
 void retireControllerRequests(std::deque<ControllerRuntimeRequest> requests) {
     if (!requests.empty())
         retirementPool().start([requests = std::move(requests)] {});
@@ -55,6 +58,14 @@ ControllerRuntimeSession::ControllerRuntimeSession(DeviceProfile profile, QObjec
       m_mailbox(std::make_shared<ControllerRuntimeMailbox>()) {
     m_preparation = new ControllerJobPreparation(this);
     connect(m_preparation, &ControllerJobPreparation::changed, this, [this] { emit changed(); });
+    connect(m_preparation,&ControllerJobPreparation::finished,this,[this](quint64 generation){
+        if(generation!=m_prepareSequence || m_candidateLocalFrame.isEmpty())return;
+        const auto local=m_preparation->localResult(generation);
+        Request request{Kind::LocalData};request.bounds={{"op","candidate"},{"frameId",QString::fromLatin1(m_candidateLocalFrame)}};
+        request.localPrepared=local;request.id=++m_nextRequest;
+        if(!local || !local->valid())request.bounds["error"]=m_preparation->reason();
+        request.issuedAt=nowMs();request.expiresAt=request.issuedAt+250;m_mailbox->enqueue(std::move(request));
+    });
     m_uiAgeTicker = new QTimer(this);
     m_uiAgeTicker->setInterval(100);
     connect(m_uiAgeTicker, &QTimer::timeout, this, [this] { emit changed(); });
@@ -130,6 +141,15 @@ ControllerStatus ControllerRuntimeSession::status() const {
         result.holdConfirmed=false;
         if (result.motionSafetyError.isEmpty())
             result.motionSafetyError = "Aktueller Runtime-/Controllerstatus fehlt.";
+    }
+    if(!result.statusFresh && !result.operatorLocalFrame.isEmpty()) {
+        for(const auto key:{"startReady","frameReady","resumeReady","localPositionKnown"})result.operatorLocalFrame[key]=false;
+    }
+    if(!m_localAdmissionError.isEmpty()) {
+        result.operatorLocalFrame["reason"]=m_localAdmissionError;
+        result.operatorLocalFrame["resultRevision"]=QVariant::fromValue(m_localAdmissionRevision);
+        result.operatorLocalFrame["lastRequestAccepted"]=false;
+        if(result.operatorLocalFrame.value("phase").toString()=="inactive")result.operatorLocalFrame["phase"]="invalid";
     }
     result.closing |= m_closing || m_mailbox->close.load();
     result.opening |= m_pendingOpen != 0;
@@ -303,7 +323,7 @@ ControllerRuntimeInputStamp ControllerRuntimeSession::sealNativeAction(Controlle
     return stamp;
 }
 bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,const ControllerRuntimeInputStamp &input,
-        double x,double y,const QVariantMap &bounds,PreparedControllerJob::Ptr prepared,int feed,int power) {
+        double x,double y,const QVariantMap &bounds,PreparedControllerJob::Ptr prepared,int feed,int power,PreparedLocalJob::Ptr local) {
     Kind kind=Kind::Start;
     switch(action){
     case ControllerNativeAction::FocusHold:kind=Kind::Focus;break;
@@ -314,14 +334,32 @@ bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,
     case ControllerNativeAction::WorkZero:kind=Kind::Zero;break;
     case ControllerNativeAction::Resume:kind=Kind::Resume;break;
     case ControllerNativeAction::Override:kind=Kind::Override;break;
+    case ControllerNativeAction::LocalCapture:kind=Kind::LocalCapture;break;
+    case ControllerNativeAction::LocalStart:kind=Kind::LocalStart;break;
+    case ControllerNativeAction::LocalFrame:kind=Kind::LocalFrame;break;
+    case ControllerNativeAction::LocalResume:kind=Kind::LocalResume;break;
     case ControllerNativeAction::SetupHome:kind=Kind::SetupHome;break;
     case ControllerNativeAction::SetupProbe:kind=Kind::SetupProbe;break;
     case ControllerNativeAction::SetupCorner:kind=Kind::SetupCorner;break;
     case ControllerNativeAction::SetupZero:kind=Kind::SetupZero;break;
     }
     Request request{kind};request.input=input;request.x=x;request.y=y;request.bounds=bounds;
-    request.prepared=std::move(prepared);request.feed=feed;request.power=power;request.id=++m_nextRequest;
+    request.prepared=std::move(prepared);request.localPrepared=std::move(local);request.feed=feed;request.power=power;request.id=++m_nextRequest;
     const bool accepted=send(m_mailbox,std::move(request));emit changed();return accepted;
+}
+bool ControllerRuntimeSession::localData(const QVariantMap &data) {
+    const auto id=++m_nextRequest;
+    if(data.value("op")=="begin") {
+        bool denied=false;
+        {QMutexLocker lock(&m_mailbox->mutex);denied=m_mailbox->dispatchInFlight||!m_mailbox->normal.empty()||m_mailbox->latest.busy||m_mailbox->latest.firing||m_mailbox->latest.accessoryLeaseActive||m_mailbox->stop.load()||m_mailbox->close.load();}
+        if(denied){m_localAdmissionError="Manueller Beginn abgelehnt: Geräteaktion aktiv oder ausstehend.";m_localAdmissionRevision=id;emit changed();return false;}
+    }
+    m_localAdmissionError.clear();
+    if(data.value("op")=="begin"||data.value("op")=="cancel") {m_preparation->cancel();m_candidateMoves={};m_candidateLocalFrame.clear();}
+    Request request{Kind::LocalData};request.bounds=data;request.id=id;
+    const bool accepted=send(m_mailbox,std::move(request));
+    if(!accepted){m_localAdmissionError="Lokale Anforderung nicht eingereiht.";m_localAdmissionRevision=id;}
+    emit changed();return accepted;
 }
 bool ControllerRuntimeSession::operatorData(const QVariantMap &data) {
     Request request{Kind::OperatorData};request.bounds=data;request.id=++m_nextRequest;
@@ -346,15 +384,27 @@ QString ControllerRuntimeSession::prepareReason() const {
     return m_preparation->reason();
 }
 void ControllerRuntimeSession::prepare(const JobPlan &plan) {
-    const auto profile = plan.deviceProfile().outputFingerprint();
-    if (plan.valid() && m_candidateMoves.constData() == plan.moves.constData() &&
-        m_candidateMoves.size() == plan.moves.size() && m_candidateProfile == profile &&
-        (jobPreparing() || jobPrepared()))
+    const auto snapshot=status();const auto local=snapshot.operatorLocalFrame;
+    const bool localMode=local.value("phase").toString()!="inactive" && !local.isEmpty();
+    if(localMode && !local.value("localPositionKnown").toBool())return;
+    const auto profile=plan.deviceProfile().outputFingerprint();
+    const auto frame=localMode?local.value("frameId").toByteArray():QByteArray();
+    if(plan.valid() && m_candidateMoves.constData()==plan.moves.constData() && m_candidateMoves.size()==plan.moves.size() &&
+       m_candidateProfile==profile && m_candidateLocalFrame==frame && (jobPreparing()||jobPrepared())) {
+        if(localMode && jobPrepared() && !local.value("prepared").toBool() && !snapshot.busy) {
+            Request request{Kind::LocalData};request.bounds={{"op","candidate"},{"frameId",QString::fromLatin1(frame)}};request.localPrepared=m_preparation->localResult(m_prepareSequence);request.id=++m_nextRequest;send(m_mailbox,std::move(request));
+        }
         return;
-    m_candidateMoves = plan.moves;
-    m_candidateProfile = profile;
-    m_preparation->prepare(
-        plan, ++m_prepareSequence); // Invalidates old data immediately; never starts I/O.
+    }
+    m_candidateMoves=plan.moves;m_candidateProfile=profile;m_candidateLocalFrame=frame;
+    if(localMode) {
+        localData({{"op","invalidateCandidate"}});
+        ManualTravelCheck::Request request;
+        request.headAnchor=QPointF(local.value("planHeadX").toDouble(),local.value("planHeadY").toDouble());
+        const auto a=local.value("planAvailable").toMap();
+        request.available=ManualTravelCheck::Distances{a.value("negativeX").toDouble(),a.value("positiveX").toDouble(),a.value("negativeY").toDouble(),a.value("positiveY").toDouble()};
+        request.safetyMarginMm=2.;m_preparation->prepareLocal(plan,request,++m_prepareSequence);
+    } else m_preparation->prepare(plan,++m_prepareSequence);
 }
 ControllerSubmission ControllerRuntimeSession::requestStart(PreparedControllerJob::Ptr prepared) {
     const auto id = ++m_nextRequest;
@@ -474,6 +524,7 @@ void ControllerRuntimeWorker::drain() {
         m_core->focus(false);
     if (m_mailbox->takeControl(m_mailbox->stop)) {
         if(m_stopHandoffProbe)m_stopHandoffProbe();
+        invalidateLocalFrame("Lokaler Rahmen durch STOPP widerrufen.");
         cancelCommissioning("Einrichtung durch STOPP widerrufen.");
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Fault);
@@ -504,21 +555,25 @@ void ControllerRuntimeWorker::drain() {
         }
     }
     const auto retireRequest =
-        qScopeGuard([&request] { retireControllerJob(std::move(request.prepared)); });
+        qScopeGuard([&request] { retireControllerJob(std::move(request.prepared));retireLocalJob(std::move(request.localPrepared)); });
     const auto clearAdmission=qScopeGuard([this]{m_dispatchProof.reset();});
     if (have && request.generation == m_mailbox->generation.load() &&
         nowMs() <= request.expiresAt &&
         (request.kind == Kind::Open || request.connectionEpoch == m_connectionEpoch)) {
         if(request.kind!=Kind::Open&&request.kind!=Kind::Hold&&request.kind!=Kind::FocusOff&&
-           request.kind!=Kind::Focus&&request.kind!=Kind::SetupData&&request.kind!=Kind::OperatorData&&!nativeActionAllowed(request)) {
+           request.kind!=Kind::Focus&&request.kind!=Kind::SetupData&&request.kind!=Kind::OperatorData&&request.kind!=Kind::LocalData&&!nativeActionAllowed(request)) {
             m_core->append("Native Geräteaktion abgelehnt: Eingabe, Argumente, Referenzrahmen oder Frist nicht bestätigt.");
         } else {
         m_dispatchProof=request.input.proof;
-        if(m_commissioning.active() && m_commissioning.stage!="complete" &&
+        if(m_local.engaged() && request.kind!=Kind::LocalData && request.kind!=Kind::LocalCapture && request.kind!=Kind::LocalStart && request.kind!=Kind::LocalFrame && request.kind!=Kind::LocalResume && request.kind!=Kind::OperatorData && request.kind!=Kind::Hold && request.kind!=Kind::FocusOff && request.kind!=Kind::Open) {
+            m_core->append("Manueller lokaler Rahmen: globale Geräteaktion gesperrt.");
+        } else if(m_commissioning.active() && m_commissioning.stage!="complete" &&
            request.kind!=Kind::SetupData && request.kind!=Kind::OperatorData && request.kind!=Kind::SetupHome && request.kind!=Kind::SetupProbe && request.kind!=Kind::SetupCorner && request.kind!=Kind::SetupZero && request.kind!=Kind::Open && request.kind!=Kind::Hold) {
             m_core->append("Einrichtung aktiv: normale Geräteaktion gesperrt.");
         } else switch (request.kind) {
         case Kind::Open: {
+            invalidateLocalFrame("Neue Verbindung erfordert neuen lokalen Rahmen.");
+            m_local={};
             ++m_connectionEpoch;
             discardOperatorWitness();m_operatorSession.clear();m_activeOperatorOperation.clear();m_operatorPaused=false;
             m_accessory = AccessoryContract(true);
@@ -528,6 +583,8 @@ void ControllerRuntimeWorker::drain() {
                 opened ? QString() : QString("Controlleranschluss konnte nicht geöffnet werden."));
             break;
         }
+        case Kind::LocalData:localData(request);break;
+        case Kind::LocalCapture:case Kind::LocalStart:case Kind::LocalFrame:case Kind::LocalResume:localMotion(request);break;
         case Kind::OperatorData:operatorData(request.bounds);break;
         case Kind::SetupData:setupData(request.bounds);break;
         case Kind::SetupHome:case Kind::SetupProbe:case Kind::SetupCorner:case Kind::SetupZero:setupMotion(request);break;
@@ -640,6 +697,12 @@ bool ControllerRuntimeWorker::nativeActionAllowed(const Request &request) {
     case Kind::Start:action=ControllerNativeAction::StartJob;
         if(!request.prepared)return false;
         source=request.prepared->sourceFingerprint()+request.prepared->profileFingerprint();break;
+    case Kind::LocalCapture:action=ControllerNativeAction::LocalCapture;break;
+    case Kind::LocalResume:action=ControllerNativeAction::LocalResume;break;
+    case Kind::LocalStart:case Kind::LocalFrame:
+        action=request.kind==Kind::LocalStart?ControllerNativeAction::LocalStart:ControllerNativeAction::LocalFrame;
+        if(!request.localPrepared)return false;
+        source=request.localPrepared->fingerprint();if(request.kind==Kind::LocalFrame)source+=request.localPrepared->frameFingerprint();break;
     case Kind::SetupZero:action=ControllerNativeAction::SetupZero;break;
     case Kind::SetupHome:action=ControllerNativeAction::SetupHome;break;
     case Kind::SetupProbe:action=ControllerNativeAction::SetupProbe;break;
@@ -678,7 +741,7 @@ bool ControllerRuntimeWorker::cancelDispatch() {
     if (status.coordinateUpdatePending && !output)
         return false;
     if(m_core->setupReadback.pending && !output)return false;
-    if (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty() ||
+    if (!runtimeMotionError().isEmpty() ||
         (output && !m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty())) {
         m_mailbox->revoke(false);
         return true;
@@ -689,6 +752,7 @@ void ControllerRuntimeWorker::coreChanged() {
     if (!m_core)
         return;
     updateCommissioning();
+    updateLocalFrame();
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     if(status.paused && m_accessory.activeLease() && !m_operatorPaused) {
@@ -731,15 +795,16 @@ void ControllerRuntimeWorker::watchdog() {
         return;
     if (!checkClockContinuity()) return;
     updateCommissioning();
+    updateLocalFrame();
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     const bool coordinate = status.coordinateUpdatePending && !output;
     const bool motion =
         status.executing && !status.referencing && !status.resetting && !coordinate &&
-        (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty());
+        !runtimeMotionError().isEmpty();
     const bool unsafeOutput =
         output &&
-        (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty() ||
+        (!runtimeMotionError().isEmpty() ||
          !m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty());
     if (motion || unsafeOutput) {
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
@@ -761,6 +826,8 @@ void ControllerRuntimeWorker::publish(bool finishDispatch) {
     if(m_operatorWitness && (m_operatorWitnessCoordinate!=m_coordinateEpoch || m_accessoryClock.elapsed()>m_operatorWitness->expiresAtMs()))discardOperatorWitness();
     auto status = m_core->status();
     status.commissioning=commissioningSnapshot();
+    status.operatorLocalFrame=localFrameSnapshot();
+    status.doorSubstate=m_core->doorSubstate;
     status.extractionSupervision=extractionSupervisionSnapshot();
     const auto now = nowMs();
     status.connectionEpoch = m_connectionEpoch;

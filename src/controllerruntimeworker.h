@@ -3,6 +3,8 @@
 #include "controllercommissioning.h"
 #include "controllerruntime.h"
 #include "grbl.h"
+#include "operatorlocalframe.h"
+#include "preparedlocaljob.h"
 #include <QElapsedTimer>
 #include <QTimer>
 #include <functional>
@@ -26,6 +28,18 @@ class ControllerRuntimeWorker final : public QObject {
     AccessoryContract m_accessory{true};
     QElapsedTimer m_accessoryClock;
     QTimer *m_watchdog = nullptr; // Created in initialize(), after worker affinity is established.
+    OperatorLocalFrameState m_local;
+    PreparedLocalJob::Ptr m_localCandidate,m_localActive;
+    bool m_localFrameRun=false,m_updatingLocal=false;
+    qint64 m_localFirstMotionDue=-1;
+    QPointF m_localMotionStartCounter;
+    void localData(const ControllerRuntimeRequest &);
+    void localMotion(const ControllerRuntimeRequest &);
+    void updateLocalFrame();
+    void invalidateLocalFrame(const QString &reason);
+    QString runtimeMotionError() const;
+    QVariantMap localFrameSnapshot() const;
+    QByteArray supervisionBinding() const;
     ControllerCommissioning m_commissioning;
     bool m_setupUpdating=false;
     QByteArray m_operatorSession, m_operatorSource, m_activeOperatorOperation;
