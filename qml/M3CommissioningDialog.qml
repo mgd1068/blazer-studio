@@ -53,7 +53,7 @@ Dialog {
             }
             Label { objectName: "commissioningReason"; Layout.fillWidth: true; textFormat: Text.PlainText; wrapMode: Text.WordWrap; color: dialog.stage === "fault" ? "#c05242" : dialog.muted; text: dialog.state.reason || "" }
             Label { objectName: "commissioningPosition"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink; text: "Maschinenposition: X " + dialog.mm(dialog.state.machineX) + " · Y " + dialog.mm(dialog.state.machineY) + "\nArbeitsposition: X " + dialog.mm(dialog.state.workX) + " · Y " + dialog.mm(dialog.state.workY) + "\nWCO: X " + dialog.mm(dialog.state.wcoX) + " · Y " + dialog.mm(dialog.state.wcoY) }
-            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.muted; visible: dialog.state.fingerprint && dialog.state.fingerprint.length > 0; text: "Controller- und Einstellungsstand: " + (dialog.state.fingerprint || "") }
+            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.muted; visible: !!dialog.state.fingerprint && dialog.state.fingerprint.length > 0; text: "Controller- und Einstellungsstand: " + (dialog.state.fingerprint || "") }
             ColumnLayout {
                 Layout.fillWidth: true; visible: dialog.stage === "mechanics"
                 Witness { id: switches; objectName: "setupSwitchesWitness"; text: "Die vorgesehenen Endschalter sind vorhanden, richtig angeschlossen und am Gerät geprüft." }
