@@ -16,7 +16,12 @@ enum class ControllerRuntimeRequestKind {
     Override,
     Focus,
     FocusOff,
-    Start
+    Start,
+    SetupData,
+    SetupHome,
+    SetupProbe,
+    SetupCorner,
+    SetupZero
 };
 struct ControllerRuntimeRequest {
     explicit ControllerRuntimeRequest(ControllerRuntimeRequestKind value) : kind(value) {}

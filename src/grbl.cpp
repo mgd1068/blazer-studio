@@ -1,4 +1,6 @@
 #include "grbl.h"
+#include <QCryptographicHash>
+#include <QDataStream>
 #include "geometry.h"
 #include "grblwirenumbers.h"
 #include "preparedcontrollerjob.h"
@@ -435,7 +437,84 @@ bool GrblSession::open(const QString &port) {
             .arg(m_deviceProfile.driverSettings()["powerScale"].toDouble(), 0, 'f', 0));
     return true;
 }
+bool GrblSession::setupReadyForAttestation() const {
+    if(ready() && verified())return true;
+    return connected() && !handshaking && !awaitingReset && !busy() && !firing && !paused &&
+        controllerState=="Alarm" && statusFresh() && configurationValid() && knownPosition &&
+        knownOffset && knownOutput && reportedOutput==0 && !activeInputs &&
+        (!overrideFeedback || powerOverride<=100);
+}
+bool GrblSession::beginSetupReadback() {
+    if(!setupReadyForAttestation()) return false;
+    const bool alarm=controllerState=="Alarm";
+    setupReadback = {}; setupReadback.pending=true;
+    commissionedEnvelope.reset();
+    commissionedModalContract=commissionedHomingContract=commissionedOverrideContract=false;
+    positionReferenced=false;
+    poll.stop(); handshaking=true; connectionVerified=false;
+    queue=alarm?QStringList{"$I","$$","$G","$#","$N"}:QStringList{"M5 S0","G21 G90 G54","$I","$$","$G","$#","$N"};
+    queueHead=0;total=queue.size();acked=0;waitingAck=waitingIdle=false;
+    state="Inbetriebnahme: Controllerdaten lesen";
+    pump(); return true;
+}
+void GrblSession::captureSetupReadback(const QByteArray &s) {
+    if(!setupReadback.pending || queue.isEmpty() || queueHead>=queue.size())return;
+    auto &r=setupReadback;const auto command=queue[queueHead];
+    const auto malformed=[&]{r.error="Controllerdaten fehlen, sind widersprüchlich oder nicht freigegeben.";};
+    if(command=="$$" && s.startsWith('$')) {
+        const auto parts=s.mid(1).split('=');bool keyOk=false,valueOk=false;
+        const int key=parts.value(0).toInt(&keyOk);const double value=parts.value(1).toDouble(&valueOk);
+        static const QSet<int> required{3,5,13,20,21,22,23,24,25,26,27,30,31,32,100,101,110,111,120,121,130,131};
+        if(keyOk && required.contains(key)) {
+            if(parts.size()!=2 || !valueOk || !std::isfinite(value) || r.settings.contains(key))malformed();
+            else r.settings[key]=value;
+        }
+    }
+    if(command=="$I" && s.startsWith("[VER:")) {
+        if(r.version || !s.endsWith(']'))malformed();
+        r.version=true;r.firmware=QCryptographicHash::hash(s,QCryptographicHash::Sha256);
+    }
+    if(command=="$G" && s.startsWith("[GC:")) {
+        const auto tokens=s.mid(4,s.size()-5).split(' ');
+        r.modal=s.endsWith(']') && tokens.contains("G21") && tokens.contains("G90") && tokens.contains("G54") && tokens.contains("M5") && tokens.contains("S0");
+        if(!r.modal)malformed();
+    }
+    if(command=="$#") {
+        for(const auto &prefix:{QByteArray("[G54:"),QByteArray("[G92:")}) {
+            if(!s.startsWith(prefix))continue;
+            QPointF value;const bool ok=s.endsWith(']') && point(s.mid(prefix.size(),s.size()-prefix.size()-1),value);
+            bool &known=prefix=="[G54:"?r.g54Known:r.g92Known;
+            if(!ok || known)malformed();
+            else {known=true;(prefix=="[G54:"?r.g54:r.g92)=value;}
+        }
+        if(s.startsWith("[TLO:")) {
+            bool ok;const double value=s.mid(5,s.size()-6).toDouble(&ok);
+            if(!s.endsWith(']') || !ok || !std::isfinite(value) || r.tloKnown)malformed();
+            else {r.tloKnown=true;r.tlo=value;}
+        }
+    }
+    if(command=="$N" && s.startsWith("$N")) {
+        const auto parts=s.mid(2).split('=');bool ok;const int index=parts.value(0).toInt(&ok);
+        if(parts.size()!=2 || !ok || index<0 || index>1 || r.startup.contains(index) || !parts[1].trimmed().isEmpty())malformed();
+        else r.startup.insert(index);
+    }
+}
+void GrblSession::finishSetupReadback() {
+    auto &r=setupReadback;r.pending=false;r.complete=true;
+    r.valid=r.error.isEmpty() && r.version && r.modal && r.g54Known && r.g92Known && r.tloKnown &&
+        r.g92==QPointF() && r.tlo==0 && r.startup.size()==2 && r.settings.size()==22 && configurationValid();
+    if(r.valid) {
+        for(const int key:{3,23})r.valid=r.valid && r.settings[key]>=0 && r.settings[key]<=7 && std::trunc(r.settings[key])==r.settings[key];
+        for(const int key:{5,13,20,21,22,32})r.valid=r.valid && (r.settings[key]==0 || r.settings[key]==1);
+        for(const int key:{24,25,27,100,101,110,111,120,121,130,131})r.valid=r.valid && r.settings[key]>0;
+        r.valid=r.valid && r.settings[26]>=0;
+    }
+    if(!r.valid) {r.error="Vollständige Controllerdaten erforderlich: Einstellungen, G54/G92/TLO, G21/G90/M5/S0 und zwei leere Startupblöcke.";return;}
+    QByteArray data;QDataStream stream(&data,QIODevice::WriteOnly);stream<<r.settings<<r.firmware<<m_deviceProfile.outputFingerprint();
+    r.fingerprint=QCryptographicHash::hash(data,QCryptographicHash::Sha256);
+}
 void GrblSession::handshake() {
+    setupReadback = {};
     clearAckDeadline();
     clearWorkZero();
     lastStatus.invalidate();
@@ -470,6 +549,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    setupReadback = {};
     clearAckDeadline();
     clearWorkZero();
     knownReportedMachinePosition = false;
@@ -635,6 +715,32 @@ void GrblSession::line(const QByteArray &s) {
                 diagnostic.setting(key, validValue ? std::optional<double>(value) : std::nullopt);
         }
     }
+    if(setupReadback.complete && setupReadback.valid && s.startsWith('$') && !s.startsWith("$N")) {
+        const auto pair=s.mid(1).split('=');bool ok;const int key=pair.value(0).toInt(&ok);
+        if(ok && setupReadback.settings.contains(key)) {
+            bool valueOk;const double value=pair.value(1).toDouble(&valueOk);
+            if(pair.size()!=2 || !valueOk || value!=setupReadback.settings.value(key)) {
+                setupReadback.valid=false;setupReadback.error="Controller-Einstellungen haben sich verändert.";
+                commissionedModalContract=commissionedHomingContract=false;
+                positionReferenced=false;
+            }
+        }
+    }
+    if(setupReadback.complete && setupReadback.valid) {
+        bool invalidate=false;
+        if(s.startsWith("[VER:"))invalidate=QCryptographicHash::hash(s,QCryptographicHash::Sha256)!=setupReadback.firmware;
+        if(s.startsWith("$N")) {
+            const auto parts=s.split('=');
+            invalidate=parts.size()!=2 || !parts[1].trimmed().isEmpty();
+        }
+        if(s.startsWith("[GC:")) {
+            const auto tokens=s.mid(4,s.size()-5).split(' ');
+            invalidate=!s.endsWith(']') || !tokens.contains("G54") || !tokens.contains("G21") || !tokens.contains("G90");
+        }
+        if(invalidate){setupReadback.valid=false;setupReadback.error="Firmware, Startupblock oder Modalzustand verändert.";
+            commissionedModalContract=commissionedHomingContract=false;positionReferenced=false;}
+    }
+    captureSetupReadback(s);
     if (s.startsWith("[VER:"))
         version = s.startsWith("[VER:1.1") || s.startsWith("[VER:1.3a");
     if (s.startsWith("$13="))
@@ -991,6 +1097,7 @@ void GrblSession::line(const QByteArray &s) {
                              ControllerDiagnostics::FaultCause::ConfigurationReadback);
                     return;
                 }
+                if(setupReadback.pending) finishSetupReadback();
                 handshaking = false;
                 state = configurationValid() ? "Warte auf Position"
                                              : "GRBL-Konfiguration nicht freigegeben";
@@ -1219,6 +1326,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    setupReadback = {};
     clearAckDeadline();
     clearWorkZero();
     overrideReadbackPending = false;

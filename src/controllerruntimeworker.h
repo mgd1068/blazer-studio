@@ -1,5 +1,6 @@
 #pragma once
 #include "accessorycontract.h"
+#include "controllercommissioning.h"
 #include "controllerruntime.h"
 #include "grbl.h"
 #include <QElapsedTimer>
@@ -25,6 +26,13 @@ class ControllerRuntimeWorker final : public QObject {
     AccessoryContract m_accessory{true};
     QElapsedTimer m_accessoryClock;
     QTimer *m_watchdog = nullptr; // Created in initialize(), after worker affinity is established.
+    ControllerCommissioning m_commissioning;
+    bool m_setupUpdating=false;
+    void setupData(const QVariantMap &data);
+    void setupMotion(const ControllerRuntimeRequest &request);
+    void updateCommissioning();
+    void cancelCommissioning(const QString &reason);
+    QVariantMap commissioningSnapshot() const;
     bool m_jobActive = false, m_focusActive = false;
     bool m_wasVerified = false, m_wasReferenced = false;
     quint64 m_lastFocusInteraction = 0;

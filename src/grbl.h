@@ -10,6 +10,8 @@
 #include <QStringList>
 #include <QTimer>
 #include <optional>
+#include <QMap>
+#include <QSet>
 #include <functional>
 class PreparedControllerJob;
 class GrblSession : public ControllerSession {
@@ -110,6 +112,20 @@ class GrblSession : public ControllerSession {
     // Deliberately absent on real sessions: neither a profile nor a homing ACK
     // proves signed travel limits or the active WCO/G54 modal contract. A future
     // commissioning workflow must bind these to a verified controller identity.
+    struct SetupReadback {
+        QMap<int,double> settings;
+        QSet<int> startup;
+        bool pending=false, complete=false, valid=false, version=false, modal=false;
+        bool g54Known=false, g92Known=false, tloKnown=false;
+        QPointF g54, g92;
+        double tlo=0;
+        QByteArray fingerprint, firmware;
+        QString error;
+    } setupReadback;
+    bool setupReadyForAttestation() const;
+    bool beginSetupReadback();
+    void captureSetupReadback(const QByteArray &line);
+    void finishSetupReadback();
     std::optional<QRectF> commissionedEnvelope;
     bool commissionedModalContract = false;
     // Independent evidence of ordered, exactly-once realtime byte processing

@@ -75,6 +75,7 @@ class ControllerRuntimeSession final : public ControllerSession {
     bool overrides(int feed, int power) override;
     void beginFocus(const ControllerRuntimeInputStamp &stamp);
     void endFocus();
+    bool commissioningData(const QVariantMap &data);
 
   private:
     friend class ControllerRuntimeTestAccess;

@@ -29,6 +29,7 @@ class Machine : public Simulator {
     Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
     Q_PROPERTY(QString prepareReason READ prepareReason NOTIFY changed)
     Q_PROPERTY(QString nativeInputSafetyError READ nativeInputSafetyError NOTIFY changed)
+    Q_PROPERTY(QVariantMap commissioning READ commissioning NOTIFY changed)
     Q_PROPERTY(bool holdConfirmed READ holdConfirmed NOTIFY changed)
   public:
     enum class HardwareAccess { Allowed, Disabled };
@@ -92,6 +93,19 @@ class Machine : public Simulator {
     // Registration/eligibility only. Intents come exclusively from native events.
     Q_INVOKABLE void registerNativeActionControl(QObject *control,const QString &action,
                                                 const QVariantMap &fixedArguments = {});
+    QVariantMap commissioning() const { return live && session ? session->status().commissioning : QVariantMap{}; }
+    Q_INVOKABLE void beginCommissioning();
+    Q_INVOKABLE void attestCommissioningMechanics(bool switches, bool direction, bool freeTravel, bool laserDisabled);
+    Q_INVOKABLE void commissioningHome();
+    Q_INVOKABLE void confirmCommissioningHome();
+    Q_INVOKABLE void commissioningProbe(double dx,double dy);
+    Q_INVOKABLE void confirmCommissioningProbe();
+    Q_INVOKABLE void setCommissioningLimits(double minX,double minY,double maxX,double maxY);
+    Q_INVOKABLE void commissioningCorner(int index);
+    Q_INVOKABLE void confirmCommissioningCorner();
+    Q_INVOKABLE void commissioningZero();
+    Q_INVOKABLE void confirmCommissioningCoordinates();
+    Q_INVOKABLE void cancelCommissioning();
     Q_INVOKABLE void beginFocus();
     Q_INVOKABLE void endFocus();
     Q_INVOKABLE void useSimulator();
@@ -142,6 +156,7 @@ class Machine : public Simulator {
     Document *document;
     std::unique_ptr<ControllerSession> session;
     void syncDeviceProfile();
+    void commissioningData(const QVariantMap &data);
     bool live = false;
     const HardwareAccess hardwareAccess;
     bool pendingSimulator = false;

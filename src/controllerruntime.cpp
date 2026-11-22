@@ -314,9 +314,17 @@ bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,
     case ControllerNativeAction::WorkZero:kind=Kind::Zero;break;
     case ControllerNativeAction::Resume:kind=Kind::Resume;break;
     case ControllerNativeAction::Override:kind=Kind::Override;break;
+    case ControllerNativeAction::SetupHome:kind=Kind::SetupHome;break;
+    case ControllerNativeAction::SetupProbe:kind=Kind::SetupProbe;break;
+    case ControllerNativeAction::SetupCorner:kind=Kind::SetupCorner;break;
+    case ControllerNativeAction::SetupZero:kind=Kind::SetupZero;break;
     }
     Request request{kind};request.input=input;request.x=x;request.y=y;request.bounds=bounds;
     request.prepared=std::move(prepared);request.feed=feed;request.power=power;request.id=++m_nextRequest;
+    const bool accepted=send(m_mailbox,std::move(request));emit changed();return accepted;
+}
+bool ControllerRuntimeSession::commissioningData(const QVariantMap &data) {
+    Request request{Kind::SetupData};request.bounds=data;request.id=++m_nextRequest;
     const bool accepted=send(m_mailbox,std::move(request));emit changed();return accepted;
 }
 void ControllerRuntimeSession::revokeFocusContext() {
@@ -462,6 +470,7 @@ void ControllerRuntimeWorker::drain() {
         m_core->focus(false);
     if (m_mailbox->takeControl(m_mailbox->stop)) {
         if(m_stopHandoffProbe)m_stopHandoffProbe();
+        cancelCommissioning("Einrichtung durch STOPP widerrufen.");
         m_accessory.transition(AccessoryContract::Event::Fault);
         m_jobActive = m_focusActive = false;
         if (!m_mailbox->close.load() && !m_core->awaitingReset)
@@ -495,11 +504,14 @@ void ControllerRuntimeWorker::drain() {
         nowMs() <= request.expiresAt &&
         (request.kind == Kind::Open || request.connectionEpoch == m_connectionEpoch)) {
         if(request.kind!=Kind::Open&&request.kind!=Kind::Hold&&request.kind!=Kind::FocusOff&&
-           request.kind!=Kind::Focus&&!nativeActionAllowed(request)) {
+           request.kind!=Kind::Focus&&request.kind!=Kind::SetupData&&!nativeActionAllowed(request)) {
             m_core->append("Native Geräteaktion abgelehnt: Eingabe, Argumente, Referenzrahmen oder Frist nicht bestätigt.");
         } else {
         m_dispatchProof=request.input.proof;
-        switch (request.kind) {
+        if(m_commissioning.active() && m_commissioning.stage!="complete" &&
+           request.kind!=Kind::SetupData && request.kind!=Kind::SetupHome && request.kind!=Kind::SetupProbe && request.kind!=Kind::SetupCorner && request.kind!=Kind::SetupZero && request.kind!=Kind::Open && request.kind!=Kind::Hold) {
+            m_core->append("Einrichtung aktiv: normale Geräteaktion gesperrt.");
+        } else switch (request.kind) {
         case Kind::Open: {
             ++m_connectionEpoch;
             m_accessory = AccessoryContract(true);
@@ -509,6 +521,8 @@ void ControllerRuntimeWorker::drain() {
                 opened ? QString() : QString("Controlleranschluss konnte nicht geöffnet werden."));
             break;
         }
+        case Kind::SetupData:setupData(request.bounds);break;
+        case Kind::SetupHome:case Kind::SetupProbe:case Kind::SetupCorner:case Kind::SetupZero:setupMotion(request);break;
         case Kind::Jog:
             m_core->jog(request.x, request.y);
             break;
@@ -614,6 +628,10 @@ bool ControllerRuntimeWorker::nativeActionAllowed(const Request &request) {
     case Kind::Start:action=ControllerNativeAction::StartJob;
         if(!request.prepared)return false;
         source=request.prepared->sourceFingerprint()+request.prepared->profileFingerprint();break;
+    case Kind::SetupZero:action=ControllerNativeAction::SetupZero;break;
+    case Kind::SetupHome:action=ControllerNativeAction::SetupHome;break;
+    case Kind::SetupProbe:action=ControllerNativeAction::SetupProbe;break;
+    case Kind::SetupCorner:action=ControllerNativeAction::SetupCorner;break;
     case Kind::Jog:action=ControllerNativeAction::Jog;break;
     case Kind::Home:action=ControllerNativeAction::Home;break;
     case Kind::Frame:action=ControllerNativeAction::Frame;break;
@@ -647,6 +665,7 @@ bool ControllerRuntimeWorker::cancelDispatch() {
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     if (status.coordinateUpdatePending && !output)
         return false;
+    if(m_core->setupReadback.pending && !output)return false;
     if (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty() ||
         (output && !m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty())) {
         m_mailbox->revoke(false);
@@ -657,6 +676,7 @@ bool ControllerRuntimeWorker::cancelDispatch() {
 void ControllerRuntimeWorker::coreChanged() {
     if (!m_core)
         return;
+    updateCommissioning();
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     const bool lost =
@@ -667,7 +687,8 @@ void ControllerRuntimeWorker::coreChanged() {
         m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_jobActive = m_focusActive = false;
         retirePrepared();
-    } else if (lost && !(status.coordinateUpdatePending && !output)) {
+    } else if (lost && !(status.coordinateUpdatePending && !output) &&
+               !(m_commissioning.stage=="readback" && m_core->setupReadback.pending && !output)) {
         m_accessory.transition(AccessoryContract::Event::Fault);
         const bool mustStop =
             (status.executing && !status.referencing && !status.resetting) || output;
@@ -691,6 +712,7 @@ void ControllerRuntimeWorker::watchdog() {
     if (!m_core)
         return;
     if (!checkClockContinuity()) return;
+    updateCommissioning();
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     const bool coordinate = status.coordinateUpdatePending && !output;
@@ -716,6 +738,7 @@ void ControllerRuntimeWorker::publish(bool finishDispatch) {
     if (!m_core)
         return;
     refreshCoordinateEpoch();auto status = m_core->status();
+    status.commissioning=commissioningSnapshot();
     const auto now = nowMs();
     status.connectionEpoch = m_connectionEpoch;
     status.coordinateEpoch=m_coordinateEpoch;

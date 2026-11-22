@@ -12,6 +12,10 @@
 #include <cmath>
 namespace {
 std::optional<ControllerNativeAction> nativeAction(const QString &name) {
+    if(name=="setupZero")return ControllerNativeAction::SetupZero;
+    if(name=="setupHome")return ControllerNativeAction::SetupHome;
+    if(name=="setupProbe")return ControllerNativeAction::SetupProbe;
+    if(name=="setupCorner")return ControllerNativeAction::SetupCorner;
     if(name=="start")return ControllerNativeAction::StartJob;
     if(name=="jog")return ControllerNativeAction::Jog;
     if(name=="home")return ControllerNativeAction::Home;
@@ -215,6 +219,19 @@ void Machine::registerNativeActionControl(QObject *control,const QString &action
 QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &arguments,const ControllerStatus &status) const {
     const auto kind=nativeAction(action);if(!kind||!live||!session||!status.connected||!status.statusFresh||
         status.opening||status.closing||status.requestPending||status.referencing||status.resetting||status.coordinateUpdatePending)return {};
+    if(action.startsWith("setup")) {
+        const auto setup=status.commissioning;const auto stage=setup.value("stage").toString();
+        if(status.busy||status.firing||status.accessoryLeaseActive||status.accessoryJobActive||status.accessoryFocusActive)return {};
+        if(action=="setupZero") {if(stage!="workCoordinates"||!arguments.isEmpty())return {};}
+        else if(action=="setupHome") {if(stage!="homeReady"||!arguments.isEmpty())return {};}
+        else if(action=="setupProbe") {if(stage!="geometry"||!setup.value("homeObserved").toBool()||arguments.size()!=2||!finiteInputNumber(arguments.value("dx"))||!finiteInputNumber(arguments.value("dy")))return {};}
+        else if(action=="setupCorner") {if(stage!="cornerReady"||arguments.size()!=1||arguments.value("index").toInt()!=setup.value("cornerIndex").toInt())return {};}
+        else return {};
+        QByteArray data;QDataStream stream(&data,QIODevice::WriteOnly);
+        stream<<action<<arguments<<setup.value("fingerprint").toString()<<stage<<status.connectionEpoch<<status.coordinateEpoch;
+        return QCryptographicHash::hash(data,QCryptographicHash::Sha256);
+    }
+    if(status.commissioning.value("active").toBool() && status.commissioning.value("stage").toString()!="complete")return {};
     if(action=="jog") {
         if(arguments.size()!=2||!finiteInputNumber(arguments.value("dx"))||!finiteInputNumber(arguments.value("dy")))return {};
     } else if(action=="frame") {
@@ -260,6 +277,24 @@ bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,
     if(!stamp.proof){document->notify("Geräteaktion gesperrt: Eingabe oder Referenzrahmen inzwischen verändert.");return false;}
     return runtime->submitNativeAction(*kind,stamp,x,y,bounds,std::move(prepared),feed,power);
 }
+void Machine::commissioningData(const QVariantMap &data) {
+    if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)
+        runtime->commissioningData(data);
+}
+void Machine::beginCommissioning(){commissioningData({{"op","begin"}});}
+void Machine::attestCommissioningMechanics(bool switches,bool direction,bool freeTravel,bool laserDisabled) {
+    commissioningData({{"op","mechanics"},{"switches",switches},{"direction",direction},{"freeTravel",freeTravel},{"laserDisabled",laserDisabled}});
+}
+void Machine::commissioningHome(){dispatchNative("setupHome",{});}
+void Machine::confirmCommissioningHome(){commissioningData({{"op","homeObserved"}});}
+void Machine::commissioningProbe(double dx,double dy){dispatchNative("setupProbe",{{"dx",dx},{"dy",dy}},dx,dy);}
+void Machine::confirmCommissioningProbe(){commissioningData({{"op","probeObserved"}});}
+void Machine::setCommissioningLimits(double minX,double minY,double maxX,double maxY){commissioningData({{"op","limits"},{"minX",minX},{"minY",minY},{"maxX",maxX},{"maxY",maxY}});}
+void Machine::commissioningCorner(int index){dispatchNative("setupCorner",{{"index",index}},double(index));}
+void Machine::confirmCommissioningCorner(){commissioningData({{"op","cornerObserved"}});}
+void Machine::commissioningZero(){dispatchNative("setupZero",{});}
+void Machine::confirmCommissioningCoordinates(){commissioningData({{"op","coordinatesObserved"}});}
+void Machine::cancelCommissioning(){if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime){runtime->stop();runtime->commissioningData({{"op","cancel"}});}}
 void Machine::beginFocus() {
     if (!live) { Simulator::focus(true); return; }
     auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());

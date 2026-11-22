@@ -12,6 +12,8 @@ struct ControllerCommissioning {
     QRectF limits;
     QPointF home, target;
     int cornerIndex = 0, cornersConfirmed = 0, probesConfirmed = 0;
+    quint64 connectionEpoch = 0;
+    qint64 deadline = -1;
     bool xConfirmed = false, yConfirmed = false, homeObserved = false;
     bool active() const { return stage != "inactive" && stage != "fault"; }
     bool moving() const { return stage == "homing" || stage == "probePending" || stage == "cornerPending"; }

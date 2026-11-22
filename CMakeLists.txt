@@ -44,6 +44,7 @@ qt_add_library(blazer-core STATIC
     src/svgasset.cpp src/svgasset.h src/materiallibrary.cpp src/materiallibrary.h
     src/controllersession.cpp src/controllersession.h
     src/grbl.cpp src/grbl.h src/machine.cpp src/machine.h
+    src/controllercommissioning.cpp src/controllercommissioning.h
     src/controllerruntime.cpp src/controllerruntime.h src/controllerruntimeworker.h src/controllerruntimemailbox.h
     src/simulator.cpp src/simulator.h src/workspace.cpp src/workspace.h)
 qt_add_resources(blazer-core manufacturer_catalog PREFIX /catalog FILES profiles/manufacturer-materials.json)
@@ -112,6 +113,11 @@ if(BUILD_TESTING)
             BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
         add_test(NAME runtime_adversarial COMMAND blazer-runtime-adversarial-tests -platform offscreen)
         set_tests_properties(runtime_adversarial PROPERTIES TIMEOUT 90)
+        qt_add_executable(blazer-controllercommissioning-tests tests/controllercommissioning_test.cpp)
+        target_link_libraries(blazer-controllercommissioning-tests PRIVATE blazer-core Qt6::Test)
+        target_compile_definitions(blazer-controllercommissioning-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        add_test(NAME controllercommissioning COMMAND blazer-controllercommissioning-tests -platform offscreen)
+        set_tests_properties(controllercommissioning PROPERTIES TIMEOUT 90)
         qt_add_executable(blazer-runtimecontinuity-tests tests/runtimecontinuity_test.cpp)
         target_link_libraries(blazer-runtimecontinuity-tests PRIVATE blazer-core Qt6::Test)
         target_compile_definitions(blazer-runtimecontinuity-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
