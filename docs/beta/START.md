@@ -1,10 +1,10 @@
-# Blazer Studio – Software-Testkandidat
+# Blazer Studio – Einstieg in beta.8-dev
 
-**Entwicklungszweig beta.7-dev:** Reale Bewegung einschließlich Referenzfahrt und Laserfreigabe bleibt nach der gemeldeten Kollision bis zur nachgewiesenen Geräteeinrichtung gesperrt. Die folgenden Simulatorfunktionen sind nutzbar. Ältere Paketberichte und Materialversuche sind keine Freigabe dieses neuen Stands. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md) und [Koordinatenvertrag](../MOTION_SAFETY.md).
+**Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.8-dev ergänzt eine geführte, nur für die aktuelle Verbindung geltende M3-Einrichtung und einen ausdrücklich bestätigten Absaugmodus ohne Sensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
 Getestete Paketplattform: **Ubuntu 26.04, x86_64**. Andere Linux-Versionen sind noch nicht als Paketplattform bestätigt. Es handelt sich um einen Software-Testkandidaten; Geräte-/Materialabnahme und externe Bedienungstests sind offen.
 
-Bei jedem normalen Programmstart erscheint ein zweisprachiger Sicherheitshinweis, auch nach abgeschlossener Einführung und vor einer Wiederherstellungsentscheidung. **Laser niemals unbeaufsichtigt betreiben / Never operate the laser unattended.** Ein Verbindungsabbruch oder hängender Controller kann den Laser eingeschaltet lassen; Software kann dann kein Laser-Aus garantieren. Während der gesamten Bearbeitung am Gerät bleiben und bereit sein, die Stromversorgung direkt am Gerät zu unterbrechen. Mit **Verstanden / I understand** bestätigen; eine dauerhafte Abschaltung dieses Hinweises gibt es nicht. Diese Ergänzung gehört zum beta.5-Kandidaten und noch nicht zum unveränderten beta.4-Paket.
+Bei jedem normalen Programmstart erscheint ein zweisprachiger Sicherheitshinweis, auch nach abgeschlossener Einführung und vor einer Wiederherstellungsentscheidung. **Laser niemals unbeaufsichtigt betreiben / Never operate the laser unattended.** Ein Verbindungsabbruch oder hängender Controller kann den Laser eingeschaltet lassen; Software kann dann kein Laser-Aus garantieren. Während der gesamten Bearbeitung am Gerät bleiben und bereit sein, die Stromversorgung direkt am Gerät zu unterbrechen. Mit **Verstanden / I understand** bestätigen; eine dauerhafte Abschaltung dieses Hinweises gibt es nicht.
 
 ## Installation
 
@@ -39,9 +39,30 @@ Für einen hilfreichen Bericht: genaue Version, Schritte, erwartetes und tatsäc
 
 Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Gerätebereich. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
 
-Eine geschlossene Einhausung und laufende geeignete Absaugung gehören zur realen Prüfung. Die gerätespezifische Lüftersteuerung über M8 ist nicht nachgewiesen; M8 wird deshalb nicht als funktionierender Lüfterknopf angeboten. Bei den beaufsichtigten Kraftpapierversuchen waren Gehäuse und externe Absaugung betriebsbereit. Materialwirkung ist bestätigt, die vollständige Betriebs-, Schnitt- und Reliefabnahme bleibt offen. Details: [Geräte und Materialabnahme](../HARDWARE_ACCEPTANCE.md).
+### M3 für diese Verbindung einrichten
 
-Eine USB-Verbindung über einen umschaltenden KVM kann beim Wechsel zum anderen PC verloren gehen. Der Auftrag wird bei Kommunikationsverlust verworfen. Nach erneutem Anschließen Konfiguration, Position und Materiallage neu prüfen; eine alte Ausgabe wird nicht automatisch wieder aufgenommen.
+1. Vor dem Verbinden die Laseremission **am Gerät sicher deaktivieren**, den Fahrweg räumen und am Gerät bleiben. Schon das Öffnen des USB-Anschlusses kann die Firmware starten; der Verbindungsaufbau setzt den Controller zurück. Unter **Gerät & Positionierung → Zuordnung …** das tatsächliche Gerät mit seinem Anschluss auswählen, dann ausdrücklich **GRBL verbinden**. Eine Verbindung allein startet keinen Auftrag.
+2. **M3 einrichten …** öffnen. Der Dialog liest Controller- und Einstellungsdaten. Bei einer Ablehnung den angezeigten Grund klären; die Anwendung löscht keine Startupbefehle und umgeht keine Schutzverriegelung.
+3. Endschalter, Homingrichtung/Pull-off, freien Fahrweg und deaktivierte Laseremission tatsächlich prüfen und bestätigen. Erst **Referenzfahrt jetzt starten** fordert die Fahrt an. Anschließend den wirklichen Referenzort am Gerät bestätigen.
+4. Je Achse einen freien **1-mm-Prüfschritt** wählen, Richtung und Strecke messen und einzeln bestätigen. Der Positionszähler ersetzt diese Beobachtung nicht. Zeichnungsbezug: Ursprung links unten, +X nach rechts, +Y nach oben.
+5. Den gemessenen **Innenfahrraum in Maschinenkoordinaten** mit Abstand zu den mechanischen Grenzen eingeben. Negative Werte sind möglich; die nominellen 200 × 150 mm sind kein Messnachweis. Alle vier Ecken einzeln laserfrei anfahren und am Gerät bestätigen.
+6. Die geprüfte Ursprungsecke ausdrücklich als Arbeitsnull setzen und anschließend die angezeigte Maschinen-/Arbeitskoordinaten-Zuordnung prüfen und bestätigen. Der Dialog startet danach keinen Laserauftrag. Das Design muss vollständig innerhalb des geprüften Innenraums liegen.
+
+Die Einrichtung gilt nur für diese Gerätesitzung. STOPP, Reset, Trennung, Fehler oder Änderungen an Firmware/Einstellungen entwerten sie; anschließend erneut einrichten. Ein Projekt speichert keine Gerätefreigabe. Bei falscher Richtung oder unerwartetem Verhalten sofort STOPP beziehungsweise den Not-Aus am Gerät verwenden. Siehe [Einrichtungsvertrag](../M3_SESSION_COMMISSIONING.md).
+
+### Absaugung bestätigen und ersten Auftrag starten
+
+Nach erfolgreicher Einrichtung die Laserfreigabe am Gerät erst für die beaufsichtigte Materialprobe wiederherstellen. Material, Fokus, geschlossene Einhausung und freien Arbeitsraum prüfen; eigene Materialwerte beziehungsweise einen geeigneten kleinen Materialversuch verwenden.
+
+Der Gehäuse-Fan-Port ist weiterhin ungeklärt: **M8 ist kein belegter Lüfterknopf.** Der neue Modus schaltet keine Absaugung ein. Er ist nur nutzbar, wenn eine geeignete Absaugung tatsächlich unabhängig läuft und am Gerät geprüft werden kann. Eine solche Anlage wird nicht als vorhanden vorausgesetzt. Wenn die vorhandene Absaugung erst mit Laseremission anläuft oder gar nicht läuft, die Bestätigung nicht setzen; dieser Modus löst das Fan-Port-Problem nicht.
+
+1. Unter **Absaugung und Aufsicht** gegebenenfalls den tatsächlich rauchfreien und geklärten Zustand mit **Sicheren Zustand bestätigen** bestätigen. Dann **Beaufsichtigte Absaugung ohne Sensor wählen**.
+2. Den konkreten Vorgang wählen: **Neuen Auftrag starten**, **Fokuspunkt prüfen** oder **Pausierten Auftrag fortsetzen**. Laufende Absaugung, eigene Anwesenheit sowie Material/Fokus/Gehäuse/Arbeitsraum wahrheitsgemäß bestätigen und **Für diesen Vorgang bestätigen** wählen.
+3. Innerhalb der angezeigten Frist von höchstens **30 Sekunden** die zugehörige Start-, Fokus- oder Fortsetzen-Taste selbst betätigen. Die Absaugungsbestätigung startet nichts und ist einmalig an diesen Vorgang gebunden. Bei abgelaufener oder veralteter Bestätigung erneut prüfen und bestätigen.
+
+Luftstrom wird **nicht gemessen**. Während der gesamten Bearbeitung am Gerät bleiben und die Absaugung weiterlaufen lassen, auch während einer Pause. Vor jedem Fortsetzen frisch bestätigen; nach STOPP, Auftragsende, Fehler oder Trennung gilt keine alte Bestätigung weiter. Bei entfallener Absaugung oder Aufsicht **Absaugung oder Aufsicht entfallen – STOPP** verwenden; bei fehlender Reaktion direkt am Gerät abschalten. Die Software schaltet die Absaugung nicht automatisch aus und kann ihren Zustand bei Strom-/Verbindungsverlust nicht garantieren. Live-Overrides bleiben gesperrt. Details: [Absaugvertrag](../OPERATOR_ATTENDED_EXTRACTION.md).
+
+Eine USB-Verbindung über einen umschaltenden KVM kann beim Wechsel zum anderen PC verloren gehen. Ein verworfener Auftrag wird nach erneutem Anschließen nicht automatisch fortgesetzt; Geräteeinrichtung, Materiallage und Absaugung neu prüfen.
 
 ## Optionale Komponenten
 
