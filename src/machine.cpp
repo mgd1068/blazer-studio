@@ -318,7 +318,9 @@ void Machine::setManualTravel(double nx,double px,double ny,double py){if(auto r
 void Machine::attestManualPlacement(bool motors,bool measured,bool stationary,bool closed){if(auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&r)r->localData({{"op","attest"},{"frameId",operatorLocalFrame().value("frameId")},{"motorsFree",motors},{"measuredClear",measured},{"headStationary",stationary},{"lidClosed",closed}});}
 void Machine::captureOperatorLocalFrame(){dispatchLocalNative("localCapture");}
 void Machine::prepareLocalJob(){
-    if(!live||!session)return;auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());if(!r)return;
+    if(!live||!session)return;
+    auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());
+    if(!r)return;
     if(document->startMode()!=Document::CurrentPosition||document->manualRegistrationEnabled()){const QPointer<Machine> alive(this);r->localData({{"op","invalidateCandidate"}});if(alive)document->notify("Lokaler manueller Start benötigt Aktuelle Position ohne Print-and-Cut-Registrierung.");return;}
     if(!document->planningBusy())r->prepare(document->job());
 }
@@ -338,7 +340,8 @@ bool Machine::dispatchLocalNative(const QString &action){
     auto source=p?p->fingerprint():QByteArray();if(p&&action=="localFrame")source+=p->frameFingerprint();
     const auto digest=ControllerNativeDigest::request(*kind,0,0,bounds,source);
     const auto proof=r->sealNativeAction(*kind,input->interaction,input->observedAtMs,input->expiresAtMs,digest,input->contextToken,status.connectionEpoch,status.coordinateEpoch);
-    if(!proof.proof)return false;return r->submitNativeAction(*kind,proof,0,0,bounds,{},100,100,std::move(p));
+    if(!proof.proof)return false;
+    return r->submitNativeAction(*kind,proof,0,0,bounds,{},100,100,std::move(p));
 }
 void Machine::selectAttendedExtraction(){
     if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)runtime->operatorData({{"op","select"}});

@@ -163,7 +163,7 @@ class GrblSession : public ControllerSession {
         bool g10Dispatched = false, modalRequested = false, modalReadback = false;
         bool queryArmed = false;
         bool operatorLocal = false;
-        QPointF targetWork;
+        QPointF targetWork{};
 
     };
     std::optional<WorkZeroTransaction> workZero;
