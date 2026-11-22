@@ -29,6 +29,7 @@ class Machine : public Simulator {
     Q_PROPERTY(bool jobPrepared READ jobPrepared NOTIFY changed)
     Q_PROPERTY(QString prepareReason READ prepareReason NOTIFY changed)
     Q_PROPERTY(QString nativeInputSafetyError READ nativeInputSafetyError NOTIFY changed)
+    Q_PROPERTY(QVariantMap extractionSupervision READ extractionSupervision NOTIFY changed)
     Q_PROPERTY(QVariantMap commissioning READ commissioning NOTIFY changed)
     Q_PROPERTY(bool holdConfirmed READ holdConfirmed NOTIFY changed)
   public:
@@ -93,6 +94,11 @@ class Machine : public Simulator {
     // Registration/eligibility only. Intents come exclusively from native events.
     Q_INVOKABLE void registerNativeActionControl(QObject *control,const QString &action,
                                                 const QVariantMap &fixedArguments = {});
+    QVariantMap extractionSupervision() const { return live && session ? session->status().extractionSupervision : QVariantMap{}; }
+    Q_INVOKABLE void selectAttendedExtraction();
+    Q_INVOKABLE void attestExternalExtraction(const QString &action,bool extractionOn,bool operatorPresent);
+    Q_INVOKABLE void revokeExternalAttendance();
+    Q_INVOKABLE void confirmExtractionClearance(bool confirmed);
     QVariantMap commissioning() const { return live && session ? session->status().commissioning : QVariantMap{}; }
     Q_INVOKABLE void beginCommissioning();
     Q_INVOKABLE void attestCommissioningMechanics(bool switches, bool direction, bool freeTravel, bool laserDisabled);

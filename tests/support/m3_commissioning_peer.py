@@ -41,10 +41,12 @@ class Plant(Peer):
             self.state = 'Idle'; self.event('homed',list(self.actual))
         elif line.startswith('$'): raise ValueError('unsupported plant command')
         else:
+            # Parenthesized comments are non-executable standard GCode.
+            line = re.sub(r'\([^()]*\)', '', line).strip()
             words = re.findall(r'([A-Z])([+-]?(?:\d+(?:\.\d*)?|\.\d+))',line)
             if ''.join(k+v for k,v in words) != line.replace(' ',''): raise ValueError('malformed command')
             codes = [int(float(v)) for k,v in words if k=='G']
-            if any(v not in [0,1,4,10,20,21,54,90,91] for v in codes): raise ValueError('unexpected modal code')
+            if any(v not in [0,1,4,10,17,20,21,54,90,91,94] for v in codes): raise ValueError('unexpected modal code')
             for k,v in words:
                 n=float(v)
                 if k=='G' and n==20:self.units=25.4

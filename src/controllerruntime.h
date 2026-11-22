@@ -76,6 +76,7 @@ class ControllerRuntimeSession final : public ControllerSession {
     void beginFocus(const ControllerRuntimeInputStamp &stamp);
     void endFocus();
     bool commissioningData(const QVariantMap &data);
+    bool operatorData(const QVariantMap &data);
 
   private:
     friend class ControllerRuntimeTestAccess;

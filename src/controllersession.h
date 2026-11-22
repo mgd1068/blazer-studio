@@ -39,6 +39,7 @@ struct ControllerStatus {
     QString extractionSafetyError{};
     quint64 coordinateEpoch = 0; // Reference/WCO/reset identity; never motion authority.
     QVariantMap commissioning{};
+    QVariantMap extractionSupervision{};
     bool holdConfirmed = false; // Fresh controller Hold report, not physical standstill proof.
 };
 class ControllerSession : public QObject {

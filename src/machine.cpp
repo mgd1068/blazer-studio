@@ -247,6 +247,9 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
         if(!status.ready||status.busy||status.firing||!status.verified||!status.positionReferenced||!status.motionSafetyError.isEmpty())return {};
         if((action=="start"||action=="focus")&&!processingSafetyErrors().isEmpty())return {};
     }
+    if(status.extractionSupervision.value("mode").toString()=="operatorAttendedExternal" &&
+       (action=="start" || action=="focus" || action=="resume") &&
+       status.extractionSupervision.value("pendingAction").toString()!=action)return {};
     const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
     PreparedControllerJob::Ptr prepared;
     if(action=="start") {
@@ -276,6 +279,27 @@ bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,
         input->contextToken,snapshot.connectionEpoch,snapshot.coordinateEpoch);
     if(!stamp.proof){document->notify("Geräteaktion gesperrt: Eingabe oder Referenzrahmen inzwischen verändert.");return false;}
     return runtime->submitNativeAction(*kind,stamp,x,y,bounds,std::move(prepared),feed,power);
+}
+void Machine::selectAttendedExtraction(){
+    if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)runtime->operatorData({{"op","select"}});
+}
+void Machine::attestExternalExtraction(const QString &action,bool extractionOn,bool operatorPresent){
+    auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());if(!live||!runtime)return;
+    QByteArray source;
+    if(action=="start") {
+        const auto prepared=runtime->m_preparation->result(runtime->m_prepareSequence);
+        if(!prepared||!prepared->valid()){document->notify("Absaugungsbestätigung: aktuellen Auftrag zuerst fertig berechnen lassen.");return;}
+        source=prepared->sourceFingerprint()+prepared->profileFingerprint();
+    }
+    runtime->operatorData({{"op","attest"},{"action",action},{"source",source},{"extractionOn",extractionOn},{"operatorPresent",operatorPresent}});
+}
+void Machine::revokeExternalAttendance(){
+    if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime) {
+        runtime->stop();runtime->operatorData({{"op","withdraw"}});
+    }
+}
+void Machine::confirmExtractionClearance(bool confirmed){
+    if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)runtime->operatorData({{"op","clearance"},{"confirmed",confirmed}});
 }
 void Machine::commissioningData(const QVariantMap &data) {
     if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)

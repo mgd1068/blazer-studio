@@ -28,6 +28,16 @@ class ControllerRuntimeWorker final : public QObject {
     QTimer *m_watchdog = nullptr; // Created in initialize(), after worker affinity is established.
     ControllerCommissioning m_commissioning;
     bool m_setupUpdating=false;
+    QByteArray m_operatorSession, m_operatorSource, m_activeOperatorOperation;
+    quint64 m_operatorAttempt=0, m_operatorWitnessCoordinate=0;
+    bool m_operatorPaused=false;
+    QString m_operatorAction, m_operatorReason;
+    std::optional<AccessoryContract::OperatorWitness> m_operatorWitness;
+    AccessoryContract::OperatorContext m_operatorContext;
+    void operatorData(const QVariantMap &data);
+    bool beginAccessory(AccessoryContract::OperatorAction action,const QByteArray &source = {});
+    void discardOperatorWitness();
+    QVariantMap extractionSupervisionSnapshot() const;
     void setupData(const QVariantMap &data);
     void setupMotion(const ControllerRuntimeRequest &request);
     void updateCommissioning();

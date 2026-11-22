@@ -323,6 +323,10 @@ bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,
     request.prepared=std::move(prepared);request.feed=feed;request.power=power;request.id=++m_nextRequest;
     const bool accepted=send(m_mailbox,std::move(request));emit changed();return accepted;
 }
+bool ControllerRuntimeSession::operatorData(const QVariantMap &data) {
+    Request request{Kind::OperatorData};request.bounds=data;request.id=++m_nextRequest;
+    const bool accepted=send(m_mailbox,std::move(request));emit changed();return accepted;
+}
 bool ControllerRuntimeSession::commissioningData(const QVariantMap &data) {
     Request request{Kind::SetupData};request.bounds=data;request.id=++m_nextRequest;
     const bool accepted=send(m_mailbox,std::move(request));emit changed();return accepted;
@@ -471,6 +475,7 @@ void ControllerRuntimeWorker::drain() {
     if (m_mailbox->takeControl(m_mailbox->stop)) {
         if(m_stopHandoffProbe)m_stopHandoffProbe();
         cancelCommissioning("Einrichtung durch STOPP widerrufen.");
+        discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Fault);
         m_jobActive = m_focusActive = false;
         if (!m_mailbox->close.load() && !m_core->awaitingReset)
@@ -478,6 +483,7 @@ void ControllerRuntimeWorker::drain() {
         retirePrepared();
     }
     if (m_mailbox->takeControl(m_mailbox->close)) {
+        discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_core->close();
         ++m_connectionEpoch;
@@ -504,16 +510,17 @@ void ControllerRuntimeWorker::drain() {
         nowMs() <= request.expiresAt &&
         (request.kind == Kind::Open || request.connectionEpoch == m_connectionEpoch)) {
         if(request.kind!=Kind::Open&&request.kind!=Kind::Hold&&request.kind!=Kind::FocusOff&&
-           request.kind!=Kind::Focus&&request.kind!=Kind::SetupData&&!nativeActionAllowed(request)) {
+           request.kind!=Kind::Focus&&request.kind!=Kind::SetupData&&request.kind!=Kind::OperatorData&&!nativeActionAllowed(request)) {
             m_core->append("Native Geräteaktion abgelehnt: Eingabe, Argumente, Referenzrahmen oder Frist nicht bestätigt.");
         } else {
         m_dispatchProof=request.input.proof;
         if(m_commissioning.active() && m_commissioning.stage!="complete" &&
-           request.kind!=Kind::SetupData && request.kind!=Kind::SetupHome && request.kind!=Kind::SetupProbe && request.kind!=Kind::SetupCorner && request.kind!=Kind::SetupZero && request.kind!=Kind::Open && request.kind!=Kind::Hold) {
+           request.kind!=Kind::SetupData && request.kind!=Kind::OperatorData && request.kind!=Kind::SetupHome && request.kind!=Kind::SetupProbe && request.kind!=Kind::SetupCorner && request.kind!=Kind::SetupZero && request.kind!=Kind::Open && request.kind!=Kind::Hold) {
             m_core->append("Einrichtung aktiv: normale Geräteaktion gesperrt.");
         } else switch (request.kind) {
         case Kind::Open: {
             ++m_connectionEpoch;
+            discardOperatorWitness();m_operatorSession.clear();m_activeOperatorOperation.clear();m_operatorPaused=false;
             m_accessory = AccessoryContract(true);
             const bool opened = m_core->open(request.endpoint) && checkClockContinuity();
             emit openFinished(
@@ -521,6 +528,7 @@ void ControllerRuntimeWorker::drain() {
                 opened ? QString() : QString("Controlleranschluss konnte nicht geöffnet werden."));
             break;
         }
+        case Kind::OperatorData:operatorData(request.bounds);break;
         case Kind::SetupData:setupData(request.bounds);break;
         case Kind::SetupHome:case Kind::SetupProbe:case Kind::SetupCorner:case Kind::SetupZero:setupMotion(request);break;
         case Kind::Jog:
@@ -538,16 +546,18 @@ void ControllerRuntimeWorker::drain() {
             break;
         case Kind::Hold:
             if(!m_core->paused)m_core->pause(); // Never toggle a delayed hold into resume.
+            if(m_core->paused && m_accessory.activeLease() && !m_operatorPaused) {
+                m_operatorPaused=true;discardOperatorWitness();m_accessory.transition(AccessoryContract::Event::Pause);
+            }
             break;
         case Kind::Resume:
             if(!m_core->paused||m_core->controllerState!="Hold"||m_core->firing||m_focusActive)break;
-            if (!m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty())
+            if (!beginAccessory(AccessoryContract::OperatorAction::Resume))
                 m_core->stop();
-            else
-                m_core->pause();
+            else {m_operatorPaused=false;m_core->pause();}
             break;
         case Kind::Override:
-            if (m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty())
+            if (m_accessory.overridesError(m_accessoryClock.elapsed()).isEmpty())
                 m_core->overrides(request.feed, request.power);
             break;
         case Kind::Focus: {
@@ -568,14 +578,15 @@ void ControllerRuntimeWorker::drain() {
                 !m_core->verified() || !m_core->positionReferenced ||
                 !m_core->motionSafetyError().isEmpty())
                 break;
-            if (!m_accessory.begin(m_accessoryClock.elapsed()))
+            if (!beginAccessory(AccessoryContract::OperatorAction::Focus))
                 break;
             m_lastFocusInteraction = proof->interaction;
             m_focusActive = true;
             m_core->focus(true);
             if (!m_core->firing) {
                 m_focusActive = false;
-                m_accessory.transition(AccessoryContract::Event::Complete);
+                discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
+        m_accessory.transition(AccessoryContract::Event::Complete);
             }
             break;
         }
@@ -586,13 +597,14 @@ void ControllerRuntimeWorker::drain() {
             if (!m_core->ready() || !m_core->verified() || !m_core->positionReferenced ||
                 !m_core->motionSafetyError().isEmpty())
                 break;
-            if (!m_accessory.begin(m_accessoryClock.elapsed()))
+            if (!beginAccessory(AccessoryContract::OperatorAction::StartJob,request.prepared?request.prepared->sourceFingerprint()+request.prepared->profileFingerprint():QByteArray()))
                 break;
             m_jobActive = true;
             m_activePrepared = std::move(request.prepared);
             if (!m_core->startPrepared(*m_activePrepared)) {
                 m_jobActive = false;
-                m_accessory.transition(AccessoryContract::Event::Complete);
+                discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
+        m_accessory.transition(AccessoryContract::Event::Complete);
                 retirePrepared();
             }
             break;
@@ -679,16 +691,21 @@ void ControllerRuntimeWorker::coreChanged() {
     updateCommissioning();
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
+    if(status.paused && m_accessory.activeLease() && !m_operatorPaused) {
+        m_operatorPaused=true;discardOperatorWitness();m_accessory.transition(AccessoryContract::Event::Pause);
+    }
     const bool lost =
         (m_wasVerified && !status.verified) || (m_wasReferenced && !status.positionReferenced);
     m_wasVerified = status.verified;
     m_wasReferenced = status.positionReferenced;
     if (!status.connected) {
+        discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_jobActive = m_focusActive = false;
         retirePrepared();
     } else if (lost && !(status.coordinateUpdatePending && !output) &&
                !(m_commissioning.stage=="readback" && m_core->setupReadback.pending && !output)) {
+        discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Fault);
         const bool mustStop =
             (status.executing && !status.referencing && !status.resetting) || output;
@@ -703,6 +720,7 @@ void ControllerRuntimeWorker::coreChanged() {
         }
     } else if ((m_jobActive || m_focusActive) && !status.executing && !status.firing) {
         m_jobActive = m_focusActive = false;
+        discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Complete);
         retirePrepared();
     }
@@ -724,11 +742,13 @@ void ControllerRuntimeWorker::watchdog() {
         (!status.verified || !status.positionReferenced || !status.motionSafetyError.isEmpty() ||
          !m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty());
     if (motion || unsafeOutput) {
+        discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Fault);
         m_jobActive = m_focusActive = false;
         m_core->stop();
     }
     if (!status.connected) {
+        discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_jobActive = m_focusActive = false;
     }
@@ -737,8 +757,11 @@ void ControllerRuntimeWorker::watchdog() {
 void ControllerRuntimeWorker::publish(bool finishDispatch) {
     if (!m_core)
         return;
-    refreshCoordinateEpoch();auto status = m_core->status();
+    refreshCoordinateEpoch();
+    if(m_operatorWitness && (m_operatorWitnessCoordinate!=m_coordinateEpoch || m_accessoryClock.elapsed()>m_operatorWitness->expiresAtMs()))discardOperatorWitness();
+    auto status = m_core->status();
     status.commissioning=commissioningSnapshot();
+    status.extractionSupervision=extractionSupervisionSnapshot();
     const auto now = nowMs();
     status.connectionEpoch = m_connectionEpoch;
     status.coordinateEpoch=m_coordinateEpoch;
@@ -750,6 +773,11 @@ void ControllerRuntimeWorker::publish(bool finishDispatch) {
     status.accessoryJobActive = m_jobActive;
     status.accessoryFocusActive = m_focusActive;
     status.extractionSafetyError = m_accessory.preflightError(m_accessoryClock.elapsed());
+    if(m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorAttendedExternal && m_operatorPaused && !m_operatorWitness)
+        status.extractionSafetyError="Vor Resume externe Absaugung und eigene Anwesenheit erneut bestätigen; Luftstrom nicht gemessen.";
+    if(m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorAttendedExternal) {
+        status.overridesReady=false;status.overridesSafetyError=m_accessory.overridesError(m_accessoryClock.elapsed());
+    }
     status.occupied = status.busy || status.firing || status.opening ||
                       status.accessoryLeaseActive || m_jobActive || m_focusActive;
     status.connectionPhase = !status.connected       ? (status.state == "Verbindungsfehler" ? QString("fault") : QString("closed"))

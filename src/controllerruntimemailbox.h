@@ -18,6 +18,7 @@ enum class ControllerRuntimeRequestKind {
     FocusOff,
     Start,
     SetupData,
+    OperatorData,
     SetupHome,
     SetupProbe,
     SetupCorner,

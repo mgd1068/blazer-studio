@@ -14,11 +14,17 @@ public:
         const auto stamp=r.sealNativeAction(action,++sequence,now,now+250,ControllerNativeDigest::request(action,x,y),std::make_shared<NativeInputContextToken>(),s.connectionEpoch,s.coordinateEpoch);
         return r.submitNativeAction(action,stamp,x,y);
     }
+    static bool start(ControllerRuntimeSession &r,PreparedControllerJob::Ptr job) {
+        const auto s=r.status();const auto now=RuntimePeer::monotonicNs()/1000000;
+        auto stamp=r.sealNativeAction(ControllerNativeAction::StartJob,++sequence,now,now+250,ControllerNativeDigest::request(ControllerNativeAction::StartJob,0,0,{},job->sourceFingerprint()+job->profileFingerprint()),std::make_shared<NativeInputContextToken>(),s.connectionEpoch,s.coordinateEpoch);
+        return r.submitNativeAction(ControllerNativeAction::StartJob,stamp,0,0,{},std::move(job));
+    }
     template<class F> static bool run(ControllerRuntimeSession &r,F fn) {
         auto done=std::make_shared<QSemaphore>();auto result=std::make_shared<std::atomic_bool>(false);
         if(!QMetaObject::invokeMethod(r.m_worker,[worker=r.m_worker,done,result,fn]{result->store(fn(*worker));done->release();},Qt::QueuedConnection))return false;
         return done->tryAcquire(1,3000)&&result->load();
     }
+    static bool sensorUnknown(ControllerRuntimeSession&r){return run(r,[](ControllerRuntimeWorker &w){return w.m_accessory.state(AccessoryContract::Role::EnclosureExtraction).physical==AccessoryContract::PhysicalState::Unknown;});}
     static bool expire(ControllerRuntimeSession &r){return run(r,[](ControllerRuntimeWorker&w){w.m_commissioning.deadline=1;w.updateCommissioning();w.publish();return true;});}
 };
 class ControllerCommissioningTest:public QObject {
@@ -59,6 +65,40 @@ private slots:
         QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupZero));QTRY_COMPARE(stage(r),QString("workCoordinates"));QTRY_VERIFY(std::abs(r.status().position.x())<0.001);
         QVERIFY(data(r,"coordinatesObserved"));QTRY_COMPARE(stage(r),QString("complete"));QVERIFY(r.status().motionSafetyError.isEmpty());
         QCOMPARE(r.status().commissioning.value("workMinX").toDouble(),0.0);QCOMPARE(r.status().commissioning.value("workMaxX").toDouble(),180.0);
+        // Homing intentionally invalidates accessory knowledge. Never clear that
+        // fault automatically merely because the geometry wizard completed.
+        QVERIFY(r.operatorData({{"op","clearance"},{"confirmed",true}}));QTRY_VERIFY(r.status().extractionSupervision.value("reason").toString().startsWith("Sicheren Zustand"));
+        QVERIFY(r.operatorData({{"op","select"}}));QTRY_COMPARE(r.status().extractionSupervision.value("mode").toString(),QString("operatorAttendedExternal"));
+        QVERIFY(!r.status().extractionSafetyError.isEmpty());
+        JobPlan plan;plan.moves.append({QPointF(1,1),QPointF(5,1),300,10,0,false});
+        const auto prepared=PreparedControllerJob::prepare(plan);QVERIFY(prepared->valid());
+        QVERIFY(ControllerRuntimeTestAccess::start(r,prepared));QTest::qWait(100);QCOMPARE(count(peer,"powered"),0);
+        QVERIFY(r.operatorData({{"op","attest"},{"action","start"},{"source",QByteArray(32,'a')+prepared->profileFingerprint()},{"extractionOn",true},{"operatorPresent",true}}));
+        QTRY_COMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString("start"));
+        QVERIFY(ControllerRuntimeTestAccess::start(r,prepared));QTest::qWait(100);QCOMPARE(count(peer,"powered"),0);
+        QTRY_VERIFY(r.status().extractionSupervision.value("pendingAction").toString().isEmpty());
+        // Human statement is separate from a sensor and bound to this job attempt.
+        QVERIFY(r.operatorData({{"op","attest"},{"action","start"},{"source",prepared->sourceFingerprint()+prepared->profileFingerprint()},{"extractionOn",true},{"operatorPresent",true}}));
+        QTRY_COMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString("start"));
+        QVERIFY(r.status().extractionSafetyError.isEmpty());
+        QVERIFY(ControllerRuntimeTestAccess::start(r,prepared));QTRY_VERIFY(count(peer,"powered")>0);QTRY_VERIFY(!r.status().occupied);
+        QCOMPARE(count(peer,"collision"),0);QCOMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString());
+        const auto powered=count(peer,"powered");QVERIFY(ControllerRuntimeTestAccess::start(r,prepared));QTest::qWait(100);QCOMPARE(count(peer,"powered"),powered);
+        QVERIFY(!r.status().overridesReady);
+        QVERIFY(ControllerRuntimeTestAccess::sensorUnknown(r));
+        // Same active job identity survives a genuine Hold; the fresh Resume
+        // witness is distinct and the existing holdConfirmed/native gate stays.
+        QVERIFY(peer.control({{"action","set"},{"values",QJsonObject{{"ackEnabled",false}}}}).ok);
+        QVERIFY(r.operatorData({{"op","attest"},{"action","start"},{"source",prepared->sourceFingerprint()+prepared->profileFingerprint()},{"extractionOn",true},{"operatorPresent",true}}));
+        QTRY_COMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString("start"));
+        QVERIFY(ControllerRuntimeTestAccess::start(r,prepared));QTRY_VERIFY(r.status().accessoryLeaseActive);
+        r.pause();QTRY_VERIFY(r.status().holdConfirmed);QVERIFY(!r.status().extractionSafetyError.isEmpty());
+        QVERIFY(r.operatorData({{"op","attest"},{"action","resume"},{"extractionOn",true},{"operatorPresent",true}}));
+        QTRY_COMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString("resume"));
+        QVERIFY(r.status().extractionSafetyError.isEmpty());
+        QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::Resume));QTRY_VERIFY(!r.status().paused);
+        bool resumed=false;for(const auto &entry:peer.snapshot().object.value("events").toArray()){const auto e=entry.toObject();if(e.value("kind")=="realtime"&&e.value("value").toInt()==int('~'))resumed=true;}QVERIFY(resumed);
+
         r.stop();QTRY_COMPARE(stage(r),QString("fault"));QVERIFY(!r.status().positionReferenced);QVERIFY(!r.status().motionSafetyError.isEmpty());
         r.close();QTRY_VERIFY(!r.status().connected);
     }

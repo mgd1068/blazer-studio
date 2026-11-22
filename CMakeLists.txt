@@ -44,7 +44,7 @@ qt_add_library(blazer-core STATIC
     src/svgasset.cpp src/svgasset.h src/materiallibrary.cpp src/materiallibrary.h
     src/controllersession.cpp src/controllersession.h
     src/grbl.cpp src/grbl.h src/machine.cpp src/machine.h
-    src/controllercommissioning.cpp src/controllercommissioning.h
+    src/controllercommissioning.cpp src/controllercommissioning.h src/controlleroperatorsupervision.cpp
     src/controllerruntime.cpp src/controllerruntime.h src/controllerruntimeworker.h src/controllerruntimemailbox.h
     src/simulator.cpp src/simulator.h src/workspace.cpp src/workspace.h)
 qt_add_resources(blazer-core manufacturer_catalog PREFIX /catalog FILES profiles/manufacturer-materials.json)
@@ -182,6 +182,10 @@ if(BUILD_TESTING)
     target_include_directories(blazer-materialtestledger-tests PRIVATE src)
     target_link_libraries(blazer-materialtestledger-tests PRIVATE Qt6::Core Qt6::Test)
     add_test(NAME materialtestledger COMMAND blazer-materialtestledger-tests)
+    qt_add_executable(blazer-operator-extraction-tests tests/operator_extraction_test.cpp)
+    target_include_directories(blazer-operator-extraction-tests PRIVATE src)
+    target_link_libraries(blazer-operator-extraction-tests PRIVATE Qt6::Core Qt6::Test)
+    add_test(NAME operator_extraction COMMAND blazer-operator-extraction-tests)
     qt_add_executable(blazer-accessory-tests tests/accessorycontract_test.cpp)
     target_include_directories(blazer-accessory-tests PRIVATE src)
     target_link_libraries(blazer-accessory-tests PRIVATE Qt6::Core Qt6::Test)
