@@ -77,6 +77,9 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
         // observed home. A home outside the interior is allowed; shrink only once
         // the head is inside after all four corner probes.
         auto approach=c.limits.united(QRectF(c.home-QPointF(2,2),QSizeF(4,4)));
+        if(approach.width()>m_profile.workArea().width()+.001 || approach.height()>m_profile.workArea().height()+.001) {
+            denied("Innenraum samt bestätigtem Home-/Probenraum überschreitet den gemeldeten Fahrweg; Maschinenvorzeichen und Messwerte prüfen.");return;
+        }
         for(const auto point:{c.limits.topLeft(),c.limits.topRight(),c.limits.bottomLeft(),c.limits.bottomRight()}) {
             const auto work=point-m_core->offset;
             const QPointF actual(GrblWireNumbers::coordinate(work.x())+m_core->offset.x(),GrblWireNumbers::coordinate(work.y())+m_core->offset.y());

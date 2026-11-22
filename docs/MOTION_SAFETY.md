@@ -34,9 +34,11 @@ Pull-off-Verhalten. `homingSafetyError` meldet den fehlenden Nachweis im Backend
 und an die Oberfläche. Ein zukünftiger separater Einrichtungsablauf muss diese
 Evidenz an Geräteinstanz, Endpunkt, Controller und geprüfte Parameter binden;
 gewöhnliche Produktionsbedienung darf keine solche Freigabe erfinden.
-Reale Sessions erhalten derzeit keinen Homingvertrag und können auch kein `$H`
-senden. Reset, Trennen, Störung und Alarm/Door entwerten diesen Vertrag.
-Nur befreundete PTY-Fixtures können unabhängige synthetische Homingevidenz
+Unbestätigte reale Sessions erhalten keinen Homingvertrag und können kein `$H`
+senden. Die [sessionbezogene Einrichtung](M3_SESSION_COMMISSIONING.md) kann nach
+frischem vollständigem Readback und ausdrücklicher mechanischer
+Operatorattestierung eine einzelne Einrichtungsreferenzfahrt zulassen. Reset, Trennen, Störung und Alarm/Door entwerten diesen Vertrag.
+Befreundete PTY-Fixtures können unabhängig davon synthetische Homingevidenz
 bereitstellen; sie ersetzt weiterhin keine Freigabe des G54-/Maschinenraums.
 
 Zusätzliche Korrekturen:
@@ -63,9 +65,9 @@ Zusätzliche Korrekturen:
   beim Encodieren abgelehnt; sonst würde das nächste Ziel eine unerwünschte
   Verbindung gravieren. M8/M9 werden nicht aus einem Profilfingerprint geraten.
 
-## Noch erforderlicher Inbetriebnahmevertrag
+## Inbetriebnahmevertrag
 
-Eine zukünftige Freigabe muss als eigener, überprüfbarer Workflow entstehen,
+Die sessionbezogene Freigabe entsteht als eigener, überprüfbarer Workflow,
 gebunden an konkrete Geräteinstanz, Endpunkt, Controlleridentität, Firmware
 und relevante Einstellungen. Ein identisches Profil allein verbindet keine
 Evidenz mit einer anderen physischen Maschine.

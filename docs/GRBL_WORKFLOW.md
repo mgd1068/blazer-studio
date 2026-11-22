@@ -28,14 +28,16 @@ Maschinengrenzen und die G54-Zuordnung des angeschlossenen Controllers.
 getrennt. Auch eine Referenzfahrt ist reale Bewegung: `homingSafetyError` sperrt
 sie ohne eigenen Nachweis für Endschalter, Homing-Richtung und Parameter.
 `$22=1`, Idle oder Alarm allein erteilen keine Freigabe. Der notwendige separate
-Inbetriebnahmeworkflow ist noch nicht implementiert; reale Sessions erhalten
-keinen solchen Vertrag. Profile, importierte Projekte
+Inbetriebnahmeworkflow ist als [sessionbezogene Einrichtung](M3_SESSION_COMMISSIONING.md)
+mit frischem Controllerreadback, gesonderter Operatorattestierung, begrenzten
+laserfreien Proben und gemessenem signiertem Innenraum implementiert. Ohne
+diesen Ablauf erhalten reale Sessions keinen solchen Vertrag. Profile, importierte Projekte
 und gemeldete Positionen können diesen Vertrag nicht freigeben. Simulator,
 Planung und Datei-Export bleiben verfügbar; Export ist keine Hardwarefreigabe.
 
 Die [Koordinaten-Sicherheitsarchitektur](MOTION_SAFETY.md) beschreibt die
-bekannten Fehler, die reine PTY-Prüfung und den noch erforderlichen
-Inbetriebnahmevertrag. Kein neuer Hardwareversuch wurde ausgeführt.
+bekannten Fehler, die reine PTY-Prüfung und den zugrunde liegenden
+Inbetriebnahmevertrag. Die neuen Worker-/Pflanzentests ersetzen keine physische Abnahme. Kein neuer Hardwareversuch wurde ausgeführt.
 
 ## Projekt → Pfade → Vorschau → Ausgabe
 

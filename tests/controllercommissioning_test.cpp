@@ -51,6 +51,8 @@ class ControllerCommissioningTest:public QObject {
             QVERIFY(data(r,"probeObserved"));QTRY_COMPARE(stage(r),QString("geometry"));
         }
         QCOMPARE(r.status().commissioning.value("probesConfirmed").toInt(),2);
+        QVERIFY(r.commissioningData({{"op","limits"},{"minX",0.0},{"minY",0.0},{"maxX",180.0},{"maxY",130.0}}));
+        QTRY_VERIFY(r.status().commissioning.value("reason").toString().contains("überschreitet"));QCOMPARE(stage(r),QString("geometry"));
         QVERIFY(r.commissioningData({{"op","limits"},{"minX",-190.0},{"minY",-140.0},{"maxX",-10.0},{"maxY",-10.0}}));QTRY_COMPARE(stage(r),QString("cornerReady"));
     }
 private slots:
@@ -86,6 +88,12 @@ private slots:
         const auto powered=count(peer,"powered");QVERIFY(ControllerRuntimeTestAccess::start(r,prepared));QTest::qWait(100);QCOMPARE(count(peer,"powered"),powered);
         QVERIFY(!r.status().overridesReady);
         QVERIFY(ControllerRuntimeTestAccess::sensorUnknown(r));
+        const auto beforeFocus=count(peer,"physicalMove"),beforeFocusPower=count(peer,"powered");
+        QVERIFY(r.operatorData({{"op","attest"},{"action","focus"},{"extractionOn",true},{"operatorPresent",true}}));
+        QTRY_COMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString("focus"));
+        QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::FocusHold));QTRY_VERIFY(count(peer,"powered")>beforeFocusPower);QTRY_VERIFY(!r.status().occupied);
+        QCOMPARE(count(peer,"physicalMove"),beforeFocus);QVERIFY(ControllerRuntimeTestAccess::sensorUnknown(r));
+
         // Same active job identity survives a genuine Hold; the fresh Resume
         // witness is distinct and the existing holdConfirmed/native gate stays.
         QVERIFY(peer.control({{"action","set"},{"values",QJsonObject{{"ackEnabled",false}}}}).ok);

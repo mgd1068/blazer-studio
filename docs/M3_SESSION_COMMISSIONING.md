@@ -55,3 +55,30 @@ werden bis Referenz, Proben, vier Ecken, G10 und Grant durchlaufen. Negative
 Readbacks/fehlende ACKs/Attestierungen/Konfigurationsänderungen und Versuch einer
 normalen Bewegung während Setup werden unabhängig beobachtet. Keine echten
 Ports, OS-Eingaben, Laser- oder Hardwarevalidierung.
+
+## Beaufsichtigte externe Absaugung
+
+`Machine.extractionSupervision` veröffentlicht `mode` (`sensorVerified` oder
+`operatorAttendedExternal`), `notice`, `reason`, `pendingAction` (leer oder
+`start`/`focus`/`resume`), `remainingMs`, `activeLease` und `airflowMeasured=false`.
+`selectAttendedExtraction()` ist eine ausdrückliche Wahl; sie sendet keinen
+Lüfterbefehl. Nach einem Zubehörfault ist zuvor
+`confirmExtractionClearance(true)` als echte menschliche Bestätigung erforderlich.
+Das wird insbesondere nach Homing nicht automatisch übersprungen.
+
+`attestExternalExtraction(action, extractionOn, operatorPresent)` erfasst eine
+Operatorerklärung, niemals einen Sensorwert. Die 30 Sekunden beginnen bei der
+Worker-Erfassung dieser Nichtbewegungsdaten. Anschließend bleibt ein separater
+frischer nativer Ausgabeintent erforderlich. Start bindet die einmalige Witness
+an Prepared-Quelle/Profil und einen konkreten Versuchsbezeichner; Fokus erhält
+einen eigenen Versuch; Resume bindet dieselbe aktive Jobinstanz mit neuer
+Witness. Eine falsche Quelle, ein anderer Koordinatenrahmen, ein abgelaufener
+oder bereits verbrauchter Beleg kann keine Ausgabe starten.
+
+Einmalig beim Hold-Eintritt wird die alte Witness verworfen. Für Resume sind
+frisches echtes Hold-Readback und neue menschliche Erklärung erforderlich.
+Abschluss/STOPP/Fault/Disconnect verwerfen Pending. Während einer ausdrücklich
+beaufsichtigten aktiven Lease wird kein fiktiver 3-s-Flowwert erneuert.
+`revokeExternalAttendance()` fordert STOPP und entwertet die Beaufsichtigung;
+externe Absaugung wird dabei nicht ausgeschaltet. Live-Overrides bleiben in
+diesem Modus gesperrt. Siehe [Vertragsdetails](OPERATOR_ATTENDED_EXTRACTION.md).
