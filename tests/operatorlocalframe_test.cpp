@@ -93,7 +93,10 @@ private slots:
   QVERIFY(ControllerRuntimeTestAccess::native(m,frame?"localFrame":"localStart"));if(frame)m.frameLocalJob();else m.startLocalJob();QTRY_VERIFY(m.busy());m.pause();QTRY_VERIFY(m.holdConfirmed());QTRY_COMPARE(phase(m),QString("paused"));
   if(!frame){QVERIFY(!m.operatorLocalFrame().value("resumeReady").toBool());m.attestExternalExtraction("resume",true,true);}
   QTRY_VERIFY(m.operatorLocalFrame().value("resumeReady").toBool());QVERIFY(ControllerRuntimeTestAccess::native(m,"localResume"));m.resumeLocalJob();QTRY_VERIFY(!m.paused());
-  bool resumed=false;for(const auto&e:peer.snapshot().object.value("events").toArray()){const auto o=e.toObject();if(o.value("kind")=="realtime"&&o.value("value").toInt()==int('~'))resumed=true;}QVERIFY(resumed);QVERIFY(!m.positionReferenced());if(frame)QCOMPARE(count(peer,"powered"),0);
+  // The host clears its hold request before the independent PTY peer necessarily
+  // receives and journals the resume byte. Wait for that wire-side evidence.
+  const auto resumed=[&peer]{for(const auto&e:peer.snapshot().object.value("events").toArray()){const auto o=e.toObject();if(o.value("kind")=="realtime"&&o.value("value").toInt()==int('~'))return true;}return false;};
+  QTRY_VERIFY(resumed());QVERIFY(!m.positionReferenced());if(frame)QCOMPARE(count(peer,"powered"),0);
   m.stop();QTRY_COMPARE(phase(m),QString("invalid"));QVERIFY(!m.operatorLocalFrame().value("localPositionKnown").toBool());
  }
  void measuredButTooSmallRoom(){RuntimePeer peer;Document d;document(d);Machine m(&d);Cleanup cleanup{m};captured(peer,m,2.1,2.1,2.1,2.1);if(QTest::currentTestFailed())return;QVERIFY(m.operatorLocalFrame().value("localPositionKnown").toBool());QVERIFY(!m.operatorLocalFrame().value("fits").toBool());QVERIFY(!m.operatorLocalFrame().value("startReady").toBool());QVERIFY(!m.operatorLocalFrame().value("frameReady").toBool());m.startLocalJob();m.frameLocalJob();QTest::qWait(80);QCOMPARE(count(peer,"physicalMove"),0);QCOMPARE(count(peer,"powered"),0);QVERIFY(!m.positionReferenced());}
