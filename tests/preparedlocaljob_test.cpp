@@ -1,4 +1,5 @@
 #include "preparedlocaljob.h"
+#include "virtualgrblplant.h"
 #include <QJsonDocument>
 #include <QtTest>
 #include <cmath>
@@ -51,6 +52,71 @@ class PreparedLocalJobTest : public QObject {
                 "G0"};
     }
   private slots:
+    void dynamicRapidsPreserveModeAndPowerWithoutEmission() {
+        JobPlan plan;
+        plan.moves = {{{10, 10}, {12, 10}, 600, 20, 0, false},
+                      {{12, 10}, {20, 10}, 600, 0, 0, true},
+                      {{20, 10}, {22, 10}, 600, 80, 0, false},
+                      {{22, 10}, {30, 11}, 600, 0, 0, true},
+                      {{30, 11}, {32, 11}, 600, 30, 0, false},
+                      {{32, 11}, {34, 11}, 600, 0, 0, false},
+                      {{34, 11}, {34, 12}, 600, 0, 0, true},
+                      {{34, 12}, {32, 12}, 600, 60, 0, false},
+                      {{32, 12}, {30, 12}, 600, 0, 0, false},
+                      {{30, 12}, {10, 10}, 600, 0, 0, true}};
+        const auto result = PreparedLocalJob::prepare(plan, request(plan, {10, 10}, {10, 30, 10, 10}));
+        QVERIFY2(result->valid(), qPrintable(result->errors().join("; ")));
+        equal(result->requiredUnion(), {0, 24, 0, 2});
+        equal(result->usableAfterMargin(), {8, 28, 8, 8});
+        const auto lines = result->prepared()->lines();
+        QCOMPARE(lines.count("M4 S200"), 1);
+        QCOMPARE(lines.count("M5"), 1);
+        QCOMPARE(lines.count("M5 S0"), 1);
+        QVERIFY(lines.contains("G1 X22.000 Y10.000 S800"));
+        QVERIFY(lines.contains("G1 X32.000 Y11.000 S300"));
+        QVERIFY(lines.contains("G1 X32.000 Y12.000 S600"));
+        VirtualGrblPlant plant({-100, -100, 200, 150}, {-20, -20}, {-50, -50}, {-98, -98});
+        plant.counterBias = {};
+        const QList<double> expectedPowers = {200, 800, 300, 0, 600, 0};
+        int cutting = 0, rapids = 0;
+        for (const auto &line : lines) {
+            const auto before = plant.modal;
+            const auto count = plant.travel.size();
+            QCOMPARE(plant.apply(line.toLatin1()), VirtualGrblPlant::Result::Accepted);
+            if (plant.travel.size() == count)
+                continue;
+            const auto &move = plant.travel.last();
+            if (move.rapid) {
+                QVERIFY(!move.emitting);
+                if (++rapids == 1) {
+                    QCOMPARE(plant.modal.spindle, 0);
+                    QCOMPARE(plant.modal.power, 0.);
+                } else {
+                    QCOMPARE(plant.modal.spindle, 4);
+                    QCOMPARE(plant.modal.power, before.power);
+                }
+            } else {
+                QVERIFY(cutting < expectedPowers.size());
+                QCOMPARE(plant.modal.spindle, 4);
+                QCOMPARE(plant.modal.power, expectedPowers[cutting]);
+                QCOMPARE(move.emitting, expectedPowers[cutting++] > 0);
+            }
+        }
+        QCOMPARE(cutting, 6);
+        QCOMPARE(rapids, 5);
+        QCOMPARE(plant.physical, QPointF(-40, -40));
+        QCOMPARE(plant.modal.spindle, 0);
+        QCOMPARE(plant.modal.power, 0.);
+        QCOMPARE(plant.idleOutput(), 0.);
+        QCOMPARE(plant.limits, 0);
+        // Only the known G0 transition is new. No S/F or foreign modes on it.
+        for (const auto &bad : {"G0 X20.000 Y10.000 S0", "G0 X20.000 Y10.000 F600.000",
+                                "G91 G0 X20.000 Y10.000", "G0 X20.000 Y10.000 Z0"}) {
+            auto invalid = minimal();
+            invalid.insert(11, bad);
+            QVERIFY(!parse(invalid));
+        }
+    }
     void nineAnchors_data() {
         QTest::addColumn<int>("anchor");
         for (int n = 0; n < 9; ++n)

@@ -137,10 +137,9 @@ class GrblControllerAdapter final : public ControllerAdapter {
                 lastSlice = m.slice;
             }
             if (m.rapid) {
-                if (emitting) {
-                    lines << "M5";
-                    emitting = false;
-                }
+                // Under the required $32=1 dynamic M4 contract, G0 itself
+                // inhibits output and preserves S. Avoid planner-draining M5/M4
+                // state changes between contours and raster rows.
                 lines << "G0 X" + num(m.to.x()) + " Y" + num(m.to.y());
             } else {
                 if (!emitting) {
@@ -149,8 +148,8 @@ class GrblControllerAdapter final : public ControllerAdapter {
                     lastPower = m.power;
                 }
                 auto line = "G1 X" + num(m.to.x()) + " Y" + num(m.to.y());
-                // A standalone S change drains GRBL's planner. Keep power changes on
-                // their motion block so raster overscan remains a continuous move.
+                // Keep power changes on their motion block so each emitting
+                // segment, including the first after G0, has the intended S.
                 if (m.power != lastPower) {
                     line += " S" + QString::number(qRound64(m.power * powerScale / 100.));
                     lastPower = m.power;

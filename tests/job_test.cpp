@@ -173,11 +173,12 @@ class JobTest : public QObject {
         QVERIFY(lines.contains("G1 X7.000 Y0.100 S500"));
         QVERIFY(lines.contains("G1 X0.000 Y0.100 S0"));
         QVERIFY(!lines.contains("M4 S500"));
-        QCOMPARE(lines.count("M4 S0"), 2);
+        QCOMPARE(lines.count("M4 S0"), 1);
         const int rapid = lines.indexOf("G0 X16.000 Y0.100");
         QVERIFY(rapid > 0);
-        QCOMPARE(lines[rapid - 1], "M5");
-        QCOMPARE(lines[rapid + 1], "M4 S0");
+        QCOMPARE(lines[rapid - 1], "G1 X16.000 Y0.000 S0");
+        QCOMPARE(lines[rapid + 1], "G1 X9.000 Y0.100");
+        QCOMPARE(lines.count("M5"), 1);
         QVERIFY(lines.contains("M5 S0"));
     }
     void rectangleCut() {

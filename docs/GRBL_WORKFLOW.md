@@ -101,3 +101,20 @@ Die erweiterten PTY-Prüfungen und ihre Grenzen stehen im [Prüfbericht](QA_REPO
 Nach einem künftig verifizierten Vertrag müssen Arbeitskoordinaten mit dem frisch bestätigten G54-Gesamtversatz in den nachgewiesenen vorzeichenbehafteten Maschinenraum umgerechnet werden. Ein im Editor gültiger Job kann physisch außerhalb dieses Raums liegen. Dieselbe Prüfung gilt für Schrittbewegung, Rahmenfahrt und Fokusposition. Der bisher pauschal positive 200×150-mm-Maschinenraum ist keine gültige Hardwareannahme; reale Ausgabe bleibt deshalb gesperrt.
 
 Nach **Arbeitsnullpunkt hier setzen** muss ein neuer Offset nach Abschluss der G10/G54-Befehle gemeldet sein. Ein während der Befehlsfolge eingetroffener alter WCO-Wert gibt keine Folgebewegung frei.
+
+## Dynamische Leerfahrten zwischen Bearbeitungen
+
+Der GRBL-Encoder setzt den bekannten `$32=1`-/`M4`-Vertrag voraus. Die erste
+Anfahrt erfolgt weiterhin nach `M5` und `S0`. Ab der ersten Bearbeitung bleibt
+`M4` über interne `G0`-Leerfahrten aktiv; der letzte `S`-Wert bleibt erhalten.
+`G0` unterdrückt in diesem Vertrag die Laserausgabe. Ein geänderter Sollwert
+steht am folgenden `G1`-Block. Dadurch entfallen die zusätzlichen
+Planner-Synchronisationen durch `M5`/`M4` zwischen Konturen und Rasterzeilen.
+Das Programmende bleibt `M5 S0` mit anschließendem zielwortlosem `G0`.
+
+Dies entspricht den [offiziellen GRBL-Lasermodusregeln](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Laser-Mode).
+Der strikte lokale Wireprüfer akzeptiert hierfür nur sein bekanntes `G0 X… Y…`
+ohne `S`, `F`, weitere Achsen oder Moduswechsel. Roh-/Wire-Restwege und
+Sicherheitsreserve bleiben identisch. Die unabhängige virtuelle Plant-Prüfung
+belegt die Softwaresemantik; sie ist keine physische Firmware- oder Lüfterabnahme.
+Es werden keine `M7`/`M8`- oder unbekannten Lüfterbefehle ergänzt.

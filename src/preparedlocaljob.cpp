@@ -140,8 +140,11 @@ bool PreparedLocalJob::inspectWire(const QStringList &lines, double powerScale, 
         if (!target.hasMatch())
             return fail("Nicht unterstützter Modus, Ziel oder Achswort in lokaler Ausgabe.");
         const bool rapid = target.captured(1) == "0";
+        // The fixed prefix requires laser mode and only M4 is accepted above.
+        // Dynamic G0 inhibits output without clearing M4 or retained S; axes,
+        // units, coordinate selection and G0's no-S/no-F grammar stay strict.
         if ((rapid &&
-             (emitting || !target.captured(4).isEmpty() || !target.captured(5).isEmpty())) ||
+             (!target.captured(4).isEmpty() || !target.captured(5).isEmpty())) ||
             (!rapid && (!emitting || !haveApproach)))
             return fail("Unbekannter Laser-/Anfahrtszustand der lokalen Ausgabe.");
         bool xOk = false, yOk = false;
