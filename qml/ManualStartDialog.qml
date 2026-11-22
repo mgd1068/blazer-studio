@@ -147,10 +147,11 @@ Dialog {
                 ActionButton {
                     id:frame; objectName:"frameLocalJob"; property bool nativeActionEnabled:dialog.visible && !dialog.beginPending && dialog.positioned
                     text:"Rahmen laserfrei prüfen und zum Startpunkt zurück"; dark:dialog.dark
-                    enabled:dialog.idle && !dialog.beginPending && !!dialog.state.prepared && !!dialog.state.fits
+                    enabled:dialog.idle && !dialog.beginPending && !!dialog.state.prepared && !!dialog.state.fits && !!dialog.state.frameReady
                     Component.onCompleted:dialog.register(frame,"localFrame")
                     onClicked:dialog.modelMachine.frameLocalJob()
                 }
+                Label { objectName:"manualFrameReason"; Layout.fillWidth:true; visible:!!dialog.state.frameReason; wrapMode:Text.WordWrap; textFormat:Text.PlainText; color:dialog.muted; text:dialog.state.frameReason || "" }
                 ActionButton {
                     id:start; objectName:"startLocalJob"; property bool nativeActionEnabled:dialog.visible && !dialog.beginPending && dialog.positioned
                     text:"Auftrag am Handstartpunkt starten"; dark:dialog.dark; primary:true
