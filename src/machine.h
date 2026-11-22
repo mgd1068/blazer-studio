@@ -107,6 +107,9 @@ class Machine : public Simulator {
     Q_INVOKABLE void resumeLocalJob();
     Q_INVOKABLE void cancelOperatorLocalFrame();
     QVariantMap extractionSupervision() const { return live && session ? session->status().extractionSupervision : QVariantMap{}; }
+    Q_INVOKABLE void selectSupervisedDeviceCycle();
+    Q_INVOKABLE void attestDeviceCycle(const QString &action,bool operatorPresent);
+    Q_INVOKABLE void revokeDeviceAttendance();
     Q_INVOKABLE void selectAttendedExtraction();
     Q_INVOKABLE void attestExternalExtraction(const QString &action,bool extractionOn,bool operatorPresent);
     Q_INVOKABLE void revokeExternalAttendance();

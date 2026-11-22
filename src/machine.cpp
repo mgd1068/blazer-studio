@@ -274,7 +274,7 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
         if(!status.ready||status.busy||status.firing||!status.verified||!status.positionReferenced||!status.motionSafetyError.isEmpty())return {};
         if((action=="start"||action=="focus")&&!processingSafetyErrors().isEmpty())return {};
     }
-    if(status.extractionSupervision.value("mode").toString()=="operatorAttendedExternal" &&
+    if(QStringList{"operatorAttendedExternal","operatorSupervisedDeviceCycle"}.contains(status.extractionSupervision.value("mode").toString()) &&
        (action=="start" || action=="focus" || action=="resume") &&
        status.extractionSupervision.value("pendingAction").toString()!=action)return {};
     const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
@@ -342,6 +342,24 @@ bool Machine::dispatchLocalNative(const QString &action){
     const auto proof=r->sealNativeAction(*kind,input->interaction,input->observedAtMs,input->expiresAtMs,digest,input->contextToken,status.connectionEpoch,status.coordinateEpoch);
     if(!proof.proof)return false;
     return r->submitNativeAction(*kind,proof,0,0,bounds,{},100,100,std::move(p));
+}
+void Machine::selectSupervisedDeviceCycle(){
+    if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)runtime->operatorData({{"op","selectDeviceCycle"}});
+}
+void Machine::attestDeviceCycle(const QString &action,bool operatorPresent){
+    auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());if(!live||!runtime)return;
+    QByteArray source;
+    if(action=="start") {
+        const auto prepared=runtime->m_preparation->result(runtime->m_prepareSequence);
+        if(!prepared||!prepared->valid()){document->notify("Anwesenheitsbestätigung: aktuellen Auftrag zuerst fertig berechnen lassen.");return;}
+        source=prepared->sourceFingerprint()+prepared->profileFingerprint();
+    }
+    runtime->operatorData({{"op","attestDeviceCycle"},{"action",action},{"source",source},{"operatorPresent",operatorPresent}});
+}
+void Machine::revokeDeviceAttendance(){
+    if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime) {
+        runtime->stop();runtime->operatorData({{"op","withdraw"}});
+    }
 }
 void Machine::selectAttendedExtraction(){
     if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)runtime->operatorData({{"op","select"}});

@@ -15,7 +15,7 @@ class AccessoryContract {
     enum class PhysicalState { Unknown, Flowing, NotFlowing };
     enum class CommandState { Unknown, Pending, AcknowledgedOn, AcknowledgedOff, Rejected };
     enum class Event { Pause, Complete, Stop, Fault, Disconnect };
-    enum class SupervisionMode { SensorVerified, OperatorAttendedExternal };
+    enum class SupervisionMode { SensorVerified, OperatorAttendedExternal, OperatorSupervisedDeviceCycle };
     enum class OperatorAction { StartJob, Focus, Resume };
     struct OperatorContext {
         QByteArray sessionBinding, operationBinding;
@@ -63,6 +63,8 @@ class AccessoryContract {
 
     SupervisionMode supervisionMode() const { return m_supervisionMode; }
     QString supervisionNotice() const {
+        if (m_supervisionMode == SupervisionMode::OperatorSupervisedDeviceCycle)
+            return QStringLiteral("Beaufsichtigter Gerätezyklus: Anwesenheit vor Start/Fokus/Fortsetzen bestätigen. Gehäuse- und Modullüfterzustand unbekannt; von Blazer nicht rücklesbar.");
         return m_supervisionMode == SupervisionMode::OperatorAttendedExternal
             ? QStringLiteral("Beaufsichtigte externe Absaugung: Bestätigung durch anwesende Bedienperson erforderlich. Luftstrom wird nicht gemessen.")
             : QStringLiteral("Sensorüberwachung erforderlich; aktueller Luftstrom siehe Zubehörstatus.");
@@ -88,28 +90,32 @@ class AccessoryContract {
     std::optional<OperatorWitness> submitOperatorAttestation(
             const OperatorContext &context, bool externalExtractionOn, bool operatorPresent,
             qint64 witnessedAtMs, qint64 nowMs) {
-        m_operatorPending.reset(); // A failed/new declaration cannot retain old consent.
-        if (m_supervisionMode != SupervisionMode::OperatorAttendedExternal || m_fault ||
-            !validContext(context) || context.sessionBinding != m_operatorSession ||
-            !externalExtractionOn || !operatorPresent || witnessedAtMs < 0 || nowMs < witnessedAtMs ||
-            nowMs - witnessedAtMs > operatorWitnessLifetimeMs || witnessedAtMs < m_lastOperatorWitnessAt ||
-            witnessedAtMs > std::numeric_limits<qint64>::max() - operatorWitnessLifetimeMs ||
-            m_operatorSequence == std::numeric_limits<quint64>::max()) return {};
-        if (m_lease && (!validOperatorLease() || !m_operatorPaused || context.action != OperatorAction::Resume ||
-            context.operationBinding != m_operatorLease->operationBinding ||
-            m_operatorLease->action == OperatorAction::Focus)) return {};
-        if (!m_lease && context.action == OperatorAction::Resume) return {};
-        m_lastOperatorWitnessAt = witnessedAtMs;
-        OperatorWitness witness(this, m_issuerIdentity, ++m_operatorSequence, context, witnessedAtMs);
-        m_operatorPending = witness;
-        return witness;
+        m_operatorPending.reset();
+        if (m_supervisionMode != SupervisionMode::OperatorAttendedExternal || !externalExtractionOn)
+            return {};
+        return submitPresence(context, operatorPresent, witnessedAtMs, nowMs);
+    }
+    bool selectOperatorSupervisedDeviceCycle(const QByteArray &sessionBinding) {
+        if (m_lease || m_releaseRequired || m_fault || !binding(sessionBinding)) return false;
+        resetOperatorEvidence();
+        m_supervisionMode = SupervisionMode::OperatorSupervisedDeviceCycle;
+        m_operatorSession = sessionBinding;
+        m_states[index(Role::EnclosureExtraction)] = {};
+        m_pending[index(Role::EnclosureExtraction)].reset();
+        return true;
+    }
+    std::optional<OperatorWitness> submitOperatorPresence(const OperatorContext &context,
+            bool operatorPresent, qint64 witnessedAtMs, qint64 nowMs) {
+        m_operatorPending.reset();
+        if (m_supervisionMode != SupervisionMode::OperatorSupervisedDeviceCycle) return {};
+        return submitPresence(context, operatorPresent, witnessedAtMs, nowMs);
     }
     QString operatorAdmissionError(const OperatorContext &context, const OperatorWitness &witness,
                                   qint64 nowMs, bool airAssistRequired = false) const {
-        if (m_supervisionMode != SupervisionMode::OperatorAttendedExternal)
-            return QStringLiteral("Beaufsichtigte externe Absaugung ist nicht ausdrücklich gewählt.");
+        if (m_supervisionMode == SupervisionMode::SensorVerified)
+            return QStringLiteral("Beaufsichtigter Bedienmodus ist nicht ausdrücklich gewählt.");
         if (m_fault)
-            return QStringLiteral("Absaugungszustand nach Störung unbekannt: sichere Freigabe und neue Bestätigung erforderlich.");
+            return QStringLiteral("Gerätezustand nach Störung unbekannt: sichere Freigabe und neue Bestätigung erforderlich.");
         if (!validContext(context) || context.sessionBinding != m_operatorSession)
             return QStringLiteral("Bestätigung gehört nicht zu dieser Session oder Ausgabeaktion.");
         if (!m_operatorPending || witness.m_issuer != this || witness.m_identity != m_issuerIdentity ||
@@ -118,7 +124,7 @@ class AccessoryContract {
             witness.m_witnessedAt != m_operatorPending->m_witnessedAt)
             return QStringLiteral("Frische einmalige Bestätigung für genau diese Ausgabeaktion erforderlich.");
         if (nowMs < witness.m_witnessedAt || nowMs - witness.m_witnessedAt > operatorWitnessLifetimeMs)
-            return QStringLiteral("Menschliche Absaugungsbestätigung ist veraltet oder ihre Zeit ungültig.");
+            return QStringLiteral("Menschliche Bedienbestätigung ist veraltet oder ihre Zeit ungültig.");
         if (m_lease) {
             if (!validOperatorLease() || !m_operatorPaused || context.action != OperatorAction::Resume ||
                 m_operatorLease->action == OperatorAction::Focus ||
@@ -138,24 +144,24 @@ class AccessoryContract {
         m_operatorAttending = true;
         m_operatorPaused = false;
         m_lease = true;
-        m_releaseRequired = true;
+        m_releaseRequired = m_supervisionMode == SupervisionMode::OperatorAttendedExternal;
         return true;
     }
     void discardOperatorWitness() { m_operatorPending.reset(); }
     // Withdraw supervision if the operator leaves OR external extraction is lost.
     // This never turns an accessory off; the worker must suspend processing.
     void operatorNoLongerAttending() {
-        if (m_supervisionMode == SupervisionMode::OperatorAttendedExternal) transition(Event::Fault);
+        if (m_supervisionMode != SupervisionMode::SensorVerified) transition(Event::Fault);
     }
     QString overridesError(qint64 nowMs) const {
-        if (m_supervisionMode == SupervisionMode::OperatorAttendedExternal)
-            return QStringLiteral("Live-Overrides sind bei menschlich beaufsichtigter externer Absaugung gesperrt.");
+        if (m_supervisionMode != SupervisionMode::SensorVerified)
+            return QStringLiteral("Live-Overrides sind im beaufsichtigten Bedienmodus gesperrt.");
         return preflightError(nowMs);
     }
 
     bool configure(Role role, Mapping mapping) {
         if (m_lease || m_releaseRequired ||
-            (role == Role::EnclosureExtraction && m_supervisionMode == SupervisionMode::OperatorAttendedExternal))
+            (role == Role::EnclosureExtraction && m_supervisionMode != SupervisionMode::SensorVerified))
             return false;
         const auto other = index(role) == 0 ? 1u : 0u;
         if (mapping.outputId.trimmed().isEmpty() ||
@@ -169,7 +175,7 @@ class AccessoryContract {
     }
     const State &state(Role role) const { return m_states[index(role)]; }
     bool verified(Role role) const {
-        if (role == Role::EnclosureExtraction && m_supervisionMode == SupervisionMode::OperatorAttendedExternal) return false;
+        if (role == Role::EnclosureExtraction && m_supervisionMode != SupervisionMode::SensorVerified) return false;
         const auto &mapping = m_mappings[index(role)];
         return mapping.verified && !mapping.outputId.trimmed().isEmpty() &&
                !mapping.verificationEvidence.trimmed().isEmpty();
@@ -218,9 +224,9 @@ class AccessoryContract {
         if (m_fault)
             return QStringLiteral(
                 "Zubehörzustand nach Störung unbekannt: sichere Freigabe erforderlich.");
-        if (m_supervisionMode == SupervisionMode::OperatorAttendedExternal) {
+        if (m_supervisionMode != SupervisionMode::SensorVerified) {
             if (!binding(m_operatorSession))
-                return QStringLiteral("Beaufsichtigte externe Absaugung benötigt eine neue Sessionbindung.");
+                return QStringLiteral("Beaufsichtigter Bedienmodus benötigt eine neue Sessionbindung.");
             if (m_lease) {
                 if (!validOperatorLease() || !m_operatorAttending || nowMs < m_lastOperatorWitnessAt)
                     return QStringLiteral("Menschliche Beaufsichtigung ist nicht mehr gültig; Bearbeitung anhalten.");
@@ -229,7 +235,9 @@ class AccessoryContract {
                     m_operatorPending->m_identity != m_issuerIdentity ||
                     nowMs < m_operatorPending->m_witnessedAt ||
                     nowMs - m_operatorPending->m_witnessedAt > operatorWitnessLifetimeMs)
-                    return QStringLiteral("Externe Absaugung und eigene Anwesenheit vor Start/Fokus/Resume neu bestätigen; Luftstrom nicht gemessen.");
+                    return m_supervisionMode == SupervisionMode::OperatorSupervisedDeviceCycle
+                        ? QStringLiteral("Eigene Anwesenheit vor Start/Fokus/Fortsetzen neu bestätigen; Lüfterzustände werden nicht rückgelesen.")
+                        : QStringLiteral("Externe Absaugung und eigene Anwesenheit vor Start/Fokus/Resume neu bestätigen; Luftstrom nicht gemessen.");
             }
             return airAssistRequired ? roleError(Role::AirAssist, nowMs) : QString{};
         }
@@ -281,8 +289,25 @@ class AccessoryContract {
     }
     bool releaseRequired() const { return m_releaseRequired; }
     bool activeLease() const { return m_lease; }
+    bool faulted() const { return m_fault; }
 
   private:
+    std::optional<OperatorWitness> submitPresence(const OperatorContext &context,
+            bool operatorPresent, qint64 witnessedAtMs, qint64 nowMs) {
+        if (m_fault || !validContext(context) || context.sessionBinding != m_operatorSession ||
+            !operatorPresent || witnessedAtMs < 0 || nowMs < witnessedAtMs ||
+            nowMs - witnessedAtMs > operatorWitnessLifetimeMs || witnessedAtMs < m_lastOperatorWitnessAt ||
+            witnessedAtMs > std::numeric_limits<qint64>::max() - operatorWitnessLifetimeMs ||
+            m_operatorSequence == std::numeric_limits<quint64>::max()) return {};
+        if (m_lease && (!validOperatorLease() || !m_operatorPaused || context.action != OperatorAction::Resume ||
+            context.operationBinding != m_operatorLease->operationBinding ||
+            m_operatorLease->action == OperatorAction::Focus)) return {};
+        if (!m_lease && context.action == OperatorAction::Resume) return {};
+        m_lastOperatorWitnessAt = witnessedAtMs;
+        OperatorWitness witness(this, m_issuerIdentity, ++m_operatorSequence, context, witnessedAtMs);
+        m_operatorPending = witness;
+        return witness;
+    }
     static bool binding(const QByteArray &value) {
         if (value.size() != 64) return false;
         for (const char c : value) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;

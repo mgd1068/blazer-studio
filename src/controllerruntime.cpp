@@ -840,9 +840,11 @@ void ControllerRuntimeWorker::publish(bool finishDispatch) {
     status.accessoryJobActive = m_jobActive;
     status.accessoryFocusActive = m_focusActive;
     status.extractionSafetyError = m_accessory.preflightError(m_accessoryClock.elapsed());
-    if(m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorAttendedExternal && m_operatorPaused && !m_operatorWitness)
-        status.extractionSafetyError="Vor Resume externe Absaugung und eigene Anwesenheit erneut bestätigen; Luftstrom nicht gemessen.";
-    if(m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorAttendedExternal) {
+    if(m_accessory.supervisionMode()!=AccessoryContract::SupervisionMode::SensorVerified && m_operatorPaused && !m_operatorWitness)
+        status.extractionSafetyError=m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorSupervisedDeviceCycle
+            ?"Vor Fortsetzen eigene Anwesenheit erneut bestätigen; Lüfterzustände unbekannt."
+            :"Vor Resume externe Absaugung und eigene Anwesenheit erneut bestätigen; Luftstrom nicht gemessen.";
+    if(m_accessory.supervisionMode()!=AccessoryContract::SupervisionMode::SensorVerified) {
         status.overridesReady=false;status.overridesSafetyError=m_accessory.overridesError(m_accessoryClock.elapsed());
     }
     status.occupied = status.busy || status.firing || status.opening ||

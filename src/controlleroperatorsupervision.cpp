@@ -19,17 +19,28 @@ void ControllerRuntimeWorker::discardOperatorWitness(){
 }
 QVariantMap ControllerRuntimeWorker::extractionSupervisionSnapshot() const {
     const auto now=m_accessoryClock.elapsed();
-    return {{"mode",m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorAttendedExternal?"operatorAttendedExternal":"sensorVerified"},
-        {"notice",m_accessory.supervisionNotice()},{"reason",m_operatorReason},
+    const auto mode=m_accessory.supervisionMode();
+    const bool cycle=mode==AccessoryContract::SupervisionMode::OperatorSupervisedDeviceCycle;
+    const auto name=cycle?QString("operatorSupervisedDeviceCycle"):
+        mode==AccessoryContract::SupervisionMode::OperatorAttendedExternal?QString("operatorAttendedExternal"):QString("sensorVerified");
+    const QVariantList fans={
+        QVariantMap{{"role","enclosureExhaust"},{"state","unknown"},{"feedback","notReadBack"},{"independentControl",false}},
+        QVariantMap{{"role","laserModuleCooling"},{"state","unknown"},{"feedback","notReadBack"},{"independentControl",false}}};
+    return {{"mode",name},{"notice",m_accessory.supervisionNotice()},{"reason",m_operatorReason},
         {"pendingAction",m_operatorWitness?m_operatorAction:QString()},
         {"remainingMs",m_operatorWitness?std::max<qint64>(0,m_operatorWitness->expiresAtMs()-now):0},
-        {"activeLease",m_accessory.activeLease()},{"airflowMeasured",false}};
+        {"activeLease",m_accessory.activeLease()},{"airflowMeasured",false},
+        {"presenceOnly",cycle},{"requiresExternalExtraction",!cycle},
+        {"clearanceRequired",m_accessory.faulted()||m_accessory.releaseRequired()},
+        {"deviceFans",fans}};
 }
 void ControllerRuntimeWorker::operatorData(const QVariantMap &data) {
     const auto op=data.value("op").toString();
     if(op=="withdraw") {
         discardOperatorWitness();m_accessory.operatorNoLongerAttending();
-        m_operatorReason="Beaufsichtigung oder externe Absaugung widerrufen; neue Einrichtung/Freigabe erforderlich.";
+        m_operatorReason=m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorSupervisedDeviceCycle
+            ?"Anwesenheit widerrufen; tatsächlichen Gerätezustand klären und neu einrichten."
+            :"Beaufsichtigung oder externe Absaugung widerrufen; neue Einrichtung/Freigabe erforderlich.";
         if((m_core->busy()||m_core->firing) && !m_core->awaitingReset)m_core->stop();
         return;
     }
@@ -37,7 +48,9 @@ void ControllerRuntimeWorker::operatorData(const QVariantMap &data) {
         if(m_core->ready() && !m_core->firing && !m_accessory.activeLease() && !m_jobActive && !m_focusActive &&
            data.value("confirmed").metaType().id()==QMetaType::Bool && data.value("confirmed").toBool() &&
            m_accessory.releaseAfterSafeClearance(true)) {
-            discardOperatorWitness();m_operatorReason="Sicheren Zustand und Abzug der Dämpfe menschlich bestätigt. Vor Ausgabe erneut attestieren.";
+            discardOperatorWitness();m_operatorReason=m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorAttendedExternal
+                ?"Sicheren Zustand und Abzug der Dämpfe menschlich bestätigt. Vor Ausgabe erneut attestieren."
+                :"Tatsächlichen Gerätezustand menschlich geklärt. Vor Ausgabe Anwesenheit erneut bestätigen.";
         } else m_operatorReason="Sichere Freigabe erst im freien Idle/S0 ohne aktive Ausgabe möglich.";
         return;
     }
@@ -46,17 +59,18 @@ void ControllerRuntimeWorker::operatorData(const QVariantMap &data) {
         m_operatorReason="Zuerst diese Gerätesitzung vollständig einrichten und referenzieren.";return;
     }
     refreshCoordinateEpoch();
-    if(op=="select") {
+    if(op=="select" || op=="selectDeviceCycle") {
         if(!m_core->ready() || m_accessory.activeLease() || m_jobActive || m_focusActive)return;
         const auto binding=supervisionBinding();
-        if(m_accessory.selectOperatorAttendedExternal(binding)) {
+        if(op=="selectDeviceCycle"?m_accessory.selectOperatorSupervisedDeviceCycle(binding):m_accessory.selectOperatorAttendedExternal(binding)) {
             m_operatorSession=binding;discardOperatorWitness();m_operatorReason=m_accessory.supervisionNotice();
         } else m_operatorReason="Moduswechsel benötigt freien sicheren Zustand und gegebenenfalls ausdrücklich bestätigte Clearance.";
         return;
     }
-    if(op!="attest" || m_accessory.supervisionMode()!=AccessoryContract::SupervisionMode::OperatorAttendedExternal)return;
+    const bool cycle=m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorSupervisedDeviceCycle;
+    if((op!="attestDeviceCycle" || !cycle) && (op!="attest" || m_accessory.supervisionMode()!=AccessoryContract::SupervisionMode::OperatorAttendedExternal))return;
     if(m_operatorSession!=supervisionBinding()) {
-        discardOperatorWitness();m_operatorReason="Absaugungsmodus gehört zu einer anderen Geräte-/Settingssitzung; ausdrücklich neu auswählen.";return;
+        discardOperatorWitness();m_operatorReason="Bedienmodus gehört zu einer anderen Geräte-/Settingssitzung; ausdrücklich neu auswählen.";return;
     }
     discardOperatorWitness();
     const auto action=data.value("action").toString();AccessoryContract::OperatorAction kind;
@@ -74,15 +88,18 @@ void ControllerRuntimeWorker::operatorData(const QVariantMap &data) {
         }
         source=m_activePrepared->sourceFingerprint()+m_activePrepared->profileFingerprint();
     } else {m_operatorReason="Ausgabeaktion für Bestätigung unbekannt.";return;}
-    if(data.value("extractionOn").metaType().id()!=QMetaType::Bool || data.value("operatorPresent").metaType().id()!=QMetaType::Bool)return;
+    if(data.value("operatorPresent").metaType().id()!=QMetaType::Bool || (!cycle && data.value("extractionOn").metaType().id()!=QMetaType::Bool))return;
     auto operation=kind==AccessoryContract::OperatorAction::Resume?m_activeOperatorOperation:contextHash(source,m_coordinateEpoch,++m_operatorAttempt,m_operatorSession);
     m_operatorContext={m_operatorSession,operation,kind};
     const auto now=m_accessoryClock.elapsed();
-    m_operatorWitness=m_accessory.submitOperatorAttestation(m_operatorContext,data.value("extractionOn").toBool(),data.value("operatorPresent").toBool(),now,now);
+    m_operatorWitness=cycle?m_accessory.submitOperatorPresence(m_operatorContext,data.value("operatorPresent").toBool(),now,now):
+        m_accessory.submitOperatorAttestation(m_operatorContext,data.value("extractionOn").toBool(),data.value("operatorPresent").toBool(),now,now);
     if(m_operatorWitness) {
         m_operatorAction=action;m_operatorSource=source;m_operatorWitnessCoordinate=m_coordinateEpoch;
-        m_operatorReason="Menschliche Bestätigung für diese Ausgabeaktion erfasst; Luftstrom nicht gemessen. Innerhalb 30 s ausdrücklich starten.";
-    } else m_operatorReason="Externe Absaugung und eigene Anwesenheit müssen ausdrücklich für die aktuelle Aktion bestätigt sein.";
+        m_operatorReason=cycle?"Anwesenheit für diese Ausgabeaktion bestätigt. Innerhalb 30 s ausdrücklich starten; Lüfterzustände unbekannt und nicht rücklesbar.":
+            "Menschliche Bestätigung für diese Ausgabeaktion erfasst; Luftstrom nicht gemessen. Innerhalb 30 s ausdrücklich starten.";
+    } else m_operatorReason=cycle?"Eigene Anwesenheit muss ausdrücklich für diese aktuelle Aktion bestätigt sein.":
+        "Externe Absaugung und eigene Anwesenheit müssen ausdrücklich für die aktuelle Aktion bestätigt sein.";
 }
 bool ControllerRuntimeWorker::beginAccessory(AccessoryContract::OperatorAction action,const QByteArray &requestedSource) {
     if(m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::SensorVerified)
@@ -100,7 +117,10 @@ bool ControllerRuntimeWorker::beginAccessory(AccessoryContract::OperatorAction a
     const auto operation=m_operatorContext.operationBinding;
     const bool accepted=m_accessory.beginOperator(m_operatorContext,*m_operatorWitness,m_accessoryClock.elapsed());
     discardOperatorWitness();
-    if(accepted){m_activeOperatorOperation=operation;m_operatorPaused=false;m_operatorReason="Beaufsichtigte Ausgabe; Luftstrom nicht gemessen. Bei Aufsichts-/Absaugungsverlust STOPP.";}
+    if(accepted){m_activeOperatorOperation=operation;m_operatorPaused=false;
+        m_operatorReason=m_accessory.supervisionMode()==AccessoryContract::SupervisionMode::OperatorSupervisedDeviceCycle
+            ?"Beaufsichtigter Gerätezyklus aktiv. Lüfterzustände unbekannt; tatsächliche Lüfter beim ersten Materialtest beobachten. Bei fehlender Aufsicht STOPP."
+            :"Beaufsichtigte Ausgabe; Luftstrom nicht gemessen. Bei Aufsichts-/Absaugungsverlust STOPP.";}
     else m_operatorReason="Einmalige menschliche Bestätigung nicht mehr gültig; erneut bestätigen.";
     return accepted;
 }
