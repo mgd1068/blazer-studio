@@ -40,6 +40,12 @@ class PreparedLocalJob final {
     // Zero-based index in prepared()->lines(); -1 if all targets equal the head.
     qsizetype firstNonzeroMotionLineIndex() const { return m_firstNonzero; }
     qsizetype motionLineCount() const { return m_motionLines; }
+    // Independently ready, entirely frozen output-off frame. A frame-only
+    // failure (e.g. quantized return to a fractional head) does not void the job.
+    const QStringList &frameLines() const { return m_frameLines; }
+    const QString &frameError() const { return m_frameError; }
+    ManualTravelCheck::Distances frameRequiredUnion() const { return m_frameRequired; }
+    const QByteArray &frameFingerprint() const { return m_frameProgramFingerprint; }
     bool matches(const JobPlan &, const ManualTravelCheck::Request &,
                  const Cancellation &cancel = {}) const;
 
@@ -48,6 +54,7 @@ class PreparedLocalJob final {
     PreparedLocalJob() = default;
     bool inspectWire(const QStringList &, double powerScale, const QSizeF &bed,
                      const Cancellation &);
+    void prepareFrame(const QSizeF &bed, const Cancellation &);
     PreparedControllerJob::Ptr m_prepared;
     ManualTravelCheck::Result m_pure;
     QStringList m_errors;
@@ -56,5 +63,9 @@ class PreparedLocalJob final {
     ManualTravelCheck::Distances m_available, m_usable, m_raw, m_wire, m_union;
     QRectF m_rawLocalBounds, m_absoluteWireBounds, m_localWireBounds;
     qsizetype m_firstNonzero = -1, m_motionLines = 0;
+    QStringList m_frameLines;
+    QString m_frameError;
+    ManualTravelCheck::Distances m_frameRequired;
+    QByteArray m_frameProgramFingerprint;
     bool m_cancelled = false;
 };

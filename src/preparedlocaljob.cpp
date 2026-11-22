@@ -1,4 +1,5 @@
 #include "preparedlocaljob.h"
+#include "grblwirenumbers.h"
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QIODevice>
@@ -188,12 +189,73 @@ bool PreparedLocalJob::inspectWire(const QStringList &lines, double powerScale, 
     return true;
 }
 
+void PreparedLocalJob::prepareFrame(const QSizeF &bed, const Cancellation &cancel) {
+    // Axis-aligned straight frame segments have extrema at their endpoints,
+    // including the first head-to-corner approach and final return.
+    const auto b = m_absoluteWireBounds;
+    const QList<QPointF> targets = {b.topLeft(),    b.topRight(), b.bottomRight(),
+                                    b.bottomLeft(), b.topLeft(),  m_head};
+    QStringList lines = {"M5 S0", "G21", "G90", "G54"};
+    m_frameRequired = m_union;
+    for (const auto target : targets) {
+        if (isCancelled(cancel)) {
+            m_cancelled = true;
+            m_frameError = "Lokale Rahmenvorbereitung abgebrochen.";
+            return;
+        }
+        const auto x = GrblWireNumbers::format(target.x());
+        const auto y = GrblWireNumbers::format(target.y());
+        bool xOk = false, yOk = false;
+        const QPointF actual(x.toDouble(&xOk), y.toDouble(&yOk));
+        if (!xOk || !yOk || !std::isfinite(actual.x()) || !std::isfinite(actual.y()) ||
+            actual.x() < 0 || actual.y() < 0 || actual.x() > bed.width() ||
+            actual.y() > bed.height()) {
+            m_frameError = "Tatsächliches Rahmenziel außerhalb des unveränderten Ausgabeprofils.";
+            return;
+        }
+        const auto rawLocal = target - m_head;
+        include(m_frameRequired, rawLocal);
+        include(m_frameRequired, {GrblWireNumbers::coordinate(rawLocal.x()),
+                                  GrblWireNumbers::coordinate(rawLocal.y())});
+        // Return to a fractional confirmed head can differ after output
+        // formatting. This residual is real requested travel, never ignored.
+        include(m_frameRequired, actual - m_head);
+        const auto line = "G1 X" + x + " Y" + y + " S0 F600.000";
+        if (line.toLatin1().size() + 1 > 79) {
+            m_frameError = "Lokale Rahmenzeile überschreitet den GRBL-Zeilenpuffer.";
+            return;
+        }
+        lines.append(line);
+    }
+    const auto errors = exceeded(m_frameRequired, m_usable);
+    if (!errors.isEmpty()) {
+        m_frameError = "Rahmen einschließlich Rückkehr passt nicht: " + errors.join("; ");
+        return;
+    }
+    lines.append("M5 S0");
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    setup(stream);
+    stream << QByteArray("prepared-local-frame-program-v1") << m_fingerprint << m_request << m_frame
+           << lines;
+    if (isCancelled(cancel)) {
+        m_cancelled = true;
+        m_frameError = "Lokale Rahmenvorbereitung abgebrochen.";
+        return;
+    }
+    m_frameProgramFingerprint = hash(bytes);
+    m_frameLines = std::move(lines);
+}
+
 PreparedLocalJob::Ptr PreparedLocalJob::prepare(const JobPlan &plan,
                                                 const ManualTravelCheck::Request &request,
                                                 const Cancellation &cancel) {
     auto result = std::shared_ptr<PreparedLocalJob>(new PreparedLocalJob);
     const auto fail = [&](QStringList errors) -> Ptr {
         result->m_prepared.reset();
+        result->m_frameLines.clear();
+        result->m_frameProgramFingerprint.clear();
+        result->m_frameError = "Kein gültiger lokaler Auftrag für eine Rahmenvorbereitung.";
         result->m_errors = std::move(errors);
         result->m_cancelled = isCancelled(cancel) || result->m_cancelled;
         return result;
@@ -256,7 +318,8 @@ PreparedLocalJob::Ptr PreparedLocalJob::prepare(const JobPlan &plan,
     s << QByteArray("prepared-local-job-v1") << result->m_source << result->m_profile
       << result->m_manualSource << result->m_request << result->m_frame << prepared->lines();
     result->m_fingerprint = hash(bytes);
-    if (isCancelled(cancel))
+    result->prepareFrame(plan.deviceProfile().workArea(), cancel);
+    if (result->m_cancelled || isCancelled(cancel))
         return fail({"Lokale Vorbereitung abgebrochen."});
     result->m_prepared = prepared;
     return result;

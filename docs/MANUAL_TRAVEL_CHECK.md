@@ -123,3 +123,24 @@ Session-/Frame-Nonce, passende Koordinaten, Bedienabsicht und Absaugung binden.
 `matches(plan, request, cancel)` prüft denselben unveränderten Quellplan und Request
 außerhalb des Echtzeitpfads. Keine dieser Hashes erlaubt reale Bewegung oder setzt
 die globale Maschinenreferenz auf bekannt.
+
+### Separat vorbereitete Rahmenfahrt
+
+`frameLines()` enthält bereits vor einer Rahmenbereitschaft das vollständige
+unveränderliche Ausgabeprogramm: M5/S0, G21/G90/G54, sechs explizite G1-Ziele mit
+S0/F600 (vier Ecken der tatsächlichen Wire-Boundingbox, Schluss und Rückkehr zum
+Kopfziel), abschließend M5/S0. Auch Anfahrt und Rückkehr werden mit Roh-, lokaler
+und tatsächlicher absoluter Wirequantisierung gegen dieselben vier nutzbaren
+Restwege geprüft; `frameRequiredUnion()` zeigt diese konservative Vereinigung.
+Bei einem bestätigten Kopf von 10,0004 mm kann die Rückkehr als X10,000 eine neue
+negative Strecke von 0,0004 mm anfordern. Diese wird nicht als exakt identische
+Kopfposition dargestellt oder verworfen.
+
+Rahmenfreigabe ist unabhängig: Nur ein gültiger Auftrag mit nicht leeren
+`frameLines()` hat ein vorbereitetes Rahmenprogramm. `frameError()` erklärt eine
+Ablehnung; ein ausschließlich zusätzlicher Rahmenfehler entwertet den Auftrag
+nicht. `frameFingerprint()` bindet exakt diese Zeilen an Job-, Request- und
+Messdatenidentität. Der Worker darf die Zeilen nicht erst bei Start neu erzeugen;
+seine eigene Session-/Frame-/Bedienbindung bleibt weiterhin erforderlich. Ein
+vollständig degenerierter Rahmen ist Daten mit unveränderten Zielen, kein
+Nachweis tatsächlich erfolgter Bewegung.

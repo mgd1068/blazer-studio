@@ -325,6 +325,102 @@ class PreparedLocalJobTest : public QObject {
         QVERIFY(!parse(lines));
         QVERIFY(!parse(minimal(), {std::numeric_limits<double>::quiet_NaN(), 0}));
     }
+    void preparedFrameUsesOnlyFrozenZeroPowerTargetsAndReturnsToHead() {
+        const auto plan = path({50, 50}, {{40, 50}, {80, 50}, {70, 60}, {35, 50}});
+        const auto r = request(plan, {50, 50}, {18, 33, 3, 13});
+        const auto result = PreparedLocalJob::prepare(plan, r);
+        QVERIFY(result->valid());
+        QVERIFY2(result->frameError().isEmpty(), qPrintable(result->frameError()));
+        const QStringList expected = {"M5 S0",
+                                      "G21",
+                                      "G90",
+                                      "G54",
+                                      "G1 X35.000 Y50.000 S0 F600.000",
+                                      "G1 X80.000 Y50.000 S0 F600.000",
+                                      "G1 X80.000 Y60.000 S0 F600.000",
+                                      "G1 X35.000 Y60.000 S0 F600.000",
+                                      "G1 X35.000 Y50.000 S0 F600.000",
+                                      "G1 X50.000 Y50.000 S0 F600.000",
+                                      "M5 S0"};
+        QCOMPARE(result->frameLines(), expected);
+        equal(result->frameRequiredUnion(), {15, 30, 0, 10});
+        QCOMPARE(result->frameFingerprint().size(), 32);
+        QCOMPARE(result->prepared()->lines(), plan.gcode());
+        const auto repeated = PreparedLocalJob::prepare(plan, r);
+        QCOMPARE(result->frameFingerprint(), repeated->frameFingerprint());
+        auto changed = plan;
+        auto move = changed.moves[0];
+        move.speed = 601;
+        changed.moves.replace(0, move);
+        const auto different =
+            PreparedLocalJob::prepare(changed, request(changed, {50, 50}, {18, 33, 3, 13}));
+        QVERIFY(different->valid());
+        QCOMPARE(different->frameLines(), expected);
+        QVERIFY(different->frameFingerprint() !=
+                result->frameFingerprint()); // Same visible frame, different frozen job.
+    }
+    void frameReturnFractionalHeadCanFailWhileTheJobStaysValid_data() {
+        QTest::addColumn<double>("headX");
+        QTest::addColumn<double>("targetX");
+        QTest::addColumn<bool>("positiveReturn");
+        QTest::newRow("negative-round-in-return") << 10.0004 << 20.0004 << false;
+        QTest::newRow("positive-round-out-return") << 10.0006 << 9.0006 << true;
+    }
+    void frameReturnFractionalHeadCanFailWhileTheJobStaysValid() {
+        QFETCH(double, headX);
+        QFETCH(double, targetX);
+        QFETCH(bool, positiveReturn);
+        const auto plan = path({headX, 10}, {{targetX, 10}});
+        auto r = request(plan, {headX, 10},
+                         positiveReturn ? Distances{4, 2, 2, 2} : Distances{2, 13, 2, 2});
+        const auto result = PreparedLocalJob::prepare(plan, r);
+        QVERIFY2(result->valid(), qPrintable(result->errors().join(';')));
+        QVERIFY(result->prepared());
+        QVERIFY(result->matches(plan, r));
+        QVERIFY(result->frameLines().isEmpty());
+        QVERIFY(result->frameFingerprint().isEmpty());
+        QVERIFY(result->frameError().contains("Rückkehr"));
+        if (positiveReturn)
+            QCOMPARE(result->frameRequiredUnion().positiveX, 10.001 - headX);
+        else
+            QCOMPARE(result->frameRequiredUnion().negativeX, headX - 10.000);
+        // Extra measured room, not changing/rounding the confirmed head, permits the frame.
+        if (positiveReturn)
+            r.available->positiveX = 2.001;
+        else
+            r.available->negativeX = 2.001;
+        const auto allowed = PreparedLocalJob::prepare(plan, r);
+        QVERIFY(allowed->valid());
+        QVERIFY2(allowed->frameError().isEmpty(), qPrintable(allowed->frameError()));
+        QCOMPARE(allowed->frameLines().size(), 11);
+        QCOMPARE(allowed->headAnchor(), QPointF(headX, 10));
+        QCOMPARE(allowed->frameLines()[9], positiveReturn
+                                               ? QString("G1 X10.001 Y10.000 S0 F600.000")
+                                               : QString("G1 X10.000 Y10.000 S0 F600.000"));
+        QCOMPARE(allowed->prepared()->lines(), result->prepared()->lines());
+    }
+    void degenerateFramesAndInvalidJobsNeverInventMotionOrGrant() {
+        const auto point = path({10, 10}, {{10, 10}});
+        const auto p = PreparedLocalJob::prepare(point, request(point, {10, 10}, {2, 2, 2, 2}));
+        QVERIFY(p->valid());
+        QVERIFY(p->frameError().isEmpty());
+        QCOMPARE(p->frameLines().size(), 11);
+        for (int i = 4; i < 10; ++i)
+            QCOMPARE(p->frameLines()[i], QString("G1 X10.000 Y10.000 S0 F600.000"));
+        equal(p->frameRequiredUnion(), {});
+        QCOMPARE(p->firstNonzeroMotionLineIndex(), qsizetype(-1));
+        auto line = path({10, 10}, {{10, 20}});
+        const auto l = PreparedLocalJob::prepare(line, request(line, {10, 10}));
+        QVERIFY(l->valid());
+        QVERIFY(l->frameError().isEmpty());
+        for (int i = 4; i < 10; ++i)
+            QVERIFY(l->frameLines()[i].startsWith("G1 X10.000 Y"));
+        const auto invalid = PreparedLocalJob::prepare(line, request(line, {11, 10}));
+        QVERIFY(!invalid->valid());
+        QVERIFY(invalid->frameLines().isEmpty());
+        QVERIFY(invalid->frameFingerprint().isEmpty());
+        QVERIFY(!invalid->frameError().isEmpty());
+    }
     void fullMoveBudgetAndCancellationNeverPublishPartialPreparation() {
         JobPlan plan;
         plan.moves.reserve(JobPlan::maximumMoves);
