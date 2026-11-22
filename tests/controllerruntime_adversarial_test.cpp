@@ -175,6 +175,28 @@ class ControllerRuntimeTestAccess {
             return {};
         return guard;
     }
+    static QVariantMap mailboxState(ControllerRuntimeSession &runtime) {
+        QMutexLocker lock(&runtime.m_mailbox->mutex);
+        return {{"queued",int(runtime.m_mailbox->normal.size())},
+                {"stopLatched",runtime.m_mailbox->stop.load()},
+                {"dispatchInFlight",runtime.m_mailbox->dispatchInFlight},
+                {"continuityFence",runtime.m_mailbox->continuityFence},
+                {"generation",QVariant::fromValue(runtime.m_mailbox->generation.load())}};
+    }
+    static QVariantMap resetDiagnostics(ControllerRuntimeSession &runtime) {
+        auto result=std::make_shared<QVariantMap>();
+        const bool captured=run(runtime,[result](ControllerRuntimeWorker &worker) {
+            auto &core=*worker.m_core;
+            *result={{"awaitingReset",core.awaitingReset},{"handshaking",core.handshaking},
+                     {"coreReady",core.ready()},{"coreState",core.status().state},
+                     {"knownPosition",core.knownPosition},{"knownOffset",core.knownOffset},
+                     {"knownOutput",core.knownOutput},{"waitingAck",core.waitingAck},
+                     {"log",core.logEntries()}};
+            return true;
+        });
+        (*result)["workerCaptured"]=captured;
+        return *result;
+    }
     static bool injectStampedJog(ControllerRuntimeSession &runtime, quint64 generation, quint64 connectionEpoch) {
         const auto stamp=proof(runtime,ControllerNativeAction::Jog,.75,0);
         return run(runtime, [generation, connectionEpoch,stamp](ControllerRuntimeWorker &worker) {
@@ -532,28 +554,76 @@ class ControllerRuntimeAdversarialTest : public QObject {
         QVERIFY(after && after->generation > before->generation && !after->lease && !after->job);
         QVERIFY(!barrier->timedOut());
     }
+    void fullMailboxRejectsOverrideAdmissionWithoutClaimingExecution_data() {
+        QTest::addColumn<bool>("resetBanner");
+        QTest::newRow("normal-reset-handshake") << true;
+        QTest::newRow("missing-reset-banner-is-not-ready") << false;
+    }
     void fullMailboxRejectsOverrideAdmissionWithoutClaimingExecution() {
+        QFETCH(bool, resetBanner);
         RuntimePeer peer;
         QVERIFY(startPeer(peer));
         RuntimeOwner owner;
         auto &runtime = *owner.runtime;
         QVERIFY(open(runtime, peer));
         QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready, 5000);
+        // Stop reception/queue drainage and reset verification are distinct.
+        // Deterministically withhold only the second startup banner, not the
+        // initial handshake; admission must never pretend it completed.
+        if (!resetBanner)
+            QVERIFY(peer.control({{"action","set"},{"values",QJsonObject{{"resetEnabled",false}}}}).ok);
+        const auto before=ControllerRuntimeTestAccess::mailboxState(runtime);
         auto barrier = ControllerRuntimeTestAccess::hold(runtime);
         QVERIFY(barrier);
-        for (int i = 0; i < 16; ++i) ControllerRuntimeTestAccess::jog(runtime,.1, 0);
-        const bool overflowAccepted = ControllerRuntimeTestAccess::overrides(runtime,100, 100);
+        for (int i = 0; i < 16; ++i)
+            QVERIFY(ControllerRuntimeTestAccess::jog(runtime,.1,0));
+        QCOMPARE(ControllerRuntimeTestAccess::mailboxState(runtime).value("queued").toInt(),16);
+        const bool overflowAccepted = ControllerRuntimeTestAccess::overrides(runtime,100,100);
+        const auto stopAt=RuntimePeer::monotonicNs();
         runtime.stop(); // Clear all queued motion before letting the worker proceed.
         barrier->release();
-        QVERIFY2(!overflowAccepted, "A full mailbox must reject admission rather than report accepted execution");
-        QTRY_VERIFY_WITH_TIMEOUT(runtime.status().ready && !runtime.status().requestPending, 3000);
-        QVERIFY(ControllerRuntimeTestAccess::overrides(runtime,100, 100)); // Enqueued only; no synthetic override/flow grant exists.
+        QVERIFY2(!overflowAccepted,"A full mailbox must reject admission rather than report accepted execution");
+        // One unchanged absolute 3000-ms recovery budget, including peer reset,
+        // queue retirement and (for the ordinary fixture) the original Ready check.
+        QElapsedTimer recoveryBudget;recoveryBudget.start();
+        const bool recovered=QTest::qWaitFor([&] {
+            const auto status=runtime.status();
+            return recoveryBudget.elapsed()<=3000 && !status.requestPending &&
+                   (!resetBanner || status.ready) &&
+                   firstResetAfter(events(peer),stopAt)>=stopAt;
+        },3000);
+        if(!recovered) {
+            const auto status=runtime.status();
+            qInfo()<<"STOP facade"<<status.state<<status.connectionPhase<<status.connected
+                   <<status.ready<<status.requestPending<<status.statusFresh<<status.statusAgeMs;
+            qInfo()<<"STOP mailbox"<<ControllerRuntimeTestAccess::mailboxState(runtime);
+            qInfo()<<"STOP worker"<<ControllerRuntimeTestAccess::resetDiagnostics(runtime);
+            qInfo()<<"STOP peer"<<peer.snapshot().object;
+        }
+        QVERIFY2(recovered,"STOP reset/queue/Ready contract failed within unchanged 3000-ms budget; see state/peer diagnostics");
+        const auto drained=ControllerRuntimeTestAccess::mailboxState(runtime);
+        QCOMPARE(drained.value("queued").toInt(),0);
+        QVERIFY(!drained.value("stopLatched").toBool());
+        QVERIFY(!drained.value("dispatchInFlight").toBool());
+        QVERIFY(!drained.value("continuityFence").toBool());
+        QVERIFY(drained.value("generation").toULongLong()>before.value("generation").toULongLong());
+        QVERIFY(!barrier->timedOut());
+        if (resetBanner) {
+            QVERIFY(runtime.status().ready); // Original successful reset/handshake evidence retained.
+        } else {
+            QVERIFY(!runtime.status().ready);
+            const auto diagnostic=ControllerRuntimeTestAccess::resetDiagnostics(runtime);
+            QVERIFY(diagnostic.value("workerCaptured").toBool());
+            QVERIFY(diagnostic.value("awaitingReset").toBool());
+            QVERIFY(!diagnostic.value("coreReady").toBool());
+        }
+        QVERIFY(ControllerRuntimeTestAccess::overrides(runtime,100,100)); // Admission only, never execution evidence.
         QVERIFY(ControllerRuntimeTestAccess::probe(runtime)); // Worker FIFO fence.
-        QTRY_VERIFY_WITH_TIMEOUT(!runtime.status().requestPending, 1000);
-        const auto after = peer.snapshot();
+        QTRY_VERIFY_WITH_TIMEOUT(!runtime.status().requestPending,1000);
+        const auto after=peer.snapshot();
         QVERIFY(after.ok);
-        QCOMPARE(after.object.value("counts").toObject().value("overrideByte").toInt(), 0);
-        QVERIFY(noUnsafeCommandAfter(after.object.value("events").toArray(), 0));
+        QCOMPARE(after.object.value("counts").toObject().value("overrideByte").toInt(),0);
+        QVERIFY(noUnsafeCommandAfter(after.object.value("events").toArray(),0));
     }
     void queuedMotionExpiresBeforeDispatch() {
         RuntimePeer peer;
