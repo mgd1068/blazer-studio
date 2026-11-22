@@ -63,7 +63,7 @@ class Plant(Peer):
                 if not re.fullmatch(r'G10 L20 P1 X[+-]?[0-9.]+ Y[+-]?[0-9.]+',line):raise ValueError('unexpected G10')
                 requested={k:float(v) for k,v in words if k in ('X','Y')}
                 self.offset=[a+b-requested[k] for a,b,k in zip(self.actual,self.bias,('X','Y'))]
-                self.zero_seen=True
+                self.zero_seen=True;self.event('coordinateUpdate')
             elif any(k in ('X','Y') for k,v in words):
                 target=list(self.actual)
                 for k,v in words:
