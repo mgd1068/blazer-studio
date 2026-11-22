@@ -285,17 +285,26 @@ ApplicationWindow {
         QCOMPARE(count(peer, "powered"), 0);
         QVERIFY(press("extractionClearanceWitness"));
         QVERIFY(press("confirmExtractionClearance"));
-        QTRY_VERIFY(machine.extractionSupervision().value("reason").toString().startsWith(
-            "Sicheren Zustand"));
-        QTRY_VERIFY(item("selectAttendedExtraction")->isEnabled());
-        QVERIFY(press("selectAttendedExtraction"));
+        QTRY_VERIFY(machine.extractionSupervision().contains("clearanceRequired") &&
+                    !machine.extractionSupervision().value("clearanceRequired").toBool());
+        QTRY_VERIFY(item("selectSupervisedDeviceCycle")->isEnabled());
+        QVERIFY(press("selectSupervisedDeviceCycle"));
         QTRY_COMPARE(machine.extractionSupervision().value("mode").toString(),
-                     QString("operatorAttendedExternal"));
-        for (const auto &name :
-             {"externalExtractionOnWitness", "operatorPresentWitness", "attendedWorkAreaWitness"})
-            QVERIFY(press(name));
-        QTRY_VERIFY(item("attestExternalExtraction")->isEnabled());
-        QVERIFY(press("attestExternalExtraction"));
+                     QString("operatorSupervisedDeviceCycle"));
+        QVERIFY(machine.extractionSupervision().value("presenceOnly").toBool());
+        QVERIFY(!machine.extractionSupervision().value("requiresExternalExtraction").toBool());
+        const auto fans = machine.extractionSupervision().value("deviceFans").toList();
+        QCOMPARE(fans.size(), 2);
+        for (const auto &value : fans) {
+            const auto fan = value.toMap();
+            QCOMPARE(fan.value("state").toString(), QString("unknown"));
+            QCOMPARE(fan.value("feedback").toString(), QString("notReadBack"));
+            QVERIFY(!fan.value("independentControl").toBool());
+        }
+        QVERIFY(!item("externalExtractionOnWitness")->isVisible());
+        QVERIFY(press("deviceOperatorPresentWitness"));
+        QTRY_VERIFY(item("attestDeviceCycle")->isEnabled());
+        QVERIFY(press("attestDeviceCycle"));
         QTRY_VERIFY(machine.operatorLocalFrame().value("startReady").toBool());
         QCOMPARE(count(peer, "powered"), 0);
         QCOMPARE(count(peer, "physicalMove"), framedMoves);
