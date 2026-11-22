@@ -61,9 +61,9 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
         c.reason="Tatsächlichen Homeort bestätigt. Kleine X- und Y-Probe (höchstens 1 mm) beobachten und vermessene Strecke/Richtung bestätigen.";
     } else if(op=="probeObserved" && c.stage=="probeConfirm") {
         if(!closePoint(m_core->reportedMachinePosition,c.target)){cancelCommissioning("Probenposition hat sich verändert.");return;}
-        ++c.probesConfirmed;c.stage="geometry";
+        ++c.probesConfirmed;c.stage=c.xConfirmed&&c.yConfirmed?"limits":"geometry";
         c.reason=c.xConfirmed&&c.yConfirmed?"X/Y geprüft. Gemessenen konservativen Innenfahrraum in Maschinenkoordinaten eingeben.":"Zweite Achse mit kleiner Probe prüfen und Strecke/Richtung bestätigen.";
-    } else if(op=="limits" && c.stage=="geometry" && c.homeObserved && c.xConfirmed && c.yConfirmed) {
+    } else if(op=="limits" && c.stage=="limits" && c.homeObserved && c.xConfirmed && c.yConfirmed) {
         const double minX=data.value("minX").toDouble(),minY=data.value("minY").toDouble(),maxX=data.value("maxX").toDouble(),maxY=data.value("maxY").toDouble();
         for(const auto &key:{"minX","minY","maxX","maxY"}) {
             const auto type=data.value(key).metaType().id();
@@ -88,7 +88,7 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
             }
         }
         m_core->commissionedEnvelope=approach;
-        c.cornerIndex=c.cornersConfirmed=0;c.stage="cornerReady";
+        c.cornerIndex=c.cornersConfirmed=0;c.target=c.limits.bottomLeft();c.stage="cornerReady";
         c.reason="Gemessenen freien Anfahrtsraum von Home und Sicherheitsabstand bestätigen; Ecke 1 laserfrei anfahren.";
     } else if(op=="cornerObserved" && c.stage=="cornerConfirm") {
         if(!closePoint(m_core->reportedMachinePosition,c.target)){cancelCommissioning("Eckenposition hat sich verändert.");return;}
@@ -96,7 +96,7 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
         if(c.cornersConfirmed==4) {
             c.stage="workCoordinates";m_core->commissionedEnvelope=c.limits;
             c.reason="Vier physische Ecken bestätigt. G54/WPos/WCO und Modellzuordnung prüfen; derzeitigen Arbeitsnullpunkt ausdrücklich übernehmen.";
-        } else {c.stage="cornerReady";c.reason="Physische Ecke bestätigt; nächste Ecke laserfrei anfahren.";}
+        } else {c.target=c.cornerIndex==1?c.limits.bottomRight():c.cornerIndex==2?c.limits.topRight():c.limits.topLeft();c.stage="cornerReady";c.reason="Physische Ecke bestätigt; nächste Ecke laserfrei anfahren.";}
     } else if(op=="coordinatesObserved" && c.stage=="workCoordinates") {
         if(!m_core->positionReferenced || !m_core->insideReportedMachineBed() || !m_core->knownOffset){denied("Aktueller G54-/Positionsreadback fehlt.");return;}
         c.stage="complete";c.reason="Sessionbezogener gemessener Fahrraum und G54-Zuordnung bestätigt. Absaugung und Materialfreigabe separat erforderlich.";

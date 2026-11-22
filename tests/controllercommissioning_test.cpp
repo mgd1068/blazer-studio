@@ -48,17 +48,20 @@ class ControllerCommissioningTest:public QObject {
         home(peer,r);if(QTest::currentTestFailed())return;
         for(const auto step:{QPointF(1,0),QPointF(0,1)}) {
             QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupProbe,step.x(),step.y()));QTRY_COMPARE(stage(r),QString("probeConfirm"));
-            QVERIFY(data(r,"probeObserved"));QTRY_COMPARE(stage(r),QString("geometry"));
+            QVERIFY(data(r,"probeObserved"));QTRY_COMPARE(stage(r),step.y()!=0?QString("limits"):QString("geometry"));
         }
         QCOMPARE(r.status().commissioning.value("probesConfirmed").toInt(),2);
         QVERIFY(r.commissioningData({{"op","limits"},{"minX",0.0},{"minY",0.0},{"maxX",180.0},{"maxY",130.0}}));
-        QTRY_VERIFY(r.status().commissioning.value("reason").toString().contains("überschreitet"));QCOMPARE(stage(r),QString("geometry"));
+        QTRY_VERIFY(r.status().commissioning.value("reason").toString().contains("überschreitet"));QCOMPARE(stage(r),QString("limits"));
         QVERIFY(r.commissioningData({{"op","limits"},{"minX",-190.0},{"minY",-140.0},{"maxX",-10.0},{"maxY",-10.0}}));QTRY_COMPARE(stage(r),QString("cornerReady"));
     }
 private slots:
     void fullSignedShiftedSession() {
         RuntimePeer peer;ControllerRuntimeSession r(DeviceProfile::m3Reference());geometry(peer,r);if(QTest::currentTestFailed())return;
         for(int i=0;i<4;++i) {
+            const QPointF expected=i==0?QPointF(-190,-10):i==1?QPointF(-10,-10):i==2?QPointF(-10,-140):QPointF(-190,-140);
+            QCOMPARE(r.status().commissioning.value("targetMachineX").toDouble(),expected.x());
+            QCOMPARE(r.status().commissioning.value("targetMachineY").toDouble(),expected.y());
             QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupCorner,i));QTRY_COMPARE(stage(r),QString("cornerConfirm"));
             QVERIFY(data(r,"cornerObserved"));QTRY_COMPARE(stage(r),i==3?QString("workCoordinates"):QString("cornerReady"));
         }
