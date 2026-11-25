@@ -25,7 +25,7 @@ class DeviceManager : public QObject {
                            QObject *parent = nullptr);
     QVariantList instances() const { return library.instances(); }
     QVariantMap active() const;
-    QString activeId() const { return bindingKey().isEmpty() ? QString() : selectedId; }
+    QString activeId() const;
     QString bindingKey() const;
     QString parameterHash() const;
     QString message() const { return lastMessage; }
@@ -52,6 +52,10 @@ class DeviceManager : public QObject {
     void changed();
   private:
     bool readAutoHomeOnConnect(QString *error = nullptr) const;
+    bool selectedIdentityCurrent() const;
+    QString profileMismatchReason() const;
+    void restoreSelectionPreference();
+    bool saveSelectionPreference(QString *error);
     bool allowChange();
     bool fail(QString text);
     void invalidateSelection();

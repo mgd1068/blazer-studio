@@ -134,3 +134,16 @@ verlängert die Freigabe nicht. Der Permit wird erst nach dem $H-Write verbrauch
 Erwartetes Schließen des Verbindungsdialogs widerruft den bereits angenommenen
 Verbindungsvorgang nicht; STOPP, Trennung oder ein Widerspruch tun dies weiterhin.
 Die Autorisierung umfasst weder Anlauf noch Jobstart oder Entriegelung.
+
+## Direkter normaler Auftragsstart (beta.10.7)
+
+`StartAttended` verbindet die native Startabsicht mit der auftragsbezogenen
+Anwesenheitserklärung für den normalen Gerätezyklus. Der Worker prüft zuerst
+frischen Idle/S0, gespeicherte Kalibrierung, aktuelle Referenz, Prepared-Quelle,
+Profil, Transport und gesamte Fahrgrenzen einschließlich erster Anfahrt.
+Der originale native Zeitstempel wird beim Wechsel zwischen monotonen Uhren
+erhalten; der private Adapter erzeugt und verbraucht die Erklärung sofort.
+Es gibt keine allgemeine gespeicherte Anwesenheitsfreigabe und keine automatische
+Fehlerquittierung. Geplantes verifiziertes S0-Homing erzeugt keinen Zubehörfault;
+echter Verbindungs-/Ausgabeverlust bleibt gesperrt. Explizit konfigurierte
+Sensor-/externe Modi und Fokus/Fortsetzen behalten ihre eigenen Verträge.

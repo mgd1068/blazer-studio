@@ -46,6 +46,7 @@ ApplicationWindow {
     property bool preferencesSyncing: true
     property bool basic: true
     property bool proofConfirmed: false
+    property bool advancedAccessoryDetails: false
     property string probeKey: ""
     readonly property string parameterKey: project.deviceInfo.outputFingerprint+JSON.stringify(project.material)+JSON.stringify(project.layers)+project.basicOperationKey+project.cutSelectedGraphics+(project.cutSelectedGraphics ? JSON.stringify(project.selectedRows) : "")+(deviceService ? deviceService.bindingKey+deviceService.parameterHash : "")+(typeof project.manualRegistrationOutputKey !== "undefined" ? project.manualRegistrationOutputKey : "")
     readonly property bool isBasicProbe: probeKey===parameterKey && project.count===1 && project.selection.width===5 && project.selection.height===5
@@ -76,6 +77,7 @@ ApplicationWindow {
     readonly property bool autoHomeOnConnect: !!win.deviceService && typeof win.deviceService.autoHomeOnConnect !== "undefined" && win.deviceService.autoHomeOnConnect
     readonly property bool initializationGuidanceActive: ["readback","savedHomeReady","restoringHome","savedApproachReady","restoringApproach","restoredOriginReview"].indexOf(setupState.stage) >= 0 && controllerStatusFresh && !setupState.activeInputs && setupState.controllerState !== "Door"
     readonly property var extractionState: typeof machine.extractionSupervision !== "undefined" ? machine.extractionSupervision : ({mode:"sensorVerified",pendingAction:""})
+    readonly property bool useAttendedStart: !manualStartSelected && typeof machine.startAttended === "function" && (simulationMode || extractionState.singleClickStart === true)
     function supervisionAllows(action) { return simulationMode || (extractionState.mode !== "operatorAttendedExternal" && extractionState.mode !== "operatorSupervisedDeviceCycle") || extractionState.pendingAction === action }
     readonly property string liveAreaError: {
         if(simulationMode || setupState.stage !== "complete" || !outputFrameRegion.valid)return ""
@@ -116,15 +118,16 @@ ApplicationWindow {
         if (!simulationMode && (controllerJobPreparing || !controllerJobPrepared)) return controllerPrepareReason || "Controllerauftrag wird vorbereitet. Nach Abschluss erneut ausdrücklich starten.";
         if (!simulationMode && project.startMode !== 0) return "Die M3-Beta verwendet am realen Gerät absolute Zeichnungskoordinaten. Unter Startposition und Ursprung auf Absolut wechseln.";
         if (liveAreaError.length>0) return liveAreaError;
-        if (!supervisionAllows("start")) return extractionState.mode === "operatorSupervisedDeviceCycle" ? "Anwesenheit für diesen Auftrag im Bereich Gerät bestätigen." : "Absaugung und Aufsicht für diesen Auftrag im Bereich Gerät bestätigen.";
-        if (!simulationMode && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0) return machine.processingSafetyErrors.join("\n");
+        if (!simulationMode && useAttendedStart && extractionState.attendedStartError) return extractionState.attendedStartError;
+        if (!useAttendedStart && !supervisionAllows("start")) return extractionState.mode === "operatorSupervisedDeviceCycle" ? "Anwesenheit für diesen Auftrag im Bereich Gerät bestätigen." : "Absaugung und Aufsicht für diesen Auftrag im Bereich Gerät bestätigen.";
+        if (!simulationMode && !useAttendedStart && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0) return machine.processingSafetyErrors.join("\n");
         if (!simulationMode && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length > 0) return machine.motionSafetyError;
         if (!simulationMode && !machine.positionReferenced) return "Maschinenreferenz fehlt. Die aktuelle Position ist noch kein verlässlicher Nullpunkt. Referenzfahrt und Arbeitsnullpunkt im Bereich »Gerät« prüfen; nach einer Kollision keinen neuen Versuch starten.";
         if (basic && !simulationMode) {
             if (!projectHeadMatches) return "Laseraufsatz und Material passen nicht zusammen. Links das passende Material auswählen.";
-            if (project.beginnerSummary.requiresAdvanced) return project.beginnerSummary.reason;
-            if (project.beginnerSummary.modified) return "Materialwerte wurden verändert. Werte prüfen oder die Profilwerte erneut übernehmen. Randgravur lässt sich rechts mit »Rand gravieren« wählen.";
-            if (!proofConfirmed && !isBasicProbe) return "Materialprüfung fehlt: Nach einer echten Probe die Bestätigung unter der Vorschau setzen.";
+            if (!useAttendedStart && project.beginnerSummary.requiresAdvanced) return project.beginnerSummary.reason;
+            if (!useAttendedStart && project.beginnerSummary.modified) return "Materialwerte wurden verändert. Werte prüfen oder die Profilwerte erneut übernehmen. Randgravur lässt sich rechts mit »Rand gravieren« wählen.";
+            if (!useAttendedStart && !proofConfirmed && !isBasicProbe) return "Materialprüfung fehlt: Nach einer echten Probe die Bestätigung unter der Vorschau setzen.";
         }
         if (!machine.ready) return simulationMode ? "Der Simulator ist noch nicht bereit. Gerätestatus prüfen." : "Der Laser ist noch nicht bereit. Verbindung und Gerätestatus im Bereich »Gerät« prüfen.";
         return "";
@@ -274,7 +277,7 @@ ApplicationWindow {
             }
         }
     }
-    DeviceManagerDialog { id: deviceDialog; manager: win.deviceService; dark: win.night; onAboutToShow: machine.focus(false) }
+    DeviceManagerDialog { id: deviceDialog; manager: win.deviceService; dark: win.night; simpleSelection:win.basic; onAboutToShow: machine.focus(false) }
     BarcodeDialog { id: barcodeDialog; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
     MaterialTestRecordDialog { id: materialRecordDialog; manager: win.deviceService; ledger: win.testLedger; document: project; dark: win.night; onAboutToShow: machine.focus(false) }
     SettingsBundleDialog { id: settingsBundleDialog; service: typeof appServices !== "undefined" ? appServices : null; dark: win.night; onAboutToShow: machine.focus(false) }
@@ -746,9 +749,14 @@ ApplicationWindow {
                 ActionButton { objectName: "saveProjectButton"; enabled: win.synchronousWorkReady; text: "Speichern"; dark: win.night; compact: true; onClicked: win.showSaveDialog() }
                 Rectangle { width: 1; height: 22; color: win.line; Layout.leftMargin: 5; Layout.rightMargin: 5 }
                 ActionButton {
-                    id: startJobControl; objectName: "startJobButton"; property bool nativeActionEnabled: win.page > 0 && !win.manualStartSelected; Component.onCompleted: machine.registerNativeActionControl(startJobControl,"start"); text: win.page === 0 ? "Vorschau  →" : win.manualStartSelected ? "Handstart öffnen …" : win.simulationMode ? (win.basic ? "▶  Am Bildschirm testen" : "▶  Simulation starten") : "▶  Am Laser starten"
-                    primary: true; compact: true; enabled: !win.controllerClosePending && (win.page === 0 || (win.manualStartSelected ? win.manualStartCanOpen : win.startBlockReason.length === 0)); hint: win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason
-                    onClicked: { if (win.page === 0) win.page = 1; else if(win.manualStartSelected) manualStartDialog.open(); else { win.page = 2; machine.start() } }
+                    id: startJobControl; objectName: "startJobButton"
+                    property bool nativeActionEnabled: (win.basic || win.page > 0) && !win.manualStartSelected
+                    property string nativeActionRole: !nativeActionEnabled ? "" : win.useAttendedStart ? "startAttended" : "start"
+                    Component.onCompleted: { machine.registerNativeActionControl(startJobControl,"start"); if(typeof machine.startAttended === "function")machine.registerNativeActionControl(startJobControl,"startAttended") }
+                    text: !win.basic && win.page === 0 ? "Vorschau  →" : win.manualStartSelected ? "Handstart öffnen …" : win.simulationMode ? "▶  Simulation starten" : "▶  Am Laser starten"
+                    primary: true; compact: true; enabled: !win.controllerClosePending && ((!win.basic && win.page === 0) || (win.manualStartSelected ? win.manualStartCanOpen : win.startBlockReason.length === 0))
+                    hint: !win.basic && win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason || "Startet den angezeigten Auftrag. Der bewusste Startklick bestätigt die eigene Anwesenheit für diesen Vorgang."
+                    onClicked: { if (!win.basic && win.page === 0) win.page = 1; else if(win.manualStartSelected) manualStartDialog.open(); else { win.page = 2; if(win.useAttendedStart)machine.startAttended();else machine.start() } }
                 }
             }
         }
@@ -806,8 +814,8 @@ ApplicationWindow {
                             Text { width: parent.width; elide: Text.ElideRight; textFormat: Text.PlainText; text: win.deviceService ? (win.deviceService.activeId.length > 0 ? win.deviceService.active.name : "Kein physisches Gerät gewählt") : "Projektprofil"; color: "#299679"; font.pixelSize: 12 }
                         }
                     }
-                    ActionButton { objectName: "manageDevicesButton"; text: "Geräte verwalten …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.deviceService; enabled: win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
-                    ActionButton { objectName: "jobPlacementButton"; text: "Startposition & Ursprung …"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: !win.runtimeOccupied; onClicked: jobPlacementDialog.open() }
+                    ActionButton { objectName: "manageDevicesButton"; text:win.basic ? (win.deviceService && win.deviceService.activeId.length>0 ? "Laser wechseln …" : "Laser auswählen …") : "Geräte verwalten …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.deviceService; enabled: win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
+                    ActionButton { objectName: "jobPlacementButton"; visible:!win.basic; text: "Startposition & Ursprung …"; dark: win.night; compact: true; Layout.fillWidth: true; enabled: !win.runtimeOccupied; onClicked: jobPlacementDialog.open() }
                     ActionButton { objectName: "manualRegistrationButton"; text: win.registrationService && win.registrationService.state.enabled ? "Print and Cut · AKTIV …" : "Print and Cut …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.registrationService; enabled: !!win.registrationService && win.registrationService.blockReason.length === 0; onClicked: manualRegistrationDialog.open() }
                     ActionButton { objectName: "artLibraryButton"; text: "Grafikbibliothek …"; dark: win.night; compact: true; Layout.fillWidth: true; visible: !!win.artService; enabled: !!win.artService && win.artService.blockReason.length === 0; onClicked: artLibraryDialog.open() }
                     ColumnLayout {
@@ -1075,14 +1083,14 @@ ApplicationWindow {
                     visible: win.basic; color: win.panel; border.color: win.line
                     Layout.fillWidth: true; Layout.preferredHeight: basicGuide.implicitHeight+20
                     ColumnLayout { id: basicGuide; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 12; y: 10; spacing: 6
-                        Text { text: win.page===0 ? "1. Motiv laden → 2. Laseraufsatz und Material links wählen → 3. Größe und Platzierung rechts prüfen" : win.page===1 ? "4. Vorschau prüfen und zuerst eine kleine Materialprobe vorbereiten" : "5. Laser verbinden, Position prüfen und Auftrag bewusst starten"; color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
+                        Text { text: "Datei laden oder bearbeiten → gespeicherten Laser verwenden → Start. Die Vorschau kannst du jederzeit zusätzlich öffnen."; color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
                         Text { text: "Werte aus: "+project.beginnerSummary.material+" · "+project.beginnerSummary.source+". Übernommene Werte sind noch keine am eigenen Gerät bestätigte Empfehlung."; color: win.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
                         Text { visible: project.beginnerSummary.reason.length>0 || !win.projectHeadMatches; text: !win.projectHeadMatches ? "Toolkopf und Projektprofil passen noch nicht zusammen. Links ein Material für den tatsächlichen Kopf auswählen." : project.beginnerSummary.reason; color: "#c07b2a"; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 11 }
                         RowLayout { Layout.fillWidth: true
                             ActionButton { objectName: "basicProfileApply"; text: "Profilwerte übernehmen"; dark: win.night; hint: "Übernimmt die Materialwerte für dieses Blatt und entfernt eigene Objekt-Abweichungen. Mit Rückgängig umkehrbar."; onClicked: project.applyBasicMaterial(project.material) }
                             ActionButton { objectName: "basicProbe"; text: "5-mm-Probe vorbereiten"; dark: win.night; hint: "Erzeugt ein neues Projekt mit einer kleinen Probe und genau den gewählten Materialwerten. Ungespeicherte Änderungen werden vorher abgefragt."; onClicked: win.requestAction("basicprobe") }
                         }
-                        CheckBox { objectName: "basicProof"; text: "Diese Werte habe ich am tatsächlichen Material geprüft"; checked: win.proofConfirmed; onClicked: win.proofConfirmed=checked; HelpBubble {target: parent; description: "Eine persönliche Bestätigung nach einer echten Materialprobe. Das Programm misst das Ergebnis nicht selbst. Bei geänderten Materialwerten wird die Bestätigung zurückgesetzt."} }
+                        CheckBox { objectName: "basicProof"; visible:!win.useAttendedStart; text: "Diese Werte habe ich am tatsächlichen Material geprüft"; checked: win.proofConfirmed; onClicked: win.proofConfirmed=checked; HelpBubble {target: parent; description: "Eine persönliche Bestätigung nach einer echten Materialprobe. Das Programm misst das Ergebnis nicht selbst. Bei geänderten Materialwerten wird die Bestätigung zurückgesetzt."} }
                     }
                 }
                 Rectangle {
@@ -1186,13 +1194,14 @@ ApplicationWindow {
                                 }
                                 Text {
                                     objectName: "processingSafetyStatus"
-                                    visible: !win.simulationMode && !win.initializationGuidanceActive && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0
+                                    visible: !win.simulationMode && !win.initializationGuidanceActive && (win.useAttendedStart ? !!win.extractionState.attendedStartError : typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0)
                                     Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: "#c07b2a"
-                                    text: typeof machine.processingSafetyErrors !== "undefined" ? machine.processingSafetyErrors.join("\n") : ""
+                                    text: win.useAttendedStart ? win.extractionState.attendedStartError || "" : typeof machine.processingSafetyErrors !== "undefined" ? machine.processingSafetyErrors.join("\n") : ""
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
-                                ActionButton { objectName:"openManualStart"; text:"Start ab Handposition …"; dark:win.night; Layout.fillWidth:true; enabled:win.manualStartCanOpen; onClicked:manualStartDialog.open() }
-                                ExtractionSupervisionPanel { Layout.fillWidth: true; visible: !win.simulationMode; modelMachine: machine; dark: win.night; setupReady: win.setupState.stage === "complete" || !!win.manualStartState.localPositionKnown }
+                                ActionButton { objectName:"openManualStart"; visible:!win.basic; text:"Start ab Handposition …"; dark:win.night; Layout.fillWidth:true; enabled:win.manualStartCanOpen; onClicked:manualStartDialog.open() }
+                                ActionButton { visible:!win.simulationMode && !win.basic; text:"Zubehör und Sensoren …"; dark:win.night; onClicked:win.advancedAccessoryDetails=!win.advancedAccessoryDetails }
+                                ExtractionSupervisionPanel { Layout.fillWidth: true; visible: !win.simulationMode && (win.advancedAccessoryDetails || !!win.extractionState.clearanceRequired || (!win.basic && !win.useAttendedStart)); modelMachine: machine; dark: win.night; setupReady: win.setupState.stage === "complete" || !!win.manualStartState.localPositionKnown }
                                 Rectangle {
                                     Layout.fillWidth: true; Layout.preferredHeight: Math.max(233, positionControls.implicitHeight + 44); radius: 9; color: win.panel; border.color: win.line
                                     RowLayout {

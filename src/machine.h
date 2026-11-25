@@ -88,6 +88,7 @@ class Machine : public Simulator {
     bool jobPrepared() const;
     QString prepareReason() const;
     QString nativeInputSafetyError() const;
+    Q_INVOKABLE void startAttended();
     bool holdConfirmed() const {
         return !live ? Simulator::paused() : session && session->status().holdConfirmed;
     }
@@ -173,6 +174,7 @@ class Machine : public Simulator {
     void nativeActionDenied(const QString &action, const QString &reason);
 
   private:
+    void startWithIntent(bool attended);
     friend class GrblTest; // Synthetic PTY commissioning, never a public release switch.
     friend class ControllerRuntimeTestAccess;
     Document *document;

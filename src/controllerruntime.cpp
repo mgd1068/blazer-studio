@@ -387,6 +387,7 @@ bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,
     case ControllerNativeAction::ConnectHome:return false; // Only the bounded connection admission path may use it.
     case ControllerNativeAction::FocusHold:kind=Kind::Focus;break;
     case ControllerNativeAction::StartJob:kind=Kind::Start;break;
+    case ControllerNativeAction::StartAttended:kind=Kind::StartAttended;break;
     case ControllerNativeAction::Jog:kind=Kind::Jog;break;
     case ControllerNativeAction::Home:kind=Kind::Home;break;
     case ControllerNativeAction::Frame:kind=Kind::Frame;break;
@@ -595,9 +596,10 @@ void ControllerRuntimeWorker::drain() {
         retirePrepared();
     }
     if (m_mailbox->takeControl(m_mailbox->close)) {
+        m_noOutputLifecycle=noOutputIdle();
         clearCalibrationSession();
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
-        m_accessory.transition(AccessoryContract::Event::Disconnect);
+        if(!m_noOutputLifecycle)m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_core->close();
         ++m_connectionEpoch;
     }
@@ -639,9 +641,9 @@ void ControllerRuntimeWorker::drain() {
             m_local={};
             ++m_connectionEpoch;
             discardOperatorWitness();m_operatorSession.clear();m_activeOperatorOperation.clear();m_operatorPaused=false;
-            m_accessory = AccessoryContract(true);
             const bool opened = m_core->open(request.endpoint) && checkClockContinuity();
             if(opened) {
+                m_noOutputLifecycle=false;
                 beginCalibrationRestore(request.calibrationRecord,request.binding);
                 if(request.connectionHomePermit && !acceptConnectionHomePermit(request))
                     m_restoreReason="Automatische Referenzfahrt verworfen: Verbindungsautorisierung ist abgelaufen oder nicht mehr passend.";
@@ -718,11 +720,13 @@ void ControllerRuntimeWorker::drain() {
         case Kind::FocusOff:
             m_core->focus(false);
             break;
+        case Kind::StartAttended:
         case Kind::Start:
             if (!m_core->ready() || !m_core->verified() || !m_core->positionReferenced ||
                 !m_core->motionSafetyError().isEmpty())
                 break;
-            if (!beginAccessory(AccessoryContract::OperatorAction::StartJob,request.prepared?request.prepared->sourceFingerprint()+request.prepared->profileFingerprint():QByteArray()))
+            if (request.kind==Kind::StartAttended ? !beginAttendedStart(request) :
+                !beginAccessory(AccessoryContract::OperatorAction::StartJob,request.prepared?request.prepared->sourceFingerprint()+request.prepared->profileFingerprint():QByteArray()))
                 break;
             m_jobActive = true;
             m_activePrepared = std::move(request.prepared);
@@ -762,7 +766,8 @@ bool ControllerRuntimeWorker::nativeActionAllowed(const Request &request) {
     refreshCoordinateEpoch();ControllerNativeAction action=ControllerNativeAction::StartJob;
     double x=request.x,y=request.y;QByteArray source;
     switch(request.kind){
-    case Kind::Start:action=ControllerNativeAction::StartJob;
+    case Kind::StartAttended:
+    case Kind::Start:action=request.kind==Kind::StartAttended?ControllerNativeAction::StartAttended:ControllerNativeAction::StartJob;
         if(!request.prepared)return false;
         source=request.prepared->sourceFingerprint()+request.prepared->profileFingerprint();break;
     case Kind::LocalCapture:action=ControllerNativeAction::LocalCapture;break;
@@ -833,11 +838,14 @@ void ControllerRuntimeWorker::coreChanged() {
     if (!status.connected) {
         clearCalibrationSession();
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
-        m_accessory.transition(AccessoryContract::Event::Disconnect);
+        if(!m_noOutputLifecycle || output)m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_jobActive = m_focusActive = false;
         retirePrepared();
     } else if (lost && !(status.coordinateUpdatePending && !output) &&
-               !(m_commissioning.stage=="readback" && m_core->setupReadback.pending && !output)) {
+               !(m_commissioning.stage=="readback" && m_core->setupReadback.pending && !output) &&
+               !(status.referencing && !output && m_core->knownOutput && m_core->reportedOutput==0 &&
+                 m_core->setupReadback.valid && m_commissioning.fingerprint==m_core->setupReadback.fingerprint &&
+                 (m_commissioning.stage=="homing" || m_commissioning.stage=="restoringHome"))) {
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Fault);
         const bool mustStop =
@@ -883,7 +891,7 @@ void ControllerRuntimeWorker::watchdog() {
     }
     if (!status.connected) {
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
-        m_accessory.transition(AccessoryContract::Event::Disconnect);
+        if(!m_noOutputLifecycle || output)m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_jobActive = m_focusActive = false;
     }
     publish();

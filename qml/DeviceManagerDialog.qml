@@ -8,6 +8,9 @@ Dialog {
     objectName: "deviceManagerDialog"
     property var manager: null
     property bool dark: false
+    property bool simpleSelection: false
+    property bool configuringNew: false
+    readonly property bool showDetails: !simpleSelection || configuringNew
     property string chosenId: ""
     readonly property color ink: dark ? "#e2eaf0" : "#263b4a"
     readonly property color muted: dark ? "#adc0ce" : "#5f7687"
@@ -17,7 +20,7 @@ Dialog {
         return manager.details(chosenId)
     }
     readonly property bool dirty: chosenId.length > 0 && (nameInput.text !== (chosenDetails.name || "") || endpointInput.text !== (chosenDetails.endpoint || ""))
-    title: "Geräte verwalten"
+    title: showDetails ? "Geräte verwalten" : "Laser auswählen"
     anchors.centerIn: parent
     modal: true; focus: true
     width: Math.min(parent.width - 48, 760)
@@ -29,7 +32,7 @@ Dialog {
         nameInput.text = row.name || ""
         endpointInput.text = row.endpoint || ""
     }
-    onAboutToShow: { load(manager ? manager.activeId : ""); if (manager) manager.refreshEndpoints() }
+    onAboutToShow: { configuringNew=false; load(manager ? manager.activeId : ""); if (manager) manager.refreshEndpoints() }
     contentItem: ScrollView {
       id: deviceScroll
       clip: true
@@ -44,7 +47,7 @@ Dialog {
         }
         Label {
             Layout.fillWidth: true; color: dialog.ink; wrapMode: Text.WordWrap
-            text: "Jeder physische Laser erhält einen eigenen Eintrag – auch zwei gleiche Modelle. Auswählen öffnet keine Verbindung und bestätigt keine Maschinenkalibrierung."
+            text: dialog.showDetails ? "Jeder physische Laser erhält einen eigenen Eintrag – auch zwei gleiche Modelle. Auswählen öffnet keine Verbindung und bestätigt keine Maschinenkalibrierung." : "Der ausgewählte Laser bleibt beim nächsten Programmstart erhalten. Hier wechselst du zu einem anderen Gerät."
         }
         ListView {
             objectName: "deviceInstanceList"
@@ -63,6 +66,9 @@ Dialog {
             }
         }
         Label { visible: dialog.manager && dialog.manager.instances.length === 0; text: "Noch kein physisches Gerät angelegt."; color: dialog.muted }
+        ActionButton { visible:dialog.simpleSelection && dialog.manager && dialog.manager.instances.length === 0; text:"Neuen Laser einrichten …"; dark:dialog.dark; onClicked:dialog.configuringNew=true }
+        ColumnLayout {
+        Layout.fillWidth:true; visible:dialog.showDetails
         Label { text: "Name des einzelnen Geräts"; color: dialog.ink }
         DialogField { dark: dialog.dark; id: nameInput; objectName: "deviceInstanceName"; Layout.fillWidth: true; maximumLength: 100; selectByMouse: true; placeholderText: "z. B. M3 an der linken Werkbank" }
         Label { text: "Lokaler Anschluss (optional für Offline-Projekte)"; color: dialog.ink }
@@ -89,6 +95,7 @@ Dialog {
             ActionButton { objectName: "duplicateDeviceInstance"; text: "Duplizieren"; dark: dialog.dark; enabled: dialog.editable && dialog.chosenId.length > 0; onClicked: { const id = dialog.manager.duplicate(dialog.chosenId, nameInput.text.slice(0,94) + " Kopie"); if (id.length) dialog.load(id) } }
             ActionButton { objectName: "removeDeviceInstance"; text: "Entfernen …"; destructive: true; dark: dialog.dark; enabled: dialog.editable && dialog.chosenId.length > 0; onClicked: removeQuestion.open() }
         }
+        }
         Label {
             objectName: "deviceManagerMessage"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.muted
             textFormat: Text.PlainText
@@ -100,7 +107,7 @@ Dialog {
     footer: RowLayout {
         spacing: 8
         Item { Layout.fillWidth: true }
-        ActionButton { objectName: "activateDeviceInstance"; text: "Für dieses Projekt auswählen"; primary: true; enabled: dialog.editable && dialog.chosenId.length > 0 && !dialog.dirty; onClicked: if (dialog.manager.activate(dialog.chosenId)) dialog.close() }
+        ActionButton { objectName: "activateDeviceInstance"; text:dialog.showDetails ? "Gerät auswählen" : "Diesen Laser verwenden"; primary: true; enabled: dialog.editable && dialog.chosenId.length > 0 && !dialog.dirty; onClicked: if (dialog.manager.activate(dialog.chosenId)) dialog.close() }
         ActionButton { text: "Schließen"; dark: dialog.dark; onClicked: dialog.close() }
     }
     FileDialog {

@@ -66,6 +66,12 @@ class ControllerRuntimeWorker final : public QObject {
     AccessoryContract::OperatorContext m_operatorContext;
     void operatorData(const QVariantMap &data);
     bool beginAccessory(AccessoryContract::OperatorAction action,const QByteArray &source = {});
+    bool singleClickStartEligible() const;
+    QString attendedStartError() const;
+    bool beginAttendedStart(const ControllerRuntimeRequest &request);
+    bool noOutputIdle() const;
+    // True only before first Open or for an explicitly observed safe idle Close.
+    bool m_noOutputLifecycle=true;
     void discardOperatorWitness();
     QVariantMap extractionSupervisionSnapshot() const;
     void setupData(const QVariantMap &data);

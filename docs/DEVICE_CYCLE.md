@@ -27,13 +27,18 @@ Beide Lüfter müssen beim ersten realen Materialversuch beobachtet werden.
 
 ## Anwesenheit und Zustandsregeln
 
-Nach Einrichtung unter **Gerätelüfter und Aufsicht** den beaufsichtigten
-Gerätebetrieb wählen. Nach einer Störung ist zunächst der tatsächliche sichere
-Gerätezustand ausdrücklich zu klären. Für Start, Fokus oder Fortsetzen wird
-jeweils nur die tatsächliche eigene Anwesenheit am Gerät bestätigt. Die
-Bestätigung ist einmalig, höchstens 30 Sekunden gültig und an Sitzung, Quelle,
-Aktion und Koordinatenrahmen gebunden. Sie startet selbst weder Fahrt noch Laser.
-Die jeweilige ausdrücklich ausgelöste native Gerätetaste bleibt erforderlich.
+Ab beta.10.7 bestätigt der tatsächliche Startklick nach abgeschlossener
+Initialisierung zugleich die Anwesenheit für genau diesen vorbereiteten Auftrag.
+Im normalen Gerätezyklus entfallen separate Moduswahl und Anwesenheitskästchen.
+Der Worker prüft den ursprünglichen nativen Klick innerhalb seiner 250-ms-Frist,
+die Sitzung, Quelle, Aktion, Koordinaten und den vollständigen Fahrraum.
+Ein Aufruf ohne solchen Eingabeintent startet nichts. Ein neuer Auftrag benötigt
+einen neuen Startklick. Explizit konfigurierte Sensor-/externe Modi werden nicht
+ersetzt; ein echter Zubehörfehler wird nicht automatisch quittiert.
+
+Fokus und Fortsetzen behalten die getrennte einmalige Anwesenheitsbestätigung
+mit höchstens 30 Sekunden Gültigkeit und die eigene native Gerätetaste.
+Nach einer tatsächlichen Störung ist der sichere Gerätezustand ausdrücklich zu klären.
 
 Es werden keine externen Flow-/Mappingwerte und keine Lüfter-Laufwerte erzeugt.
 Während eines gestarteten Vorgangs bleibt die normale aktive Betriebsbindung

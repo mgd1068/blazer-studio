@@ -390,10 +390,17 @@ bool Document::setDeviceProfile(const DeviceProfile &profile) {
            "Materialparameter für dieses Gerät prüfen.");
     return true;
 }
+bool Document::setPreferredDeviceProfile(std::optional<DeviceProfile> profile) {
+    if(!profile){m_preferredDeviceProfile.reset();return true;}
+    if(!setDeviceProfile(*profile))return false;
+    m_preferredDeviceProfile=m_deviceProfile;
+    return true;
+}
 void Document::applySnapshot(const Snapshot &s) {
-    const bool profileChanged = m_deviceProfile.toJson() != s.deviceProfile.toJson();
+    const auto profile=m_preferredDeviceProfile.value_or(s.deviceProfile);
+    const bool profileChanged = m_deviceProfile.toJson() != profile.toJson();
     beginResetModel();
-    m_deviceProfile = s.deviceProfile;
+    m_deviceProfile = profile;
     m_items = s.items;
     m_layers = s.layers;
     m_title = s.title;
@@ -517,7 +524,7 @@ bool Document::restoreHistory(int position, quint64 revision) {
     const auto &target = position < m_undo.size()
                              ? m_undo[position].state
                              : m_redo[m_redo.size() - 1 - (position - m_undo.size() - 1)].state;
-    if (!canApplyDeviceProfile(target.deviceProfile))
+    if (!canApplyDeviceProfile(m_preferredDeviceProfile.value_or(target.deviceProfile)))
         return false;
     auto current = snapshot();
     while (m_undo.size() > position) {
@@ -1456,6 +1463,7 @@ bool Document::open(const QUrl &url) {
         notify("Keine gültige Blazer-Studio-Projektdatei; aktuelles Projekt bleibt erhalten.");
         return false;
     }
+    if(m_preferredDeviceProfile)state->deviceProfile=*m_preferredDeviceProfile;
     if (!canApplyDeviceProfile(state->deviceProfile))
         return false;
     const bool registrationWasActive = manualRegistrationEnabled();
@@ -1514,11 +1522,12 @@ bool Document::newFromTemplate(const QUrl &url) {
     }
     root["format"] = "blazer-studio";
     root.remove("templateVersion");
-    const auto state = parse(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    auto state = parse(QJsonDocument(root).toJson(QJsonDocument::Compact));
     if (!state) {
         notify("Vorlage enthält kein gültiges Projekt; das aktuelle Projekt bleibt erhalten.");
         return false;
     }
+    if(m_preferredDeviceProfile)state->deviceProfile=*m_preferredDeviceProfile;
     if (!canApplyDeviceProfile(state->deviceProfile))
         return false;
     const bool registrationWasActive = manualRegistrationEnabled();

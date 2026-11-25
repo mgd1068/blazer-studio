@@ -45,6 +45,13 @@ public:
         return gate->entered.tryAcquire(1,1000);
     }
     static ControllerRuntimeSession &runtime(Machine &m){return *static_cast<ControllerRuntimeSession *>(m.session.get());}
+    static QString workerState(Machine &m) {
+        auto *worker=runtime(m).m_worker;QString result;
+        QMetaObject::invokeMethod(worker,[&]{result=QString("lease=%1 job=%2 focus=%3 firing=%4 paused=%5")
+            .arg(worker->m_accessory.activeLease()).arg(worker->m_jobActive).arg(worker->m_focusActive)
+            .arg(worker->m_core->firing).arg(worker->m_core->paused);},Qt::BlockingQueuedConnection);
+        return result;
+    }
     static bool seed(Machine&m,QQuickItem&control,const QString&action,const QVariantMap&args={}){
         const auto binding=m.nativeBinding(action,args,m.session->status());
         const auto actual=m.nativeArguments(&control,{});
@@ -85,6 +92,7 @@ ApplicationWindow {
  App.DeviceInitializationPanel { anchors.fill:parent; modelMachine:actualMachine; visible:actualMachine.commissioning.stage !== "complete" }
  App.ExtractionSupervisionPanel { id:supervision; anchors.fill:parent; visible:actualMachine.commissioning.stage === "complete"; modelMachine:actualMachine; commissioningComplete:actualMachine.commissioning.stage === "complete" }
  Button { id:start; objectName:"bridgeStart"; x:900; y:850; text:"Start"; property bool nativeActionEnabled:true; Component.onCompleted:actualMachine.registerNativeActionControl(start,"start"); onClicked:actualMachine.start() }
+ Button { id:startAttended; objectName:"bridgeStartAttended"; x:750; y:850; text:"Start attended"; property bool nativeActionEnabled:true; property string nativeActionRole:"startAttended"; Component.onCompleted:{actualMachine.registerNativeActionControl(startAttended,"start");actualMachine.registerNativeActionControl(startAttended,"startAttended")} onClicked:actualMachine.startAttended() }
  Button { id:resume; objectName:"bridgeResume"; x:1000; y:850; text:"Resume"; property bool nativeActionEnabled:true; Component.onCompleted:actualMachine.registerNativeActionControl(resume,"resume"); onClicked:actualMachine.pause() }
  Button { id:connectHome; objectName:"bridgeConnectHome"; x:900; y:930; text:"Connect and Home"; property bool nativeActionEnabled:true; property var nativeActionArguments:({endpoint:bridgeEndpoint,binding:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}); Component.onCompleted:actualMachine.registerNativeActionControl(connectHome,"connectHome") }
 })").arg(QUrl::fromLocalFile(qmlDir).toString()).toUtf8(),QUrl());
@@ -97,7 +105,7 @@ ApplicationWindow {
         auto stage=[&]{auto setup=root->property("setup").value<QObject*>();return setup?setup->property("stage").toString():QString();};
         auto setup=root->property("setup").value<QObject*>();QVERIFY(setup);QVERIFY(QMetaObject::invokeMethod(setup,"open"));QTRY_COMPARE(stage(),QString("mechanics"));
         for(const auto name:{"setupSwitchesWitness","setupDirectionWitness","setupFreeTravelWitness","setupLaserDisabledWitness"})QVERIFY(check(name));
-        QVERIFY(invoke("attestSetupMechanics"));QTRY_COMPARE(stage(),QString("homeReady"));
+        QVERIFY(invoke("attestSetupMechanics"));QTRY_VERIFY2(stage()=="homeReady",qPrintable(machine.commissioning().value("reason").toString()+" / "+ControllerRuntimeTestAccess::workerState(machine)+" / "+machine.log().join(" | ")));
         QCoreApplication::processEvents();
         QVERIFY2(NativeInputIntentTestAccess::hit(window,item("setupHomeButton")),
             "The actual modal Home button must be reachable by the native input hit test");
@@ -145,11 +153,26 @@ ApplicationWindow {
         QCOMPARE(stage(),QString("complete"));QVERIFY(invoke("closeSetup"));QTRY_VERIFY(!setup->property("visible").toBool());
         QVERIFY(machine.positionReferenced());QCOMPARE(resets(),beforeFinishResets);
         QTRY_VERIFY(machine.commissioning().value("calibrationStored").toBool());
+        QTRY_VERIFY2(machine.extractionSupervision().value("attendedStartReady").toBool(),qPrintable(machine.extractionSupervision().value("attendedStartError").toString()));
+        const auto poweredBeforeSingle=count(peer,"powered");
+        machine.startAttended();QTest::qWait(60);QCOMPARE(count(peer,"powered"),poweredBeforeSingle);
+        // One genuine-shaped native intent, no clearance, mode selection or
+        // separate presence data request. The independent PTY sees the job.
+        QVERIFY(native("bridgeStartAttended","startAttended"));QTRY_VERIFY(count(peer,"powered")>poweredBeforeSingle);QTRY_VERIFY(!machine.occupied());
+        QCOMPARE(count(peer,"collision"),0);
+        const auto firstJobPower=count(peer,"powered");
+        machine.startAttended();QTest::qWait(60);QCOMPARE(count(peer,"powered"),firstJobPower);
+        // A subsequent job needs only its own new native Start, no reset or
+        // clearance after normal device-cycle completion.
+        QTRY_VERIFY(machine.extractionSupervision().value("attendedStartReady").toBool());
+        QVERIFY(native("bridgeStartAttended","startAttended"));
+        QTRY_VERIFY(count(peer,"powered")>firstJobPower);QTRY_VERIFY(!machine.occupied());
+        const auto poweredAfterSingle=count(peer,"powered");
         QVERIFY(check("extractionClearanceWitness"));QVERIFY(invoke("confirmExtractionClearance"));QTRY_VERIFY(machine.extractionSupervision().value("reason").toString().startsWith("Sicheren Zustand"));
         QVERIFY(invoke("selectAttendedExtraction"));QTRY_COMPARE(machine.extractionSupervision().value("mode").toString(),QString("operatorAttendedExternal"));
         auto attest=[&](){return check("externalExtractionOnWitness")&&check("operatorPresentWitness")&&check("attendedWorkAreaWitness")&&invoke("attestExternalExtraction");};
         QVERIFY(attest());QTRY_COMPARE(machine.extractionSupervision().value("pendingAction").toString(),QString("start"));
-        QVERIFY(native("bridgeStart","start"));QTRY_VERIFY(count(peer,"powered")>0);QTRY_VERIFY(!machine.occupied());
+        QVERIFY(native("bridgeStart","start"));QTRY_VERIFY(count(peer,"powered")>poweredAfterSingle);QTRY_VERIFY(!machine.occupied());
         QCOMPARE(count(peer,"collision"),0);QVERIFY(machine.extractionSupervision().value("pendingAction").toString().isEmpty());
         const auto before=count(peer,"powered");machine.start();QTest::qWait(80);QCOMPARE(count(peer,"powered"),before); // No new native activation/witness.
         QVERIFY(attest());QTRY_COMPARE(machine.extractionSupervision().value("pendingAction").toString(),QString("start"));
@@ -162,6 +185,11 @@ ApplicationWindow {
         const auto resumeReceived=[&]{for(const auto &entry:peer.snapshot().object.value("events").toArray()){const auto e=entry.toObject();if(e.value("kind")=="realtime"&&e.value("value").toInt()==int('~'))return true;}return false;};
         QTRY_VERIFY(resumeReceived());
         QVERIFY(invoke("revokeExternalAttendance"));QTRY_COMPARE(stage(),QString("fault"));QVERIFY(!machine.positionReferenced());QVERIFY(!machine.motionSafetyError().isEmpty());
+        QTRY_VERIFY(machine.extractionSupervision().value("clearanceRequired").toBool());
+        const auto poweredAfterFault=count(peer,"powered");
+        machine.startAttended();QTest::qWait(60);
+        QCOMPARE(count(peer,"powered"),poweredAfterFault);
+        QVERIFY(machine.extractionSupervision().value("clearanceRequired").toBool());
         machine.useSimulator();QTRY_VERIFY(machine.simulation()&&machine.connectionPhase()=="closed");
         machine.setPreviewDeviceBinding(QByteArray(64,'a'));
         QVERIFY(peer.control({{"action","set"},{"values",QJsonObject{{"ackEnabled",true}}}}).ok);

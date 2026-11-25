@@ -17,6 +17,7 @@ enum class ControllerRuntimeRequestKind {
     Focus,
     FocusOff,
     Start,
+    StartAttended,
     LocalData, LocalCapture, LocalStart, LocalFrame, LocalResume,
     SetupData,
     OperatorData,

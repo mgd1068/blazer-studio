@@ -3,7 +3,7 @@
 This explicit opt-in models a human statement about independently operated external
 extraction and the operator's continued attendance. It is not measured airflow,
 a verified M3 enclosure-fan command, Air Assist, or a hardware safety guarantee.
-The default remains SensorVerified; unknown sensor mapping/flow still blocks.
+Explicitly selected SensorVerified retains its sensor contract; unknown configured mapping/flow still blocks. The normal unconfigured device-cycle start path is described below.
 No M8/M9 command is added, and no existing command/physical sensor state is forged.
 The installed M3's internal fan mapping remains unresolved.
 
@@ -76,3 +76,9 @@ consumption/supersession, cross-instance/copy/session/job/action rejection,
 Pause/Resume, focus, absence and lifecycle invalidation. Existing sensor contract
 cases run unchanged. Tests only link Qt Core/Test; no serial, display, hardware
 input or emission capability exists in these tests.
+
+## Single-click supervised device-cycle start (beta.10.7)
+
+For the ordinary device cycle, a sealed fresh native StartAttended input also supplies attendance for that exact prepared job. The worker validates controller state, calibration, coordinates, geometry and prepared identity before selecting this mode and privately creating/consuming the presence statement. Original input age is preserved (250 ms admission); no pending general permission is exposed. Programmatic calls, stale or replayed inputs do not authorize output.
+
+This path is eligible only for device-cycle mode or the pristine unconfigured default. Explicit sensor selection, configured sensor mappings and external extraction mode cannot be replaced by it. It never calls releaseAfterSafeClearance. Actual faults/disconnects still invalidate execution. Pristine startup, planned verified S0 homing and deliberate Idle/S0 disconnect without an active lease do not fabricate an accessory fault. Fan/airflow states remain unknown. Focus and Resume retain their existing distinct admission.

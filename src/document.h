@@ -121,6 +121,9 @@ class Document : public QAbstractListModel {
         return info;
     }
     bool setDeviceProfile(const DeviceProfile &profile);
+    // Session-local chosen hardware. Portable file/history metadata cannot
+    // silently replace it; no connection or physical-reference grant is stored.
+    bool setPreferredDeviceProfile(std::optional<DeviceProfile> profile);
     void addDeviceProfileChangeGuard(std::function<bool()> guard) {
         m_profileGuards.append(std::move(guard));
     }
@@ -300,6 +303,7 @@ class Document : public QAbstractListModel {
     void appendArtwork(const Artwork &item);
     QList<Artwork> m_items;
     DeviceProfile m_deviceProfile = DeviceProfile::m3Reference();
+    std::optional<DeviceProfile> m_preferredDeviceProfile;
     QList<std::function<bool()>> m_profileGuards;
     QVariantList m_layers;
     QVariantMap m_material;

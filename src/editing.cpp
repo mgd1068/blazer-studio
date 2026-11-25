@@ -253,6 +253,7 @@ bool Document::restoreBytes(const QByteArray &bytes) {
         notify("Wiederherstellung abgelehnt: ungültiges Projekt.");
         return false;
     }
+    if(m_preferredDeviceProfile)state->deviceProfile=*m_preferredDeviceProfile;
     if (!canApplyDeviceProfile(state->deviceProfile))
         return false;
     const bool registrationWasActive = manualRegistrationEnabled();

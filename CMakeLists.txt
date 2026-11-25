@@ -384,6 +384,22 @@ install(FILES tools/photo_depth.py tools/setup_depth.py DESTINATION share/blazer
 
 include(packaging/Packaging.cmake)
 
+if(BUILD_TESTING)
+    qt_add_executable(blazer-selecteddevicerestore-tests tests/selecteddevicerestore_test.cpp)
+    target_link_libraries(blazer-selecteddevicerestore-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME selecteddevicerestore COMMAND blazer-selecteddevicerestore-tests -platform offscreen)
+    set_tests_properties(selecteddevicerestore PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen")
+    qt_add_executable(blazer-operatorstartintentcontract-tests tests/operatorstartintentcontract_test.cpp)
+    target_include_directories(blazer-operatorstartintentcontract-tests PRIVATE src)
+    target_link_libraries(blazer-operatorstartintentcontract-tests PRIVATE Qt6::Core Qt6::Test)
+    if(BLAZER_SANITIZERS)
+        target_compile_options(blazer-operatorstartintentcontract-tests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(blazer-operatorstartintentcontract-tests PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME operatorstartintentcontract COMMAND blazer-operatorstartintentcontract-tests)
+    set_tests_properties(operatorstartintentcontract PROPERTIES TIMEOUT 30)
+endif()
+
 if(BUILD_TESTING AND UNIX)
     qt_add_executable(blazer-deviceautohomepreference-tests tests/deviceautohomepreference_test.cpp)
     target_link_libraries(blazer-deviceautohomepreference-tests PRIVATE blazer-core Qt6::Test)

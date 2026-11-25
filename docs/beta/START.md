@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.10.6-dev
+# Blazer Studio – Einstieg in beta.10.7-dev
 
 Die [Anforderungen an den einfachen Standardworkflow](USABILITY_REQUIREMENTS.md) gelten für die weitere Entwicklung.
 
@@ -51,7 +51,7 @@ Beta.10.3 korrigiert die Erkennung von Mausklicks auf Geräteschaltflächen in D
 
 Beta.10.4 prüft den gemessenen Innenfahrraum zusammen mit dem bestätigten Referenzort und allen bestätigten Prüfwegen. Der nur für kleine Achsprüfungen vorgesehene ±2-mm-Raum wird nicht mehr pauschal auf beiden Seiten hinzugerechnet. Dadurch lassen sich beispielsweise 0–199 × 0–149 mm bei Home 0,0 und positiven 1-mm-Proben einrichten. Außerhalb liegende bestätigte Prüfwege werden weiterhin mitgeprüft. Die vier Eckfahrten und die Koordinatenprüfung bleiben erforderlich; auch Rasterüberlauf muss innerhalb des freigegebenen Fahrraums liegen.
 
-Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Gerätebereich. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
+Die zuletzt ausgewählte lokale Geräteinstanz und ihr Profil bleiben erhalten. Die Auswahl öffnet noch keinen echten Anschluss; eine Verbindung erfolgt ausdrücklich im Gerätebereich. Ohne gespeichertes Gerät bleibt der Simulator Standard. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
 
 ### Automatisch beim Verbinden referenzieren
 
@@ -63,7 +63,7 @@ Die Automatik ersetzt die Referenzfahrt-Taste, nicht den Positionsnachweis: Kali
 
 ### Ein bekanntes M3 initialisieren
 
-1. Das tatsächliche Gerät auswählen und **GRBL verbinden**. Blazer liest Firmware, Controllerkennung, Einstellungen, Offsets und Startupblöcke automatisch. Dabei fährt der Kopf nicht los.
+1. Das gespeicherte Gerät verwenden; nur zum Wechseln **Laser wechseln** öffnen. **GRBL verbinden** beziehungsweise **Verbinden und referenzieren** betätigen. Blazer liest Firmware, Controllerkennung, Einstellungen, Offsets und Startupblöcke automatisch. Dabei fährt der Kopf nicht los.
 2. Passt eine gespeicherte Einrichtung zum Controller, **Referenzieren – ohne Laser** drücken und die freie Referenzfahrt am Gerät beobachten. Bei unverändertem Arbeitsursprung ist die Initialisierung damit abgeschlossen.
 3. Liegt der Referenzort außerhalb des gespeicherten Innenraums, bietet Blazer eine zusätzliche langsame Fahrt **Sicheren Startpunkt anfahren – ohne Laser** an. Hat sich der Arbeitsursprung geändert, die neue Zuordnung im kleinen Ursprungsdialog prüfen und bestätigen. Es werden keine alten Offsets automatisch zurückgeschrieben.
 
@@ -86,7 +86,7 @@ Eine vollständig bestätigte Einrichtung wird lokal gespeichert, wenn eine eind
 
 ### Beaufsichtigter Gerätebetrieb und erster Auftrag
 
-Unter **Gerätelüfter und Aufsicht** den tatsächlichen Gerätezustand klären, falls eine vorherige Störung angezeigt wird, und **Beaufsichtigten Gerätebetrieb verwenden** wählen. Den konkreten Vorgang wählen, die eigene Anwesenheit am Gerät wahrheitsgemäß bestätigen und **Für diesen Vorgang bereit** betätigen. Dies startet keine Bewegung. Innerhalb der angezeigten 30 Sekunden die zugehörige Start-/Fortsetzen-Taste selbst betätigen. Nach Pause oder Quellenänderung gilt keine alte Bestätigung weiter.
+Ab beta.10.7 genügt nach erfolgreicher Verbindung und Initialisierung im normalen Gerätebetrieb **Am Laser starten** direkt aus der Bearbeitung. Dieser frische Klick bestätigt zugleich die eigene Anwesenheit für genau den vorbereiteten Auftrag. Eine zusätzliche Moduswahl, Vorschau oder Anwesenheitsbestätigung ist für diesen Start nicht nötig. Materialwerte bleiben sichtbar und müssen zum tatsächlichen Material passen. Eine echte vorherige Störung verlangt weiterhin die ausdrückliche Klärung des Gerätezustands; der Startklick löscht keine Fehlersperre. Fokus und Fortsetzen behalten ihre eigenen aktionsbezogenen Bestätigungen. Unter Advanced bleiben ausdrücklich gewählte Sensor-/externe Zubehörmodi mit ihrem eigenen Ablauf verfügbar.
 
 Die externe Absaugung liegt in diesem Modus außerhalb der Programmsteuerung und wird nicht als Pflichtgerät oder Sensor abgefragt. Beide tatsächlichen Gerätelüfter müssen beim ersten realen Auftrag beobachtet werden. Die Software meldet keinen gemessenen Lüfterlauf und bietet keine unbelegten getrennten Lüfterausgänge an. Der dynamische Gerätezyklus bleibt bei internen G0-Leerfahrten aktiv; G0 unter geprüftem GRBL-Lasermodus ist laserfrei. Am Ende wird M5/S0 angefordert. Firmwareabhängige Lüfterwirkung und Nachlauf sind nicht durch ein ACK bewiesen.
 

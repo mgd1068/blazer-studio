@@ -2,6 +2,8 @@
 #include "controllerruntimemailbox.h"
 #include <QCryptographicHash>
 #include <QDataStream>
+#include <chrono>
+#include <cmath>
 namespace {
 QByteArray contextHash(const QByteArray &source,quint64 epoch,quint64 attempt,const QByteArray &session) {
     QByteArray bytes;QDataStream stream(&bytes,QIODevice::WriteOnly);stream<<source<<epoch<<attempt<<session;
@@ -26,7 +28,9 @@ QVariantMap ControllerRuntimeWorker::extractionSupervisionSnapshot() const {
     const QVariantList fans={
         QVariantMap{{"role","enclosureExhaust"},{"state","unknown"},{"feedback","notReadBack"},{"independentControl",false}},
         QVariantMap{{"role","laserModuleCooling"},{"state","unknown"},{"feedback","notReadBack"},{"independentControl",false}}};
-    return {{"mode",name},{"notice",m_accessory.supervisionNotice()},{"reason",m_operatorReason},
+    const auto startError=attendedStartError();
+    return {{"singleClickStart",singleClickStartEligible()},{"attendedStartError",startError},{"attendedStartReady",startError.isEmpty()},
+        {"mode",name},{"notice",m_accessory.supervisionNotice()},{"reason",m_operatorReason},
         {"pendingAction",m_operatorWitness?m_operatorAction:QString()},
         {"remainingMs",m_operatorWitness?std::max<qint64>(0,m_operatorWitness->expiresAtMs()-now):0},
         {"activeLease",m_accessory.activeLease()},{"airflowMeasured",false},
@@ -123,4 +127,59 @@ bool ControllerRuntimeWorker::beginAccessory(AccessoryContract::OperatorAction a
             :"Beaufsichtigte Ausgabe; Luftstrom nicht gemessen. Bei Aufsichts-/Absaugungsverlust STOPP.";}
     else m_operatorReason="Einmalige menschliche Bestätigung nicht mehr gültig; erneut bestätigen.";
     return accepted;
+}
+
+bool ControllerRuntimeWorker::singleClickStartEligible() const {
+    return m_accessory.singleClickDeviceCycleEligible();
+}
+bool ControllerRuntimeWorker::noOutputIdle() const {
+    return m_core && m_core->connected() && m_core->statusFresh() && m_core->ready() &&
+        m_core->controllerState=="Idle" && m_core->knownOutput && m_core->reportedOutput==0 &&
+        !m_core->firing && !m_jobActive && !m_focusActive && !m_accessory.activeLease() &&
+        !m_accessory.faulted() && !m_accessory.releaseRequired();
+}
+QString ControllerRuntimeWorker::attendedStartError() const {
+    if(!singleClickStartEligible())return "Explizit gewählter Zubehörmodus benötigt seinen eigenen Startablauf.";
+    if(m_accessory.faulted() || m_accessory.releaseRequired())return "Tatsächlichen Gerätezustand klären und sichere Freigabe ausdrücklich bestätigen.";
+    if(!m_core || m_commissioning.stage!="complete" || !m_core->positionReferenced)
+        return "Gerät zuerst vollständig einrichten und frisch referenzieren.";
+    if(!m_core->verified() || !noOutputIdle())return "Frischer bestätigter Idle/S0 ohne aktive Ausgabe erforderlich.";
+    if(const auto error=m_core->motionSafetyError();!error.isEmpty())return error;
+    if(!m_core->insideReportedMachineBed())return "Gemeldeter physischer Kopf liegt außerhalb des bestätigten Fahrraums.";
+    return {};
+}
+bool ControllerRuntimeWorker::beginAttendedStart(const ControllerRuntimeRequest &request) {
+    const auto error=attendedStartError();
+    if(!error.isEmpty()){m_operatorReason=error;return false;}
+    const auto &job=request.prepared;
+    if(!job || !job->valid() || job->profileFingerprint()!=m_profile.outputFingerprint() ||
+       job->driverId()!=m_profile.driverId() || job->transport()!=m_profile.transport() ||
+       job->mediaType()!="text/x-gcode")return false;
+    const auto bounds=job->workBounds();
+    for(const auto point:{bounds.topLeft(),bounds.topRight(),bounds.bottomLeft(),bounds.bottomRight(),job->firstApproach()}) {
+        if(!std::isfinite(point.x()) || !std::isfinite(point.y()) || !m_core->insideMachineBed(point)) {
+            m_operatorReason="Auftrag liegt mit aktuellem WCO außerhalb des bestätigten Fahrraums.";return false;
+        }
+    }
+    const auto proof=request.input.proof;
+    const auto absoluteNow=std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if(!proof || proof->action!=ControllerNativeAction::StartAttended ||
+       proof->observedAt<=0 || proof->observedAt>absoluteNow || proof->expiresAt<absoluteNow ||
+       absoluteNow-proof->observedAt>250 || !proof->contextToken || !proof->contextToken->valid ||
+       m_mailbox->stop.load() || m_mailbox->close.load() || !checkClockContinuity())return false;
+    refreshCoordinateEpoch();
+    const auto binding=supervisionBinding();
+    if(!m_accessory.selectOperatorSupervisedDeviceCycle(binding))return false;
+    m_operatorSession=binding;discardOperatorWitness();
+    const auto source=job->sourceFingerprint()+job->profileFingerprint();
+    const auto operation=contextHash(source,m_coordinateEpoch,++m_operatorAttempt,binding);
+    const AccessoryContract::OperatorContext context{binding,operation,AccessoryContract::OperatorAction::StartJob};
+    // Preserve the original OS event's age across distinct monotonic origins.
+    const auto relativeNow=m_accessoryClock.elapsed();
+    const auto observed=relativeNow-(absoluteNow-proof->observedAt);
+    if(!m_accessory.beginOperatorWithStartIntent(context,observed,relativeNow))return false;
+    m_activeOperatorOperation=operation;m_operatorPaused=false;
+    m_operatorReason="Beaufsichtigter Gerätezyklus durch frischen Start bestätigt. Lüfterzustände unbekannt und nicht rücklesbar.";
+    return true;
 }

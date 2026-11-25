@@ -721,7 +721,7 @@ class WorkflowTest : public QObject {
         window->findChild<QObject *>("toolsPanel")->setProperty("section",0);
         QVERIFY(click(window,item("workflow0")));
         window->setProperty("basic", true);
-        QVERIFY(click(window, item("startJobButton"))); // Preview, no machine job yet.
+        QVERIFY(click(window, item("workflow1"))); // Optional preview tab; Basic Start executes directly.
         QTRY_COMPARE(window->property("page").toInt(), 1);
         QVERIFY(!machine.busy());
         QVERIFY(!window->grabWindow().isNull());

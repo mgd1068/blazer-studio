@@ -62,6 +62,16 @@ class AccessoryContract {
         : m_extractionRequired(extractionRequired) {}
 
     SupervisionMode supervisionMode() const { return m_supervisionMode; }
+    // Policy eligibility only, never readiness or a fault/lease bypass. Basic
+    // defaults must not silently replace an explicitly chosen advanced mode.
+    bool singleClickDeviceCycleEligible() const {
+        if (m_supervisionMode == SupervisionMode::OperatorSupervisedDeviceCycle) return true;
+        if (m_supervisionMode != SupervisionMode::SensorVerified || m_sensorExplicitlySelected)
+            return false;
+        for (const auto &mapping : m_mappings)
+            if (!mapping.outputId.isEmpty()) return false;
+        return true;
+    }
     QString supervisionNotice() const {
         if (m_supervisionMode == SupervisionMode::OperatorSupervisedDeviceCycle)
             return QStringLiteral("Beaufsichtigter Gerätezyklus: Anwesenheit vor Start/Fokus/Fortsetzen bestätigen. Gehäuse- und Modullüfterzustand unbekannt; von Blazer nicht rücklesbar.");
@@ -83,6 +93,7 @@ class AccessoryContract {
         resetOperatorEvidence();
         m_operatorSession.clear();
         m_supervisionMode = SupervisionMode::SensorVerified;
+        m_sensorExplicitlySelected = true;
         m_states[index(Role::EnclosureExtraction)] = {};
         m_pending[index(Role::EnclosureExtraction)].reset();
         return true;
@@ -292,6 +303,27 @@ class AccessoryContract {
     bool faulted() const { return m_fault; }
 
   private:
+    friend class ControllerRuntimeWorker;
+    friend class OperatorStartIntentContractTest; // Explicit synthetic unit fixture only.
+    // Worker-only adapter AFTER a typed StartAttended native proof has passed
+    // original deadline, one-use interaction, session/coordinate/source checks.
+    // Times must use this contract's monotonic domain. Converting an absolute
+    // native timestamp must retain its original age, never stamp it as "now".
+    // This helper authenticates no input, selects no mode, and clears no fault.
+    bool beginOperatorWithStartIntent(const OperatorContext &context, qint64 observedAtMs,
+                                      qint64 nowMs, bool airAssistRequired = false) {
+        if (m_supervisionMode != SupervisionMode::OperatorSupervisedDeviceCycle ||
+            context.action != OperatorAction::StartJob || m_lease || m_fault ||
+            m_releaseRequired || !validContext(context) ||
+            context.sessionBinding != m_operatorSession ||
+            (m_lastNativeStartContext && sameContext(context, *m_lastNativeStartContext)))
+            return false;
+        // A failed admission cannot turn the same concrete consumed native
+        // operation into a fresh presence statement on a later retry.
+        m_lastNativeStartContext = context;
+        const auto witness = submitOperatorPresence(context, true, observedAtMs, nowMs);
+        return witness && beginOperator(context, *witness, nowMs, airAssistRequired);
+    }
     std::optional<OperatorWitness> submitPresence(const OperatorContext &context,
             bool operatorPresent, qint64 witnessedAtMs, qint64 nowMs) {
         if (m_fault || !validContext(context) || context.sessionBinding != m_operatorSession ||
@@ -332,8 +364,10 @@ class AccessoryContract {
     inline static std::atomic<quint64> s_issuerSequence{0};
     quint64 m_issuerIdentity = ++s_issuerSequence;
     SupervisionMode m_supervisionMode = SupervisionMode::SensorVerified;
+    bool m_sensorExplicitlySelected = false;
     QByteArray m_operatorSession;
     std::optional<OperatorWitness> m_operatorPending;
+    std::optional<OperatorContext> m_lastNativeStartContext;
     std::optional<OperatorContext> m_operatorLease;
     const AccessoryContract *m_operatorLeaseIssuer = nullptr;
     quint64 m_operatorSequence = 0;

@@ -1,6 +1,8 @@
 #include "devicemanager.h"
 #include "document.h"
 #include "machine.h"
+#include "controllercalibrationstore.h"
+#include <cmath>
 #include <QFile>
 #include <QScopedValueRollback>
 #include <QCryptographicHash>
@@ -14,6 +16,7 @@
 #include <algorithm>
 
 namespace {
+const QString selectedDeviceKey=QStringLiteral("devices/lastSelected/v1");
 QString autoHomeKey(const QString &binding) {
     if (binding.size() != 64) return {};
     for (const auto c : binding)
@@ -155,7 +158,10 @@ void DeviceManager::setAutoHomeOnConnect(bool enabled) {
 
 DeviceManager::DeviceManager(Document *d, Machine *m, QString path, QObject *parent)
     : QObject(parent), document(d), machine(m), library(std::move(path)) {
-    connect(&library, &DeviceLibrary::changed, this, &DeviceManager::changed);
+    connect(&library, &DeviceLibrary::changed, this, [this] {
+        if(!selectedId.isEmpty()&&!selectedIdentityCurrent())document->setPreferredDeviceProfile(std::nullopt);
+        emit changed();
+    });
     connect(machine, &Simulator::changed, this, &DeviceManager::changed);
     connect(machine, &Machine::connectionRequestFinished, this,
             [this](quint64 requestId, bool opened, const QString &reason) {
@@ -182,11 +188,14 @@ DeviceManager::DeviceManager(Document *d, Machine *m, QString path, QObject *par
     });
     connect(document, &Document::deviceProfileChanged, this, [this] {
         if (activating || selectedId.isEmpty()) return;
-        const auto selected = library.profile(selectedId);
-        if (!selected || selected->outputFingerprint() != document->deviceProfile().outputFingerprint())
-            invalidateSelection();
+        // Portable project metadata may change the document profile. Retain
+        // the chosen physical identity, but never apply its old execution binding
+        // or silently replace the newly opened project's profile.
+        if (!selectedIdentityCurrent()) invalidateSelection();
+        else if (!profileMismatchReason().isEmpty()) {lastMessage=profileMismatchReason();emit changed();}
     });
     if (!library.writable()) lastMessage = library.message();
+    else restoreSelectionPreference();
 }
 bool DeviceManager::fail(QString text) {
     lastMessage = std::move(text);
@@ -194,6 +203,8 @@ bool DeviceManager::fail(QString text) {
     return false;
 }
 QString DeviceManager::connectionStatusText() const {
+    const auto mismatch=profileMismatchReason();
+    if(!mismatch.isEmpty())return mismatch;
     const auto phase = machine->connectionPhase();
     if (phase == "closing")
         return "Verbindung wird beendet. Gerätezuordnung erst nach bestätigter Trennung ändern.";
@@ -243,20 +254,112 @@ void DeviceManager::refreshEndpoints() {
 }
 void DeviceManager::invalidateSelection() {
     selectedId.clear(); selectedBinding.clear();
+    document->setPreferredDeviceProfile(std::nullopt);
     pendingConnectionRequestId = 0;
     pendingConnectionBinding.clear();
     lastMessage = "Gerätezuordnung hat sich geändert. Das physische Gerät erneut auswählen; keine Verbindung wurde geöffnet.";
     emit changed();
 }
+bool DeviceManager::selectedIdentityCurrent() const {
+    return library.writable() && !selectedId.isEmpty() && !selectedBinding.isEmpty() &&
+           library.bindingKey(selectedId)==selectedBinding && library.profile(selectedId).has_value();
+}
+QString DeviceManager::activeId() const {return selectedIdentityCurrent()?selectedId:QString();}
+QString DeviceManager::profileMismatchReason() const {
+    if(!selectedIdentityCurrent())return {};
+    const auto profile=library.profile(selectedId);
+    return profile->outputFingerprint()==document->deviceProfile().outputFingerprint()?QString():
+        QString("Ausgewähltes Gerät und Projekt verwenden verschiedene Geräteprofile. Das gewählte Gerät bleibt erhalten; sein Profil vor Verbinden oder Start erneut ausdrücklich übernehmen.");
+}
 QString DeviceManager::bindingKey() const {
-    if (!library.writable()) return {};
-    if (selectedId.isEmpty() || library.bindingKey(selectedId) != selectedBinding) return {};
-    const auto selected = library.profile(selectedId);
-    if (!selected || selected->outputFingerprint() != document->deviceProfile().outputFingerprint()) return {};
-    return selectedBinding;
+    return selectedIdentityCurrent()&&profileMismatchReason().isEmpty()?selectedBinding:QString();
 }
 QVariantMap DeviceManager::active() const {
-    return bindingKey().isEmpty() ? QVariantMap{} : library.instance(selectedId);
+    if(!selectedIdentityCurrent())return {};
+    auto result=library.instance(selectedId);
+    result["profileMatchesProject"]=profileMismatchReason().isEmpty();
+    result["profileMismatchReason"]=profileMismatchReason();
+    return result;
+}
+bool DeviceManager::saveSelectionPreference(QString *error) {
+    if(error)error->clear();
+    if(!selectedIdentityCurrent())return false;
+    if(!preferenceFileReadableWithoutSharedCache(error)) {
+        if(error)error->replace("Home-Option","Geräteauswahl");
+        return false;
+    }
+    QSettings settings;settings.setFallbacksEnabled(false);settings.setAtomicSyncRequired(true);settings.sync();
+    if(settings.status()!=QSettings::NoError){if(error)*error="Geräteauswahl konnte nicht sicher gespeichert werden.";return false;}
+    const bool existed=settings.contains(selectedDeviceKey);const auto previous=settings.value(selectedDeviceKey);
+    (void)settings.allKeys();
+    if(settings.status()!=QSettings::NoError){if(error)*error="Geräteauswahl konnte nicht sicher gespeichert werden.";return false;}
+    const QVariantMap value{{"schema",1},{"instanceId",selectedId},{"binding",selectedBinding}};
+    if(existed&&previous==QVariant(value))return true;
+    settings.setValue(selectedDeviceKey,value);settings.sync();
+    if(settings.status()==QSettings::NoError)return true;
+    if(existed)settings.setValue(selectedDeviceKey,previous);else settings.remove(selectedDeviceKey);
+    settings.sync();
+    if(error)*error="Gerät jetzt ausgewählt, aber Auswahl konnte nicht für den nächsten Start gespeichert werden.";
+    return false;
+}
+void DeviceManager::restoreSelectionPreference() {
+    QString error;
+    if(!preferenceFileReadableWithoutSharedCache(&error)){lastMessage=error.replace("Home-Option","Geräteauswahl");return;}
+    QSettings settings;settings.setFallbacksEnabled(false);settings.sync();
+    const bool preferencePresent=settings.contains(selectedDeviceKey);
+    auto stored=settings.value(selectedDeviceKey);
+    (void)settings.allKeys();
+    if(settings.status()!=QSettings::NoError){lastMessage="Gespeicherte Geräteauswahl nicht lesbar; Gerät erneut auswählen.";return;}
+    bool migrated=false;
+    if(!preferencePresent) {
+        QVariantList candidates;
+        for(const auto &entry:library.instances()) {
+            const auto id=entry.toMap().value("id").toString();
+            const auto profile=library.profile(id);const auto binding=library.bindingKey(id);
+            if(!profile||autoHomeKey(binding).isEmpty())continue;
+            QString loadError;const auto record=ControllerCalibrationStore().load(binding.toLatin1(),&loadError);
+            const auto schemaType=record.value("schema").metaType().id();
+            if(!loadError.isEmpty()||record.size()!=17 || (schemaType!=QMetaType::Int&&schemaType!=QMetaType::LongLong&&schemaType!=QMetaType::Double) || record.value("schema").toDouble()!=1 ||
+               record.value("binding").toString()!=binding ||
+               record.value("profileFingerprint").toString().toLatin1()!=profile->outputFingerprint())continue;
+            bool geometryValid=true;
+            for(const auto &key:{"homeX","homeY","minX","minY","maxX","maxY","observedMinX","observedMinY","observedMaxX","observedMaxY","workOriginX","workOriginY"}) {
+                const auto value=record.value(key);const auto type=value.metaType().id();
+                const bool numeric=type==QMetaType::Double||type==QMetaType::Int||type==QMetaType::LongLong||type==QMetaType::UInt||type==QMetaType::ULongLong;
+                geometryValid &= numeric&&std::isfinite(value.toDouble())&&std::abs(value.toDouble())<=10000;
+            }
+            for(const auto &key:{"settingsFingerprint","deviceIdentityHash"})geometryValid &= !autoHomeKey(record.value(key).toString()).isEmpty();
+            geometryValid &= record.value("minX").toDouble()<record.value("maxX").toDouble() && record.value("minY").toDouble()<record.value("maxY").toDouble();
+            if(!geometryValid)continue;
+            candidates.append(QVariantMap{{"schema",1},{"instanceId",id},{"binding",binding}});
+        }
+        if(candidates.size()!=1) {
+            if(candidates.size()>1)lastMessage="Mehrere eingerichtete Geräte gefunden; gewünschtes Gerät ausdrücklich auswählen.";
+            return;
+        }
+        stored=candidates.first();migrated=true;
+    }
+    if(!stored.isValid())return;
+    if(stored.metaType().id()!=QMetaType::QVariantMap){lastMessage="Gespeicherte Geräteauswahl ungültig; Gerät erneut auswählen.";return;}
+    const auto value=stored.toMap();
+    const auto id=value.value("instanceId"),binding=value.value("binding"),schema=value.value("schema");
+    if(value.size()!=3 || schema.metaType().id()!=QMetaType::Int || schema.toInt()!=1 ||
+       id.metaType().id()!=QMetaType::QString || binding.metaType().id()!=QMetaType::QString ||
+       id.toString().isEmpty() || autoHomeKey(binding.toString()).isEmpty() ||
+       !library.profile(id.toString()) || library.bindingKey(id.toString())!=binding.toString()) {
+        lastMessage="Gespeicherte Geräteauswahl passt nicht zur aktuellen lokalen Geräteinstanz. Gerät erneut auswählen.";return;
+    }
+    if(!machine->simulation()||machine->occupied()||machine->requestPending()||
+       machine->busy()||machine->firing()||document->batchBusy()||document->imageExportBusy()) {
+        lastMessage="Gespeicherte Geräteauswahl nicht während einer Geräteaktion übernommen. Gerät nach Trennung auswählen.";return;
+    }
+    QScopedValueRollback<bool> guard(activating,true);
+    if(!document->setPreferredDeviceProfile(*library.profile(id.toString()))) {lastMessage=document->message();return;}
+    selectedId=id.toString();selectedBinding=binding.toString();
+    lastMessage=migrated?"Einziges zuvor eingerichtetes Gerät wieder ausgewählt. Keine Verbindung geöffnet oder Bewegung ausgelöst.":
+                         "Zuletzt gewähltes Gerät wieder ausgewählt. Keine Verbindung geöffnet oder Bewegung ausgelöst.";
+    if(migrated) {QString saveError;if(!saveSelectionPreference(&saveError)&&!saveError.isEmpty())lastMessage+=' '+saveError;}
+    emit changed();
 }
 QString DeviceManager::parameterHash() const {
     if (bindingKey().isEmpty()) return {};
@@ -314,12 +417,14 @@ bool DeviceManager::activate(const QString &id) {
     const auto profile = library.profile(id);
     if (!profile) return fail("Gerät nicht gefunden.");
     QScopedValueRollback<bool> guard(activating, true);
-    if (!document->setDeviceProfile(*profile)) return fail(document->message());
+    if (!document->setPreferredDeviceProfile(*profile)) return fail(document->message());
     selectedId = id; selectedBinding = library.bindingKey(id);
     lastMessage = "Gerät ausgewählt. Material und Kalibrierung für dieses einzelne Gerät prüfen. Keine Verbindung geöffnet.";
     QString preferenceError;
     readAutoHomeOnConnect(&preferenceError);
     if (!preferenceError.isEmpty()) lastMessage += ' ' + preferenceError;
+    QString selectionError;
+    if(!saveSelectionPreference(&selectionError) && !selectionError.isEmpty())lastMessage += ' ' + selectionError;
     emit changed(); return true;
 }
 bool DeviceManager::update(const QString &id, QString name, QString endpoint) {
@@ -351,6 +456,7 @@ bool DeviceManager::remove(const QString &id) {
 bool DeviceManager::connectSelected() {
     if (changing) return false;
     if (!library.writable()) return fail(library.message());
+    if (!profileMismatchReason().isEmpty()) return fail(profileMismatchReason());
     if (bindingKey().isEmpty()) return fail("Zuerst ein physisches Gerät in der Geräteverwaltung auswählen.");
     if (!machine->simulation() && machine->connected()) return fail("Eine echte Verbindung ist bereits geöffnet; zum Wechseln zuerst trennen.");
     if (connectionRequestPending() || machine->occupied() || machine->requestPending() ||

@@ -72,6 +72,38 @@ bool click(QQuickWindow *window, QQuickItem *item, bool requireEnabled = true) {
 }
 }
 
+// Readiness-only UI fixture. C++ Machine stays hardware-disabled/simulated;
+// these Qt status properties exercise Main's live readiness explanation without
+// manufacturing any runtime reference, native proof or execution permission.
+class AttendedReadinessMachine : public Machine {
+    Q_OBJECT
+    Q_PROPERTY(bool simulation READ uiSimulation NOTIFY uiChanged)
+    Q_PROPERTY(bool connected READ uiConnected NOTIFY uiChanged)
+    Q_PROPERTY(bool connectionVerified READ uiConnected NOTIFY uiChanged)
+    Q_PROPERTY(bool statusFresh READ uiConnected NOTIFY uiChanged)
+    Q_PROPERTY(QString connectionPhase READ uiPhase NOTIFY uiChanged)
+    Q_PROPERTY(bool jobPreparing READ uiFalse NOTIFY uiChanged)
+    Q_PROPERTY(bool jobPrepared READ uiConnected NOTIFY uiChanged)
+    Q_PROPERTY(bool positionReferenced READ uiConnected NOTIFY uiChanged)
+    Q_PROPERTY(QString motionSafetyError READ uiEmpty NOTIFY uiChanged)
+    Q_PROPERTY(QStringList processingSafetyErrors READ oldWitnessErrors NOTIFY uiChanged)
+    Q_PROPERTY(QVariantMap commissioning READ uiCommissioning NOTIFY uiChanged)
+    Q_PROPERTY(QVariantMap extractionSupervision READ uiExtraction NOTIFY uiChanged)
+    Q_PROPERTY(QVariantMap operatorLocalFrame READ uiLocalFrame NOTIFY uiChanged)
+public:
+    explicit AttendedReadinessMachine(Document *document):Machine(document,nullptr,HardwareAccess::Disabled){}
+    QString attendedError;
+    bool uiSimulation()const{return false;}bool uiConnected()const{return true;}bool uiFalse()const{return false;}
+    QString uiPhase()const{return "idle";}QString uiEmpty()const{return {};}
+    QStringList oldWitnessErrors()const{return {"OLD_SEPARATE_WITNESS_MISSING"};}
+    QVariantMap uiCommissioning()const{return {{"stage","complete"},{"workMinX",0.},{"workMinY",0.},{"workMaxX",200.},{"workMaxY",150.},{"activeInputs",0},{"controllerState","Idle"}};}
+    QVariantMap uiLocalFrame()const{return {{"phase","inactive"}};}
+    QVariantMap uiExtraction()const{return {{"mode","operatorSupervisedDeviceCycle"},{"pendingAction",""},{"singleClickStart",true},{"attendedStartReady",attendedError.isEmpty()},{"attendedStartError",attendedError}};}
+    void setAttendedError(QString error){attendedError=std::move(error);emit uiChanged();}
+signals:
+    void uiChanged();
+};
+
 class FeatureWorkflowTest : public QObject {
     Q_OBJECT
   private slots:
@@ -193,8 +225,8 @@ class FeatureWorkflowTest : public QObject {
             item("controllerPositionReadout")->property("text").toString().contains("unbekannt"));
         QVERIFY(!item("activePageFooter")->property("text").toString().contains("Bereit"));
         QVERIFY(item("controllerModeStatus")->property("text").toString().contains("veraltet"));
-        QVERIFY(click(
-            window, item("controllerPositionReadout"))); // Reveal wrapped status/position controls.
+        QTRY_VERIFY(click(
+            window, item("controllerPositionReadout"))); // Settle wrapped layout and reveal status/position controls.
         const auto folder = qEnvironmentVariable("BLAZER_RUNTIME_UI_EVIDENCE");
         if (!folder.isEmpty()) {
             QVERIFY(QDir().mkpath(folder));
@@ -530,6 +562,86 @@ class FeatureWorkflowTest : public QObject {
         window->setProperty("discardCloseApproved", true);
         window->close();
     }
+    void basicDirectStartThroughRealMain_data() {
+        QTest::addColumn<bool>("compactDark");QTest::addColumn<bool>("fromFile");
+        QTest::newRow("shape-normal")<<false<<false;QTest::newRow("shape-compact")<<true<<false;
+        QTest::newRow("file-normal")<<false<<true;QTest::newRow("file-compact")<<true<<true;
+    }
+    void basicDirectStartThroughRealMain() {
+        QFETCH(bool,compactDark);QFETCH(bool,fromFile);QTemporaryDir storage;QVERIFY(storage.isValid());
+        Document project;project.setBackgroundPlanning(false);project.newProject();
+        if(fromFile) {
+            Document source;source.setBackgroundPlanning(false);source.newProject();
+            QVERIFY(source.applyBasicMaterial(MaterialLibrary::example()));source.addShape("rect");
+            source.setBasicOperation("outline");source.setProperty("width",100.);source.setProperty("height",50.);
+            const auto file=QUrl::fromLocalFile(storage.filePath("direct-start.blazer"));QVERIFY(source.save(file));QVERIFY(project.open(file));
+        } else QVERIFY(project.applyBasicMaterial(MaterialLibrary::example()));
+        Machine machine(&project,nullptr,Machine::HardwareAccess::Disabled);
+        DeviceManager devices(&project,&machine,storage.filePath("devices.json"));
+        MaterialLibrary materials(storage.filePath("materials.json"));MaterialTestLedger ledger(storage.filePath("ledger.json"));
+        ArtLibrary arts(storage.filePath("arts.json"));ArtLibraryController artController(&project,&machine,&arts);
+        VectorInspectionService vectors(&project);Registration registration;
+        ApplicationServices services(&project,&machine,storage.filePath("settings.ini"));QVERIFY(services.finishOnboarding());QVERIFY(services.setDarkTheme(compactDark));
+        QQmlApplicationEngine engine;auto *context=engine.rootContext();
+        context->setContextProperty("project",&project);context->setContextProperty("machine",&machine);
+        context->setContextProperty("deviceManager",&devices);context->setContextProperty("materialLibrary",&materials);
+        context->setContextProperty("materialTestLedger",&ledger);context->setContextProperty("artLibrary",&arts);
+        context->setContextProperty("artLibraryController",&artController);context->setContextProperty("vectorInspectionService",&vectors);
+        context->setContextProperty("cameraRegistration",&registration);context->setContextProperty("appServices",&services);
+        engine.load(QUrl::fromLocalFile(QString(BLAZER_SOURCE_DIR)+"/qml/Main.qml"));QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window=qobject_cast<QQuickWindow*>(engine.rootObjects().first());QVERIFY(window);window->resize(compactDark?1180:1480,compactDark?760:920);
+        QVERIFY(QTest::qWaitForWindowExposed(window));auto item=[&](const QString&name){return find(window->contentItem(),name);};
+        QTRY_VERIFY(window->findChild<QObject*>("startupSafetyDialog")->property("visible").toBool());
+        QVERIFY(click(window,item("acknowledgeStartupSafety")));QTRY_VERIFY(!window->findChild<QObject*>("startupSafetyDialog")->property("visible").toBool());
+        QVERIFY(window->property("basic").toBool());QCOMPARE(window->property("page").toInt(),0);
+        if(!fromFile){QVERIFY(click(window,item("addRectangle")));QCOMPARE(project.count(),1);project.setBasicOperation("outline");project.setProperty("width",100.);project.setProperty("height",50.);}
+        QTRY_VERIFY(project.job().valid());QVERIFY(!machine.busy());
+        // Optional explicit preview remains available in Basic.
+        QVERIFY(click(window,item("workflow1")));QCOMPARE(window->property("page").toInt(),1);QVERIFY(!machine.busy());
+        QVERIFY(click(window,item("workflow0")));QCOMPARE(window->property("page").toInt(),0);
+        // Advanced keeps its established first-click Preview contract.
+        QVERIFY(click(window,item("modeToggle")));QVERIFY(!window->property("basic").toBool());
+        QVERIFY(click(window,item("startJobButton")));QCOMPARE(window->property("page").toInt(),1);QVERIFY(!machine.busy());
+        QVERIFY(click(window,item("workflow0")));QVERIFY(click(window,item("modeToggle")));QVERIFY(window->property("basic").toBool());
+        auto *start=item("startJobButton");QVERIFY(start);QTRY_VERIFY(start->isEnabled());
+        QCOMPARE(start->property("nativeActionRole").toString(),QString("startAttended"));
+        QSignalSpy clicked(start,SIGNAL(clicked()));
+        QVERIFY(click(window,start));QCOMPARE(clicked.count(),1);
+        QTRY_VERIFY(machine.busy());QCOMPARE(window->property("page").toInt(),2);
+        QVERIFY(machine.simulation());QCOMPARE(machine.connectionPhase(),QString("closed"));QVERIFY(!machine.connectionVerified());
+        QVERIFY(click(window,item("globalStopButton")));QTRY_VERIFY(!machine.busy());QVERIFY(!machine.firing());
+        window->setProperty("discardCloseApproved",true);window->close();
+    }
+    void attendedReadinessThroughRealMain() {
+        QTemporaryDir storage;QVERIFY(storage.isValid());Document project;project.setBackgroundPlanning(false);project.newProject();
+        QVERIFY(project.applyBasicMaterial(MaterialLibrary::example()));project.addShape("rect");project.setBasicOperation("outline");
+        AttendedReadinessMachine machine(&project);DeviceManager devices(&project,&machine,storage.filePath("devices.json"));
+        MaterialLibrary materials(storage.filePath("materials.json"));MaterialTestLedger ledger(storage.filePath("ledger.json"));
+        ArtLibrary arts(storage.filePath("arts.json"));ArtLibraryController artController(&project,&machine,&arts);
+        VectorInspectionService vectors(&project);Registration registration;ApplicationServices services(&project,&machine,storage.filePath("settings.ini"));QVERIFY(services.finishOnboarding());
+        QQmlApplicationEngine engine;auto *context=engine.rootContext();
+        context->setContextProperty("project",&project);context->setContextProperty("machine",&machine);
+        context->setContextProperty("deviceManager",&devices);context->setContextProperty("materialLibrary",&materials);
+        context->setContextProperty("materialTestLedger",&ledger);context->setContextProperty("artLibrary",&arts);
+        context->setContextProperty("artLibraryController",&artController);context->setContextProperty("vectorInspectionService",&vectors);
+        context->setContextProperty("cameraRegistration",&registration);context->setContextProperty("appServices",&services);
+        engine.load(QUrl::fromLocalFile(QString(BLAZER_SOURCE_DIR)+"/qml/Main.qml"));QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window=qobject_cast<QQuickWindow*>(engine.rootObjects().first());QVERIFY(window);QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto item=[&](const QString&name){return find(window->contentItem(),name);};
+        QTRY_VERIFY(window->findChild<QObject*>("startupSafetyDialog")->property("visible").toBool());QVERIFY(click(window,item("acknowledgeStartupSafety")));
+        QTRY_VERIFY(window->property("useAttendedStart").toBool());
+        // Deliberately no pendingAction or old separate material/presence proof.
+        QVERIFY(!window->property("proofConfirmed").toBool());
+        QTRY_VERIFY2(window->property("startBlockReason").toString().isEmpty(),qPrintable(window->property("startBlockReason").toString()));
+        QTRY_VERIFY(item("startJobButton")->isEnabled());
+        machine.setAttendedError("ATTENDED_INTERLOCK_DENIED");QTRY_COMPARE(window->property("startBlockReason").toString(),QString("ATTENDED_INTERLOCK_DENIED"));
+        QVERIFY(!item("startJobButton")->isEnabled());QVERIFY(!machine.busy());
+        machine.setAttendedError({});QTRY_VERIFY(window->property("startBlockReason").toString().isEmpty());
+        project.setProperty("x",250.);QTRY_VERIFY(!project.job().valid());
+        QTRY_VERIFY(!window->property("startBlockReason").toString().isEmpty());QVERIFY(!item("startJobButton")->isEnabled());
+        QVERIFY(!machine.busy());QVERIFY(!machine.firing());
+        window->setProperty("discardCloseApproved",true);window->close();
+    }
     void realApplicationFeatures_data() {
         QTest::addColumn<bool>("compactDark");
         QTest::newRow("normal-light") << false;
@@ -600,6 +712,7 @@ class FeatureWorkflowTest : public QObject {
         QTRY_VERIFY(!object("startupSafetyDialog")->property("visible").toBool());
         QCOMPARE(window->property("night").toBool(),compactDark);
         QVERIFY(window->property("basic").toBool());
+        QVERIFY(press("modeToggle"));QVERIFY(!window->property("basic").toBool());
 
         QVERIFY(press("manageDevicesButton"));
         QTRY_VERIFY(object("deviceManagerDialog")->property("visible").toBool());
@@ -680,6 +793,7 @@ class FeatureWorkflowTest : public QObject {
         QVERIFY(!object("materialTestRecordDialog")->property("sameContext").toBool());
         QVERIFY(QMetaObject::invokeMethod(object("materialTestRecordDialog"),"close"));
 
+        QVERIFY(press("modeToggle"));QVERIFY(window->property("basic").toBool());
         QVERIFY(settingsMenu()); QTRY_VERIFY(object("settingsBundleDialog")->property("visible").toBool());
         QVERIFY(press("exportSettingsBundle"));
         const auto bundle = storage.filePath("portable-ui.json");
@@ -715,6 +829,7 @@ class FeatureWorkflowTest : public QObject {
         window->setProperty("page",2);
         QTRY_VERIFY(item("frameJobButton")->isEnabled());
         QVERIFY(press("frameJobButton")); QTRY_VERIFY(machine.busy()); QVERIFY(!machine.firing());
+        QVERIFY(window->property("basic").toBool());
         QVERIFY(settingsMenu()); QTRY_VERIFY(object("settingsBundleDialog")->property("visible").toBool());
         QVERIFY(machine.busy());
         QTest::keyClick(window,Qt::Key_Period,Qt::ControlModifier);

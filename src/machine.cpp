@@ -13,6 +13,7 @@
 #include <cmath>
 namespace {
 std::optional<ControllerNativeAction> nativeAction(const QString &name) {
+    if(name=="startAttended")return ControllerNativeAction::StartAttended;
     if(name=="connectHome")return ControllerNativeAction::ConnectHome;
     if(name=="localCapture")return ControllerNativeAction::LocalCapture;
     if(name=="localStart")return ControllerNativeAction::LocalStart;
@@ -245,6 +246,8 @@ void Machine::registerNativeActionControl(QObject *control,const QString &action
     const auto key=action+"#"+QString::number(quintptr(control),16);
     nativeInput->registerClickControl(control,key,[self=QPointer<Machine>(this),target=QPointer<QObject>(control),action,fixedArguments] {
         if(!self||!target||!self->session)return QByteArray();
+        const auto role=target->property("nativeActionRole");
+        if(role.isValid() && role.toString()!=action)return QByteArray();
         return self->nativeBinding(action,self->nativeArguments(target,fixedArguments),self->session->status());
     });
 }
@@ -300,13 +303,14 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
     else if(action!="override") {
         if(!status.ready||status.busy||status.firing||!status.verified||!status.positionReferenced||!status.motionSafetyError.isEmpty())return {};
         if((action=="start"||action=="focus")&&!processingSafetyErrors().isEmpty())return {};
+        if(action=="startAttended" && (!status.extractionSupervision.value("attendedStartReady").toBool() || !status.extractionSupervision.value("attendedStartError").toString().isEmpty()))return {};
     }
     if(QStringList{"operatorAttendedExternal","operatorSupervisedDeviceCycle"}.contains(status.extractionSupervision.value("mode").toString()) &&
        (action=="start" || action=="focus" || action=="resume") &&
        status.extractionSupervision.value("pendingAction").toString()!=action)return {};
     const auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
     PreparedControllerJob::Ptr prepared;
-    if(action=="start") {
+    if(action=="start" || action=="startAttended") {
         if(!runtime||document->planningBusy()||document->startMode()!=Document::AbsoluteCoordinates)return {};
         prepared=runtime->m_preparation->result(runtime->m_prepareSequence);
         if(!prepared||!prepared->valid())return {};
@@ -521,7 +525,9 @@ void Machine::frame(const QVariantMap &b) {
     else
         Simulator::frame(current);
 }
-void Machine::start() {
+void Machine::start() { startWithIntent(false); }
+void Machine::startAttended() { startWithIntent(true); }
+void Machine::startWithIntent(bool attended) {
     if (document->planningBusy()) {
         document->notify("Auftragsberechnung oder Export läuft noch.");
         return;
@@ -532,7 +538,13 @@ void Machine::start() {
         document->notify("Relative Startmodi sind derzeit nur im Simulator eingerichtet. Reale Positions- und Koordinatenbindung ist noch nicht abgenommen.");
         return;
     }
-    if (live && !processingSafetyErrors().isEmpty()) {
+    if(live && attended) {
+        const auto state=session->status().extractionSupervision;
+        if(!state.value("attendedStartReady").toBool() || !state.value("attendedStartError").toString().isEmpty()) {
+            document->notify(state.value("attendedStartError").toString().isEmpty()?"Gerät noch nicht bereit.":state.value("attendedStartError").toString());return;
+        }
+    }
+    if (live && !attended && !processingSafetyErrors().isEmpty()) {
         document->notify(processingSafetyErrors().join("\n"));
         return;
     }
@@ -550,7 +562,7 @@ void Machine::start() {
         if(runtime->m_candidateMoves.constData()!=job.moves.constData()||runtime->m_candidateMoves.size()!=job.moves.size()||!runtime->jobPrepared()) {
             runtime->prepare(job);return; // No completion callback can start this job.
         }
-        dispatchNative("start",{},0,0,{},runtime->m_preparation->result(runtime->m_prepareSequence));
+        dispatchNative(attended?"startAttended":"start",{},0,0,{},runtime->m_preparation->result(runtime->m_prepareSequence));
     } else {
         Simulator::setJob(job);
         Simulator::start();
