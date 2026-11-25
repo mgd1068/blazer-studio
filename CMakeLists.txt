@@ -9,7 +9,7 @@ add_custom_target(blazer-build-info
     VERBATIM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Svg SerialPort Xml Concurrent DBus)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Widgets Svg SerialPort Xml Concurrent DBus)
 qt_standard_project_setup(REQUIRES 6.8)
 include(CTest)
 find_package(PkgConfig REQUIRED)
@@ -76,7 +76,7 @@ qt_add_qml_module(blazer-studio URI BlazerStudio VERSION 1.0 QML_FILES ${blazer_
 qt_add_resources(blazer-studio profiles PREFIX / FILES
     profiles/blaze-x-m3.json profiles/manufacturer-materials.json)
 target_compile_definitions(blazer-studio PRIVATE BLAZER_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools")
-target_link_libraries(blazer-studio PRIVATE blazer-core Qt6::QuickControls2)
+target_link_libraries(blazer-studio PRIVATE blazer-core Qt6::QuickControls2 Qt6::Widgets)
 
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test QuickTest)

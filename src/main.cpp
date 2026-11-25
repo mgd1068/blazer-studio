@@ -18,7 +18,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
-#include <QGuiApplication>
+#include <QApplication>
 #include <QImage>
 #include <QImageReader>
 #include <QJsonDocument>
@@ -82,7 +82,10 @@ int main(int argc, char **argv) {
             fprintf(stdout, "Blazer Studio %s\n", BLAZER_VERSION);
             return 0;
         }
-    QGuiApplication app(argc, argv);
+    // KDE's platform theme only supplies its native file dialogs to QApplication.
+    // Keep the Qt Quick UI, but allow Open/Save/Folder dialogs to use the desktop's
+    // file picker (including KDE places, breadcrumbs and file previews).
+    QApplication app(argc, argv);
     app.setApplicationName("Blazer Studio");
     app.setOrganizationName("BlazerStudio");
     app.setApplicationVersion(QStringLiteral(BLAZER_VERSION));

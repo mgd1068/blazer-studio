@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.10-dev
+# Blazer Studio – Einstieg in beta.10.1-dev
 
 **Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.8-dev ergänzt eine geführte, nur für die aktuelle Verbindung geltende M3-Einrichtung und einen ausdrücklich bestätigten Absaugmodus ohne Sensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
@@ -16,6 +16,12 @@ sudo apt install ./blazer-studio_*_amd64.deb
 ```
 
 Die Paketverwaltung installiert die benötigten Laufzeitbibliotheken. Ein Compiler oder Qt-Entwicklungsumgebung ist nicht erforderlich. Starte anschließend **Blazer Studio** im Anwendungsmenü oder `blazer-studio` im Terminal. Beim Wechsel von einer alten Entwicklungsversion das alte Fenster regulär schließen; Benutzerdateien werden beim Installieren nicht gelöscht.
+
+## Dateiauswahl unter Kubuntu / KDE
+
+Ab beta.10.1 verwendet Blazer Studio mit installierter KDE-Integration den nativen KDE-Dateidialog. Er bietet die vertraute Orte-Seitenleiste, Pfadnavigation, Dateiansichten und die Vorschaufunktionen des Desktops. Das Qt-Quick-Hauptfenster bleibt erhalten. Auf anderen Desktops richtet sich die Dateiauswahl nach der vorhandenen Plattformintegration; ohne native Integration bleibt die Qt-Auswahl verfügbar. Für KDE stammt die Integration im Ubuntu-Paket aus `plasma-integration`.
+
+Mit **Strg+L** lässt sich ein vollständiger Pfad direkt eingeben. Unter Linux zählt Groß- und Kleinschreibung: `Projekte/Laser` unterscheidet sich von `projekte/laser`. Nach einer Aktualisierung das laufende Programm regulär schließen und neu öffnen, damit die geänderte Desktopintegration aktiv wird.
 
 ## Erster Auftrag im Simulator
 
