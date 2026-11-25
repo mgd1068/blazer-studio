@@ -7,6 +7,9 @@
 // Private seam, synthetic timestamps/events only. No claim of physical input.
 class NativeInputIntentTestAccess {
 public:
+    static bool hit(QQuickWindow &window,QQuickItem &control,QPointF scene) {
+        return NativeInputIntentAdapter::hitControl(&window,&control,scene,false);
+    }
     static qint64 now() { return NativeInputIntentAdapter::nowMs(); }
     static void calibrate(NativeInputIntentAdapter &a, quint32 server=1000) {
         a.m_domain=NativeInputIntentAdapter::Domain::X11Server32;
@@ -31,6 +34,41 @@ public:
 class NativeInputAdversarialTest:public QObject {
     Q_OBJECT
 private slots:
+    void paintOrderPlacesLateDialogBackgroundBelowButton() {
+        QQuickWindow window;window.resize(200,200);window.show();window.requestActivate();
+        QTRY_VERIFY(window.isActive());
+        QQuickItem panel(window.contentItem());panel.setSize({180,180});
+        QQuickItem button(&panel);button.setPosition({10,10});button.setSize({40,40});
+        QQuickItem background(&panel);background.setSize({180,180});background.setZ(-1);
+        QVERIFY(NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        background.setZ(1);
+        QVERIFY(!NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        background.setZ(0); // Later sibling paints above at equal z.
+        QVERIFY(!NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        background.stackBefore(&button);
+        QVERIFY(NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        background.stackAfter(&button);
+        QVERIFY(!NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        button.setZ(2);
+        QVERIFY(NativeInputIntentTestAccess::hit(window,button,{30,30}));
+    }
+    void nativeHitStillRejectsModalCoverHiddenDisabledAndClippedControls() {
+        QQuickWindow window;window.resize(200,200);window.show();window.requestActivate();
+        QTRY_VERIFY(window.isActive());
+        QQuickItem panel(window.contentItem());panel.setSize({100,100});panel.setClip(true);
+        QQuickItem button(&panel);button.setPosition({10,10});button.setSize({40,40});
+        QVERIFY(NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        QQuickItem cover(window.contentItem());cover.setSize({200,200});cover.setZ(1000000);
+        QVERIFY(!NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        cover.setVisible(false);
+        QVERIFY(NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        button.setEnabled(false);
+        QVERIFY(!NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        button.setEnabled(true);button.setVisible(false);
+        QVERIFY(!NativeInputIntentTestAccess::hit(window,button,{30,30}));
+        button.setVisible(true);button.setPosition({90,90});
+        QVERIFY(!NativeInputIntentTestAccess::hit(window,button,{110,110}));
+    }
     void x11IndependentTimeBoundaries_data() {
         QTest::addColumn<quint32>("server");QTest::addColumn<quint64>("event");
         QTest::addColumn<qint64>("now");QTest::addColumn<qint64>("expectedObserved");

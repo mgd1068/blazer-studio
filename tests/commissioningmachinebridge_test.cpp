@@ -18,6 +18,12 @@ using RuntimeTestSupport::RuntimePeer;
 // Real registered QML controls and their real binding providers remain in use.
 class NativeInputIntentTestAccess {
 public:
+    static bool hit(QQuickWindow *window,QQuickItem *control) {
+        if(!control)return false;
+        const auto scene=control->mapToScene(control->boundingRect().center());
+        const auto okay=NativeInputIntentAdapter::hitControl(window,control,scene,false);
+        return okay;
+    }
     static bool seed(NativeInputIntentAdapter &a,QQuickItem &control,const QString &action,const QByteArray &binding) {
         const auto key=action+"#"+QString::number(quintptr(&control),16);
         if(binding.isEmpty()||a.m_controls.value(key)!=&control||!a.m_clickBindings.value(key))return false;
@@ -75,6 +81,9 @@ ApplicationWindow {
         auto setup=root->property("setup").value<QObject*>();QVERIFY(setup);QVERIFY(QMetaObject::invokeMethod(setup,"open"));QTRY_COMPARE(stage(),QString("mechanics"));
         for(const auto name:{"setupSwitchesWitness","setupDirectionWitness","setupFreeTravelWitness","setupLaserDisabledWitness"})QVERIFY(check(name));
         QVERIFY(invoke("attestSetupMechanics"));QTRY_COMPARE(stage(),QString("homeReady"));
+        QCoreApplication::processEvents();
+        QVERIFY2(NativeInputIntentTestAccess::hit(window,item("setupHomeButton")),
+            "The actual modal Home button must be reachable by the native input hit test");
         QSignalSpy denied(&machine,&Machine::nativeActionDenied);
         const int homesBefore=count(peer,"homed");
         machine.commissioningHome(); // No native activation: reject, explain, never send $H.

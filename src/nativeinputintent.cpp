@@ -21,6 +21,8 @@
 #include <time.h>
 #include <chrono>
 #include <limits>
+#include <algorithm>
+#include <cmath>
 #ifdef BLAZER_HAS_XCB_INPUT_CLOCK
 #include <xcb/xcb.h>
 #endif
@@ -362,8 +364,24 @@ bool NativeInputIntentAdapter::hitControl(QObject *windowObject,QObject *control
     auto item=qobject_cast<QQuickItem *>(control);
     if(!window||!item||!window->isActive()||!window->isVisible()||!item->isVisible()||!item->isEnabled()||item->window()!=window)return false;
     if(key)return item->hasActiveFocus();
+    if(!std::isfinite(scene.x())||!std::isfinite(scene.y()))return false;
+    for(auto ancestor=item->parentItem();ancestor;ancestor=ancestor->parentItem())
+        if(ancestor->clip()&&!ancestor->boundingRect().contains(ancestor->mapFromScene(scene)))return false;
     auto hit=window->contentItem();
-    for(int depth=0;hit&&depth<64;++depth){auto point=hit->mapFromScene(scene);auto child=hit->childAt(point.x(),point.y());if(!child)break;hit=child;if(depth==63)return false;}
+    for(int depth=0;hit&&depth<64;++depth) {
+        // childAt() returns a visible child, not necessarily the top painted
+        // child. A Dialog's late-created background (z=-1) must not obscure
+        // its content (z=0), while actual foreground overlays still block it.
+        auto children=hit->childItems();
+        if(children.size()>4096)return false;
+        for(auto child:children)if(!std::isfinite(child->z()))return false;
+        std::stable_sort(children.begin(),children.end(),[](auto a,auto b){return a->z()<b->z();});
+        QQuickItem *next=nullptr;
+        for(auto i=children.crbegin();i!=children.crend();++i)
+            if((*i)->isVisible()&&(*i)->contains((*i)->mapFromScene(scene))){next=*i;break;}
+        if(!next)break;
+        hit=next;if(depth==63)return false;
+    }
     for(auto ancestor=hit;ancestor;ancestor=ancestor->parentItem())if(ancestor==item)return item->contains(item->mapFromScene(scene));
     return false;
 }
