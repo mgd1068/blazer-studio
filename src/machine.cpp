@@ -4,6 +4,7 @@
 #include "connectionhomepermit.h"
 #include "nativeinputintent.h"
 #include "document.h"
+#include "controllerjobpreparation.h"
 #include <QPointer>
 #include <QCryptographicHash>
 #include <QScopedValueRollback>
@@ -11,6 +12,7 @@
 #include <QJSValue>
 #include <QDataStream>
 #include <cmath>
+#include <algorithm>
 namespace {
 std::optional<ControllerNativeAction> nativeAction(const QString &name) {
     if(name=="startAttended")return ControllerNativeAction::StartAttended;
@@ -52,6 +54,17 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     connect(nativeInput,&NativeInputIntentAdapter::contextInvalidated,this,[this] {
         if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()))
             runtime->invalidatePendingSequenceContext();
+    });
+    simulatedVisualizationPreparation=new ControllerJobPreparation(this);
+    connect(simulatedVisualizationPreparation,&ControllerJobPreparation::finished,this,[this](quint64 generation) {
+        if(generation!=simulatedVisualizationGeneration)return;
+        const auto prepared=simulatedVisualizationPreparation->result(generation);
+        simulatedVisualization=prepared?prepared->visualization():PreparedControllerJob::Visualization::Ptr{};
+        emit changed(); // Data completion only; never starts any motion.
+    });
+    connect(this,&Simulator::changed,this,[this] {
+        observeSimulatedJob();
+        emit liveJobChanged(); // Notify only AFTER updating the frozen simulation snapshot.
     });
     simulatorFrameNonce = QUuid::createUuid().toRfc4122();
     document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
@@ -99,6 +112,44 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
     connect(d,&Document::changed,this,cancelChangedOutput);
     connect(d,&Document::selectionChanged,this,cancelChangedOutput);
     refreshPreviewPosition();
+}
+void Machine::observeSimulatedJob() {
+    if(live || !simulatedJobActive)return;
+    if(Simulator::busy()) {
+        simulatedJobPercent=std::clamp(Simulator::progress()*100.,0.,99.);
+        simulatedJobPhase=Simulator::paused()?"paused":"engraving";
+        const QPointF p(Simulator::x(),Simulator::y());
+        if(simulatedTrail.isEmpty() || simulatedTrail.last()!=p) {
+            if(simulatedTrail.size()>=256)simulatedTrail.removeFirst();
+            simulatedTrail.append(p);
+        }
+    } else {
+        simulatedJobActive=false;
+        simulatedJobPhase=Simulator::progress()>=1.?"complete":Simulator::connected()?"stopped":"fault";
+        if(simulatedJobPhase=="complete")simulatedJobPercent=100.;
+    }
+}
+QVariantMap Machine::liveJob() const {
+    if(live) {
+        const auto status=session->status();auto result=status.liveJob;
+        if(!status.statusFresh) {result["headFresh"]=false;result["outputKnown"]=false;}
+        return result;
+    }
+    if(!simulatedJobValid || (!simulatedJobActive && (Simulator::busy() || Simulator::firing())))return {};
+    return {{"valid",true},{"active",simulatedJobActive},{"completed",simulatedJobPhase=="complete"},
+        {"phase",simulatedJobPhase},{"percent",simulatedJobPercent},{"estimated",false},{"estimateKnown",true},
+        {"estimatedSeconds",simulatedJobSeconds},{"elapsedActiveMs",qint64(simulatedJobPercent*simulatedJobSeconds*10.)},
+        {"headFresh",Simulator::connected()},{"headX",Simulator::x()},{"headY",Simulator::y()},
+        {"outputKnown",false},{"reportedPower",0.},{"statusAgeMs",0},{"simulation",true},
+        {"jobId",QString("sim-%1").arg(simulatedVisualizationGeneration)},
+        {"sourceFingerprint",simulatedVisualization?QString::fromLatin1(simulatedVisualization->sourceFingerprint.toHex()):QString()},
+        {"visualizationReady",bool(simulatedVisualization)}};
+}
+PreparedControllerJob::Visualization::Ptr Machine::liveJobVisualization() const {
+    return live?session->status().activeJobVisualization:simulatedVisualization;
+}
+QVector<QPointF> Machine::liveJobTrail() const {
+    return live?session->status().activeJobTrail:simulatedTrail;
 }
 void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
     if (previewDeviceBinding == binding) return;
@@ -602,8 +653,17 @@ void Machine::startWithIntent(bool attended) {
         }
         dispatchNative(attended?"startAttended":"start",{},0,0,{},runtime->m_preparation->result(runtime->m_prepareSequence));
     } else {
+        simulatedJobActive=false;simulatedJobValid=false;simulatedVisualization.reset();simulatedTrail.clear();
+        simulatedJobPercent=0;simulatedJobSeconds=job.seconds;
+        const QPointer<Machine> alive(this);
+        simulatedVisualizationPreparation->prepare(job,++simulatedVisualizationGeneration);
+        if(!alive)return;
         Simulator::setJob(job);
         Simulator::start();
+        if(!alive)return;
+        simulatedJobValid=Simulator::running();simulatedJobActive=simulatedJobValid;
+        simulatedJobPhase=simulatedJobValid?"engraving":"idle";
+        emit changed();
     }
 }
 void Machine::pause() {

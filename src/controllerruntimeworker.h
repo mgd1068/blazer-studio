@@ -107,6 +107,17 @@ class ControllerRuntimeWorker final : public QObject {
     bool m_wasVerified = false, m_wasReferenced = false;
     quint64 m_lastFocusInteraction = 0;
     PreparedControllerJob::Ptr m_activePrepared;
+    PreparedControllerJob::Ptr m_visualizedJob; // Retired offworker when replaced.
+    QVector<QPointF> m_liveJobTrail;
+    QString m_liveJobPhase="idle";
+    bool m_liveJobActive=false,m_liveClockRunning=false;
+    qint64 m_liveElapsedMs=0,m_liveLastTick=-1;
+    double m_livePercent=0;
+    quint64 m_liveJobId=0;
+    void beginLiveJob(const PreparedControllerJob::Ptr &,const QString &phase);
+    void finishLiveJob(const QString &phase);
+    void updateLiveJob();
+    QVariantMap liveJobSnapshot() const;
     quint64 m_connectionEpoch = 0, m_sequence = 0;
     quint64 m_coordinateEpoch = 1, m_lastNativeInteraction = 0;
     std::shared_ptr<const ControllerNativePressProof> m_dispatchProof;

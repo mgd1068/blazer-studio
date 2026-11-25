@@ -90,9 +90,13 @@ class AttendedReadinessMachine : public Machine {
     Q_PROPERTY(QVariantMap commissioning READ uiCommissioning NOTIFY uiChanged)
     Q_PROPERTY(QVariantMap extractionSupervision READ uiExtraction NOTIFY uiChanged)
     Q_PROPERTY(QVariantMap operatorLocalFrame READ uiLocalFrame NOTIFY uiChanged)
+    Q_PROPERTY(QVariantMap liveJob READ uiLiveJob NOTIFY uiChanged)
 public:
     explicit AttendedReadinessMachine(Document *document):Machine(document,nullptr,HardwareAccess::Disabled){}
     QString attendedError;
+    QVariantMap liveState;
+    QVariantMap uiLiveJob()const{return liveState;}
+    void setLiveState(QVariantMap state){liveState=std::move(state);emit uiChanged();}
     bool uiSimulation()const{return false;}bool uiConnected()const{return true;}bool uiFalse()const{return false;}
     QString uiPhase()const{return "idle";}QString uiEmpty()const{return {};}
     QStringList oldWitnessErrors()const{return {"OLD_SEPARATE_WITNESS_MISSING"};}
@@ -609,6 +613,41 @@ class FeatureWorkflowTest : public QObject {
         QVERIFY(click(window,start));QCOMPARE(clicked.count(),1);
         QTRY_VERIFY(machine.busy());QCOMPARE(window->property("page").toInt(),2);
         QVERIFY(machine.simulation());QCOMPARE(machine.connectionPhase(),QString("closed"));QVERIFY(!machine.connectionVerified());
+        QTRY_VERIFY(item("liveJobPanel")->isVisible());QVERIFY(!item("deviceSetupScroll")->isVisible());
+        auto *liveWorkspace=item("liveJobWorkspace");QVERIFY(liveWorkspace);QVERIFY(liveWorkspace->property("liveJobView").toBool());
+        QTRY_VERIFY(liveWorkspace->height()>=280);QVERIFY(liveWorkspace->width()>200);
+        QVERIFY(!item("basicGuidePanel")->isVisible());
+        const auto live=[&]{return machine.property("liveJob").toMap();};
+        QTRY_VERIFY(live().value("valid").toBool());
+        QTRY_VERIFY(live().value("visualizationReady").toBool());
+        QTRY_VERIFY(!live().value("sourceFingerprint").toString().isEmpty());
+        QTRY_VERIFY(window->property("livePercent").toDouble()>=3.);
+        QVERIFY(item("liveJobPercent")->property("text").toString().contains('%'));
+        const auto source=live().value("sourceFingerprint");QVERIFY(source.isValid());QVERIFY(!source.toString().isEmpty());
+        auto *pause=item("pauseJobButton");auto *stop=item("stopJobButton");QVERIFY(pause&&stop);
+        QVERIFY(pause->isVisible()&&stop->isVisible());QVERIFY(pause->isEnabled());
+        QCOMPARE(window->findChildren<QObject*>("pauseJobButton").size(),1);
+        QCOMPARE(window->findChildren<QObject*>("stopJobButton").size(),1);
+        QCOMPARE(window->findChildren<QObject*>("frameJobButton").size(),1);
+        QVERIFY(click(window,pause));QTRY_VERIFY(machine.paused());
+        const auto heldPercent=live().value("percent");QTest::qWait(140);QCOMPARE(live().value("percent"),heldPercent);
+        QTRY_COMPARE(live().value("phase").toString(),QString("paused"));
+        QTRY_VERIFY(item("liveJobPhase")->property("text").toString().contains("Pausiert"));
+        const auto screenshots=qEnvironmentVariable("BLAZER_LIVE_PREVIEW_SCREENSHOT_DIR");
+        if(!screenshots.isEmpty()) {
+            QVERIFY(QDir().mkpath(screenshots));QTest::qWait(60);
+            const auto image=window->grabWindow();QVERIFY(!image.isNull());
+            QVERIFY(image.save(screenshots+"/"+QTest::currentDataTag()+"-paused.png"));
+        }
+        project.setProperty("x",70.);QCOMPARE(live().value("sourceFingerprint"),source);QVERIFY(live().value("visualizationReady").toBool());
+        QVERIFY(click(window,pause));QTRY_VERIFY(machine.running());
+        QVERIFY(click(window,item("liveDeviceDetailsButton")));QTRY_VERIFY(item("deviceSetupScroll")->isVisible());QTRY_VERIFY(item("basicGuidePanel")->isVisible());
+        QVERIFY(pause->isVisible()&&stop->isVisible());
+        QVERIFY(click(window,item("showLiveJobButton")));QTRY_VERIFY(item("liveJobPanel")->isVisible());
+        QVERIFY(click(window,stop));QTRY_VERIFY(!machine.busy());QVERIFY(!machine.firing());
+        QVERIFY(item("stopJobButton")->isVisible());
+        QTRY_VERIFY(item("frameJobButton")->isEnabled());QVERIFY(click(window,item("frameJobButton")));
+        QVERIFY(!window->property("livePreviewSelected").toBool());QTRY_VERIFY(item("deviceSetupScroll")->isVisible());
         QVERIFY(click(window,item("globalStopButton")));QTRY_VERIFY(!machine.busy());QVERIFY(!machine.firing());
         window->setProperty("discardCloseApproved",true);window->close();
     }
@@ -647,6 +686,29 @@ class FeatureWorkflowTest : public QObject {
         project.setProperty("x",250.);QTRY_VERIFY(!project.job().valid());
         QTRY_VERIFY(!window->property("startBlockReason").toString().isEmpty());QVERIFY(!item("startJobButton")->isEnabled());
         QVERIFY(!machine.busy());QVERIFY(!machine.firing());
+        window->setProperty("page",2);
+        machine.setLiveState({{"valid",true},{"jobId",1},{"sourceFingerprint","fixed-job"},{"active",true},{"completed",false},{"phase","parking"},{"percent",100.},{"estimateKnown",true},{"headFresh",false},{"visualizationReady",false}});
+        QTRY_VERIFY(item("liveJobPanel")->isVisible());QCOMPARE(window->property("livePercent").toDouble(),99.);
+        QVERIFY(item("liveJobPhase")->property("text").toString().contains("Rückfahrt"));QVERIFY(item("liveJobVisualizationPending")->isVisible());
+        QVERIFY(item("liveJobPositionStatus")->isVisible());QCOMPARE(item("liveJobPositionStatus")->property("text").toString(),QString("Position nicht aktuell"));
+        QVERIFY(item("stopJobButton")->isVisible());
+        machine.setLiveState({{"valid",true},{"jobId",1},{"sourceFingerprint","fixed-job"},{"active",false},{"completed",true},{"phase","complete"},{"percent",100.},{"estimateKnown",true},{"headFresh",true}});
+        QTRY_COMPARE(window->property("livePercent").toDouble(),100.);QVERIFY(item("liveJobPanel")->isVisible());
+        QVERIFY(!item("liveJobPositionStatus")->isVisible());
+        // Confirmed completion is100% even when no duration estimate existed.
+        machine.setLiveState({{"valid",true},{"jobId",1},{"sourceFingerprint","fixed-job"},{"active",false},{"completed",true},{"phase","complete"},{"percent",100.},{"estimateKnown",false},{"headFresh",true}});
+        QTRY_COMPARE(window->property("livePercent").toDouble(),100.);
+        QVERIFY(item("liveJobPercent")->property("text").toString().contains("100 %"));
+        QVERIFY(click(window,item("liveDeviceDetailsButton")));QVERIFY(!window->property("livePreviewSelected").toBool());
+        machine.setLiveState({{"valid",true},{"jobId",1},{"sourceFingerprint","image-ready-source"},{"active",false},{"completed",true},{"phase","complete"},{"percent",100.},{"estimateKnown",true},{"headFresh",false}});
+        QTRY_VERIFY(!item("liveJobPanel")->isVisible());
+        // A genuinely new job restores Live even when geometry is identical;
+        // mere status/freshness changes of the old job preserve the user's view.
+        machine.setLiveState({{"valid",true},{"jobId",2},{"sourceFingerprint","fixed-job"},{"active",true},{"completed",false},{"phase","engraving"},{"percent",1.},{"estimateKnown",true},{"headFresh",true}});
+        QTRY_VERIFY(item("liveJobPanel")->isVisible());
+        machine.setLiveState({{"valid",true},{"jobId",2},{"sourceFingerprint","fixed-job"},{"active",false},{"completed",false},{"phase","fault"},{"percent",42.},{"estimateKnown",true},{"headFresh",false}});
+        QTRY_COMPARE(window->property("livePercent").toDouble(),42.);QVERIFY(item("liveJobPhase")->property("text").toString().contains("abgebrochen"));
+        QVERIFY(item("stopJobButton")->isVisible());QVERIFY(!machine.busy());QVERIFY(!machine.firing());
         window->setProperty("discardCloseApproved",true);window->close();
     }
     void realApplicationFeatures_data() {

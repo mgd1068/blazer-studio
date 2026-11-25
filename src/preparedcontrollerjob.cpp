@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 #include <utility>
+#include <QPainter>
+#include <QLineF>
 
 PreparedControllerJob::Ptr PreparedControllerJob::prepare(const JobPlan &plan,
                                                         const Cancellation &cancel) {
@@ -66,6 +68,43 @@ PreparedControllerJob::Ptr PreparedControllerJob::prepare(const JobPlan &plan,
     result->m_media = program.mediaType();
     result->m_moveCount = plan.moves.size();
     result->m_lines = std::move(lines);
+    auto view=std::make_shared<Visualization>();
+    view->workArea=profile.workArea();
+    view->sourceFingerprint=result->m_source;view->moveCount=result->m_moveCount;
+    view->estimatedSeconds=std::isfinite(plan.seconds)&&plan.seconds>0?plan.seconds:0;
+    // One bounded bitmap contains ALL planned paths. Neither the realtime
+    // worker nor the GUI needs to rescan up to 500k moves on a status update.
+    const double extent=std::max({right-left,top-bottom,1.});
+    const double pad=std::max(.01,extent/512.);
+    view->workBounds=QRectF(QPointF(left-pad,bottom-pad),QPointF(right+pad,top+pad));
+    const double pixels=1020./std::max(view->workBounds.width(),view->workBounds.height());
+    const int width=std::clamp(int(std::ceil(view->workBounds.width()*pixels)),2,1024);
+    const int height=std::clamp(int(std::ceil(view->workBounds.height()*pixels)),2,1024);
+    view->image=QImage(width,height,QImage::Format_ARGB32_Premultiplied);
+    view->image.fill(Qt::transparent);
+    QPainter painter(&view->image);painter.setRenderHint(QPainter::Antialiasing);
+    const auto pixel=[&](QPointF p){return QPointF((p.x()-view->workBounds.left())/view->workBounds.width()*(width-1),
+        (view->workBounds.bottom()-p.y())/view->workBounds.height()*(height-1));};
+    QPointF cursor=result->m_firstApproach;bool first=true;
+    double fallbackSeconds=0;
+    for(const auto &move:plan.moves) {
+        if(isCancelled(cancel)){painter.end();return fail("Auftragsvorbereitung abgebrochen.",true);}
+        const QPen travel(QColor("#8da4b1"),2.5,Qt::DashLine);
+        if(move.rapid) {
+            painter.setPen(travel);
+            // The initial rapid's 'from' is only a preview hint, not emitted.
+            if(!first)painter.drawLine(pixel(cursor),pixel(move.to));
+        } else {
+            if(cursor!=move.from){painter.setPen(travel);painter.drawLine(pixel(cursor),pixel(move.from));}
+            painter.setPen(QPen(move.power>0?QColor("#28a4c8"):QColor("#8da4b1"),4.));
+            painter.drawLine(pixel(move.from),pixel(move.to));
+            if(std::isfinite(move.speed)&&move.speed>0)fallbackSeconds+=QLineF(move.from,move.to).length()/move.speed*60.;
+        }
+        cursor=move.to;first=false;
+    }
+    painter.end();
+    if(view->estimatedSeconds<=0 && std::isfinite(fallbackSeconds))view->estimatedSeconds=fallbackSeconds;
+    result->m_visualization=std::move(view);
     if (isCancelled(cancel)) return fail("Auftragsvorbereitung abgebrochen.", true);
     return result;
 }

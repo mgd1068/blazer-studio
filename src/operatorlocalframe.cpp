@@ -160,13 +160,14 @@ void ControllerRuntimeWorker::localMotion(const ControllerRuntimeRequest &reques
     if(request.kind==ControllerRuntimeRequestKind::LocalStart) {
         if(p->firstNonzeroMotionLineIndex()<0){f.reason="Lokaler Auftrag enthält keinen nichtnulligen Verfahrweg.";return;}
         if(!beginAccessory(AccessoryContract::OperatorAction::StartJob,p->sourceFingerprint()+p->profileFingerprint()))return;
+        beginLiveJob(p->prepared(),"engraving");
         m_jobActive=true;m_activePrepared=p->prepared();
     }
     m_localActive=p;m_localFrameRun=request.kind==ControllerRuntimeRequestKind::LocalFrame;
     m_localMotionStartCounter=m_core->reportedMachinePosition;m_localFirstMotionDue=request.input.proof->observedAt+10000;
     f.phase="running";f.reason=m_localFrameRun?"Explizite laserfreie lokale Rahmenfahrt mit Rückkehr zum Ausgangspunkt.":"Beaufsichtigter lokaler Auftrag läuft; kein globaler Referenznachweis.";
     bool accepted=m_localFrameRun?m_core->frameLocalPrepared(p->frameLines()):m_core->startLocalPrepared(*p->prepared());
-    if(!accepted){m_jobActive=false;m_accessory.transition(AccessoryContract::Event::Complete);retirePrepared();invalidateLocalFrame("Lokaler Start nicht angenommen.");}
+    if(!accepted){if(!frame)finishLiveJob("fault");m_jobActive=false;m_accessory.transition(AccessoryContract::Event::Complete);retirePrepared();invalidateLocalFrame("Lokaler Start nicht angenommen.");}
 }
 void ControllerRuntimeWorker::updateLocalFrame() {
     if(m_updatingLocal||!m_local.engaged()||m_local.phase=="invalid")return;

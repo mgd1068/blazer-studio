@@ -32,6 +32,7 @@ class StartAttendedSequenceTest:public QObject {
     int serial=0;
     const QByteArray binding=QByteArray(64,'a');
     const QString script=QStringLiteral(BLAZER_TEST_SOURCE_DIR "/tests/support/start_home_return_peer.py");
+    static QVariantMap live(ControllerRuntimeSession &runtime){return runtime.status().liveJob;}
     static QString stage(ControllerRuntimeSession &runtime){return runtime.status().commissioning.value("stage").toString();}
     static int count(RuntimePeer &peer,const QString &kind){return peer.snapshot().object.value("counts").toObject().value(kind).toInt();}
     static bool data(ControllerRuntimeSession &runtime,const QString &op){return runtime.commissioningData({{"op",op}});}
@@ -113,6 +114,7 @@ private slots:
         QTRY_COMPARE(count(peer,"homed"),homes+1);
         QTRY_VERIFY(!runtime.status().occupied&&!runtime.status().busy);
         QVERIFY(!runtime.status().extractionSupervision.value("referencePending").toBool());
+        QVERIFY(!live(runtime).value("active").toBool());QVERIFY(!live(runtime).value("valid").toBool());
         QCOMPARE(count(peer,"physicalMove"),moves);QCOMPARE(count(peer,"machineCoordinateMove"),parks);QCOMPARE(count(peer,"powered"),0);
         QCOMPARE(peer.snapshot().object.value("actual").toArray(),QJsonArray({0.,0.}));
         for(const auto &entry:eventsAfter(peer,since)) {
@@ -133,13 +135,39 @@ private slots:
         if(QTest::currentTestFailed())return;
         const auto prepared=job();QVERIFY2(prepared->valid(),qPrintable(prepared->errors().join(";")));
         const auto homes=count(peer,"homed"),parks=count(peer,"machineCoordinateMove");const auto since=RuntimePeer::monotonicNs();
-        QVERIFY(peer.control({{"action","startSequenceFixture"},{"holdParkM5",true}}).ok);
+        QVERIFY(peer.control({{"action","startSequenceFixture"},{"holdParkM5",true},{"holdReturnMove",true}}).ok);
         QVERIFY(ControllerRuntimeTestAccess::action(runtime,ControllerNativeAction::StartAttended,0,0,prepared));
         QTRY_COMPARE(count(peer,"homed"),homes+1);QTRY_VERIFY(count(peer,"powered")>0);
         QTRY_COMPARE(count(peer,"parkM5AckHeld"),1);QCOMPARE(count(peer,"machineCoordinateMove"),parks);
         QVERIFY(runtime.status().occupied||runtime.status().busy);
+        const auto jobId=live(runtime).value("jobId").toULongLong();QVERIFY(jobId>0);
+        QVERIFY(live(runtime).value("valid").toBool());QVERIFY(live(runtime).value("active").toBool());
+        QVERIFY(!live(runtime).value("completed").toBool());QVERIFY(live(runtime).value("percent").toDouble()<100.);
+        QVERIFY(live(runtime).value("estimated").toBool());
+        QCOMPARE(live(runtime).value("sourceFingerprint").toString(),QString::fromLatin1(prepared->sourceFingerprint().toHex()));
+        QVERIFY(runtime.status().activeJobVisualization);QCOMPARE(runtime.status().activeJobVisualization->image,prepared->visualization()->image);
+        // Editing a different next plan cannot replace the active frozen bitmap.
+        JobPlan next;next.moves={{{80,90},{100,90},100,10,0,false}};runtime.prepare(next);
+        QCOMPARE(runtime.status().activeJobVisualization->sourceFingerprint,prepared->sourceFingerprint());
         QVERIFY(peer.control({{"action","releaseParkM5"}}).ok);
-        QTRY_COMPARE(count(peer,"machineCoordinateMove"),parks+1);QTRY_VERIFY(!runtime.status().occupied&&!runtime.status().busy);
+        QTRY_COMPARE(count(peer,"machineCoordinateMove"),parks+1);QTRY_COMPARE(count(peer,"returnMoveAckHeld"),1);
+        QTRY_COMPARE(live(runtime).value("phase").toString(),QString("parking"));
+        QVERIFY(live(runtime).value("active").toBool());QVERIFY(!live(runtime).value("completed").toBool());
+        QCOMPARE(live(runtime).value("percent").toDouble(),99.);QVERIFY(runtime.status().occupied);
+        QTRY_VERIFY(live(runtime).value("headFresh").toBool());QVERIFY(runtime.status().activeJobTrail.size()<=256);
+        // A peer-side G53 event proves command execution in the virtual plant,
+        // not that the app has received its next fresh position report yet.
+        const auto reportedParkingHead=[&]{
+            const auto snapshot=live(runtime);
+            const QPointF head(snapshot.value("headX").toDouble(),snapshot.value("headY").toDouble());
+            return snapshot.value("headFresh").toBool() && head==(shifted?QPointF(10,20):QPointF(0,0));
+        };
+        QTRY_VERIFY(reportedParkingHead()); // WPos, not machine parking coordinates.
+        QVERIFY(peer.control({{"action","releaseReturnMove"}}).ok);
+        QTRY_VERIFY(!runtime.status().occupied&&!runtime.status().busy);
+        QTRY_VERIFY(live(runtime).value("completed").toBool());QCOMPARE(live(runtime).value("phase").toString(),QString("complete"));
+        QCOMPARE(live(runtime).value("percent").toDouble(),100.);QVERIFY(!live(runtime).value("active").toBool());
+        QCOMPARE(live(runtime).value("jobId").toULongLong(),jobId);
         QCOMPARE(peer.snapshot().object.value("actual").toArray(),QJsonArray({0.,0.}));QCOMPARE(count(peer,"collision"),0);
         int homeIndex=-1,powerIndex=-1,m5ReleaseIndex=-1,parkIndex=-1,index=0;
         for(const auto &entry:eventsAfter(peer,since)) {
@@ -152,7 +180,16 @@ private slots:
             ++index;
         }
         QVERIFY(homeIndex>=0);QVERIFY(powerIndex>homeIndex);QVERIFY(m5ReleaseIndex>powerIndex);QVERIFY(parkIndex>m5ReleaseIndex);
-        QCOMPARE(count(peer,"homed"),homes+1);runtime.close();QTRY_VERIFY(!runtime.status().connected);
+        QCOMPARE(count(peer,"homed"),homes+1);
+        if(!shifted && !freshConnection) {
+            // The same immutable source is a distinct job attempt, not a stale
+            // renderer continuation merely because its artwork hash matches.
+            QVERIFY(ControllerRuntimeTestAccess::action(runtime,ControllerNativeAction::StartAttended,0,0,prepared));
+            QTRY_VERIFY(live(runtime).value("jobId").toULongLong()>jobId);
+            QTRY_COMPARE(count(peer,"homed"),homes+2);QTRY_VERIFY(live(runtime).value("completed").toBool());
+            QCOMPARE(live(runtime).value("sourceFingerprint").toString(),QString::fromLatin1(prepared->sourceFingerprint().toHex()));
+        }
+        runtime.close();QTRY_VERIFY(!runtime.status().connected);
     }
     void missingOrImpossibleCalibrationCannotStart_data(){QTest::addColumn<bool>("impossibleHome");QTest::newRow("missing-calibration")<<false;QTest::newRow("home-outside-plausible-machine-travel")<<true;}
     void missingOrImpossibleCalibrationCannotStart() {
@@ -180,11 +217,16 @@ private slots:
         QTRY_COMPARE(count(peer,"homeM5AckHeld"),1);QCOMPARE(count(peer,"homed"),homes);
         QVERIFY(runtime.status().extractionSupervision.value("startSequencePending").toBool());
         QCOMPARE(runtime.status().extractionSupervision.value("startSequencePhase").toString(),QString("homing"));
+        QCOMPARE(live(runtime).value("phase").toString(),QString("homing"));QVERIFY(live(runtime).value("active").toBool());
+        QVERIFY(!live(runtime).value("headFresh").toBool());QCOMPARE(live(runtime).value("percent").toDouble(),0.);
+        QVERIFY(runtime.status().activeJobTrail.isEmpty());
         runtime.stop();QTRY_VERIFY(!runtime.status().positionReferenced);QTRY_VERIFY(!runtime.status().requestPending);
         QVERIFY(peer.control({{"action","releaseHomeM5"}}).ok);
         const auto queries=count(peer,"query");QTRY_VERIFY(!runtime.status().connected||count(peer,"query")>=queries+3);
         QCOMPARE(count(peer,"homed"),homes);QCOMPARE(count(peer,"powered"),0);QCOMPARE(count(peer,"machineCoordinateMove"),parks);
         QVERIFY(!runtime.status().extractionSupervision.value("startSequencePending").toBool());
+        QTRY_VERIFY(!live(runtime).value("active").toBool());QVERIFY(!live(runtime).value("completed").toBool());
+        QCOMPARE(live(runtime).value("phase").toString(),QString("stopped"));QVERIFY(live(runtime).value("percent").toDouble()<100.);
         runtime.close();QTRY_VERIFY(!runtime.status().connected);
     }
     void pendingSequenceContext_data() {
@@ -223,6 +265,28 @@ private slots:
         QCOMPARE(count(peer,"physicalMove"),moves);QCOMPARE(count(peer,"machineCoordinateMove"),parks);QCOMPARE(count(peer,"powered"),0);
         runtime.close();QTRY_VERIFY(!runtime.status().connected);
     }
+    void liveTelemetryPauseAndStaleHead() {
+        RuntimePeer peer;ControllerRuntimeSession runtime(DeviceProfile::m3Reference());
+        calibrate(peer,runtime,false);if(QTest::currentTestFailed())return;
+        QVERIFY(peer.control({{"action","startSequenceFixture"},{"holdPoweredAck",true}}).ok);
+        const auto prepared=job();QVERIFY(prepared->valid());
+        QVERIFY(ControllerRuntimeTestAccess::action(runtime,ControllerNativeAction::StartAttended,0,0,prepared));
+        QTRY_COMPARE(count(peer,"poweredAckHeld"),1);QTRY_VERIFY(live(runtime).value("active").toBool());
+        runtime.pause();QTRY_VERIFY(runtime.status().holdConfirmed);
+        QTRY_COMPARE(live(runtime).value("phase").toString(),QString("paused"));
+        const auto elapsed=live(runtime).value("elapsedActiveMs").toLongLong();
+        const auto percent=live(runtime).value("percent").toDouble();
+        const auto queries=count(peer,"query");QTRY_VERIFY(count(peer,"query")>=queries+3);
+        QCOMPARE(live(runtime).value("elapsedActiveMs").toLongLong(),elapsed);
+        QCOMPARE(live(runtime).value("percent").toDouble(),percent);QVERIFY(percent<100.);
+        // Healthy ACK/status receipt is not needed to invent a final percent.
+        // Missing actual status must hide the marker and trigger existing safety.
+        QVERIFY(peer.control({{"action","set"},{"values",QJsonObject{{"statusEnabled",false}}}}).ok);
+        QTRY_VERIFY(!live(runtime).value("headFresh").toBool());
+        QVERIFY(!live(runtime).value("completed").toBool());QVERIFY(live(runtime).value("percent").toDouble()<100.);
+        runtime.stop();QTRY_VERIFY(!runtime.status().requestPending);
+        runtime.close();QTRY_VERIFY(!runtime.status().connected);
+    }
     void interruptionNeverParksOrRestarts_data(){QTest::addColumn<QString>("loss");QTest::newRow("stop")<<QString("stop");QTest::newRow("alarm")<<QString("alarm");QTest::newRow("door")<<QString("door");}
     void interruptionNeverParksOrRestarts() {
         QFETCH(QString,loss);RuntimePeer peer;ControllerRuntimeSession runtime(DeviceProfile::m3Reference());calibrate(peer,runtime,true);if(QTest::currentTestFailed())return;
@@ -233,6 +297,9 @@ private slots:
         if(loss=="alarm")QVERIFY(peer.control({{"action","reply"},{"data","ALARM:1\r\n"}}).ok);
         if(loss=="door"){QVERIFY(peer.control({{"action","plantConfig"},{"doorSubstate",1}}).ok);QVERIFY(peer.control({{"action","report"}}).ok);}
         QTRY_VERIFY(!runtime.status().positionReferenced);QTRY_VERIFY(!runtime.status().requestPending);
+        QTRY_VERIFY(!live(runtime).value("active").toBool());QVERIFY(!live(runtime).value("completed").toBool());
+        QCOMPARE(live(runtime).value("phase").toString(),loss=="stop"?QString("stopped"):QString("fault"));
+        QVERIFY(live(runtime).value("percent").toDouble()<100.);QVERIFY(!live(runtime).value("headFresh").toBool());
         const auto powerAfterRevocation=count(peer,"powered");
         QVERIFY(peer.control({{"action","releasePoweredAck"}}).ok);
         const auto queries=count(peer,"query");QTRY_VERIFY(!runtime.status().connected||count(peer,"query")>=queries+3);

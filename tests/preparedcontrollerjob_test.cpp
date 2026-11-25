@@ -26,6 +26,42 @@ class PreparedControllerJobTest : public QObject {
         return targets;
     }
   private slots:
+    void immutableBoundedVisualizationIncludesEveryContour() {
+        auto plan=edge();plan.seconds=12.;
+        plan.moves.append({{70,30},{120,80},3000,0,0,true});
+        plan.moves.append({{120,80},{150,80},200,20,0,false});
+        const auto result=PreparedControllerJob::prepare(plan);QVERIFY2(result->valid(),qPrintable(result->errors().join("; ")));
+        const auto view=result->visualization();QVERIFY(view);QVERIFY(!view->image.isNull());
+        QVERIFY(view->image.width()<=1024);QVERIFY(view->image.height()<=1024);
+        QVERIFY(view->workBounds.contains(QPointF(20,30)));QVERIFY(view->workBounds.contains(QPointF(150,80)));
+        QCOMPARE(view->sourceFingerprint,result->sourceFingerprint());QCOMPARE(view->moveCount,3);
+        QCOMPARE(view->workArea,plan.deviceProfile().workArea());QCOMPARE(view->estimatedSeconds,12.);
+        const auto frozen=view->image;const auto bounds=view->workBounds;
+        const auto visibleAt=[&](QPointF point){
+            const int x=qRound((point.x()-bounds.left())/bounds.width()*(frozen.width()-1));
+            const int y=qRound((bounds.bottom()-point.y())/bounds.height()*(frozen.height()-1));
+            bool drawn=false;for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx)
+                if(x+dx>=0&&x+dx<frozen.width()&&y+dy>=0&&y+dy<frozen.height())drawn|=qAlpha(frozen.pixel(x+dx,y+dy))>0;
+            return drawn;
+        };
+        QVERIFY(visibleAt({45,30}));QVERIFY(visibleAt({135,80}));
+        plan.moves.clear();plan.seconds=0;
+        QCOMPARE(view->image,frozen);QCOMPARE(view->estimatedSeconds,12.);QCOMPARE(view->workBounds,bounds);
+    }
+    void visualizationDegenerateBounds_data() {
+        QTest::addColumn<QPointF>("end");
+        QTest::newRow("horizontal")<<QPointF(70,30);
+        QTest::newRow("vertical")<<QPointF(20,80);
+        QTest::newRow("point")<<QPointF(20,30);
+    }
+    void visualizationDegenerateBounds() {
+        QFETCH(QPointF,end);auto plan=edge();plan.moves.replace(0,{{20,30},end,300,20,0,false});
+        const auto result=PreparedControllerJob::prepare(plan);QVERIFY(result->valid());
+        const auto view=result->visualization();QVERIFY(view);QVERIFY(!view->image.isNull());
+        QVERIFY(view->workBounds.width()>0);QVERIFY(view->workBounds.height()>0);
+        QVERIFY(std::isfinite(view->workBounds.width()));QVERIFY(std::isfinite(view->workBounds.height()));
+        QCOMPARE(result->workBounds(),QRectF(QPointF(20,30),end)); // Motion limits are never padded.
+    }
     void firstEmittingEdgeHasOutputOffApproachAndDegenerateBounds() {
         auto plan = edge();
         const auto result = PreparedControllerJob::prepare(plan);

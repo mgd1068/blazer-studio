@@ -1,9 +1,11 @@
 #pragma once
 #include "deviceprofile.h"
+#include "preparedcontrollerjob.h"
 #include <QObject>
 #include <QPointF>
 #include <QStringList>
 #include <QVariantMap>
+#include <QVector>
 #include <memory>
 struct JobPlan;
 struct ControllerSubmission {
@@ -42,6 +44,9 @@ struct ControllerStatus {
     QVariantMap extractionSupervision{};
     QVariantMap operatorLocalFrame{};
     int doorSubstate = -1;
+    PreparedControllerJob::Visualization::Ptr activeJobVisualization{};
+    QVariantMap liveJob{};
+    QVector<QPointF> activeJobTrail{}; // At most256 observed positions, never inferred completed paths.
     bool holdConfirmed = false; // Fresh controller Hold report, not physical standstill proof.
 };
 class ControllerSession : public QObject {

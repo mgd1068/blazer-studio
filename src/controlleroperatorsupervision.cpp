@@ -262,6 +262,7 @@ bool ControllerRuntimeWorker::commitCalibratedReference(const ControllerRuntimeR
     operation.relativeAdmittedAt=m_accessoryClock.elapsed();operation.relativeObservedAt=operation.relativeAdmittedAt-(now-proof->observedAt);
     operation.binding=m_calibrationBinding;operation.profile=m_profile.outputFingerprint();operation.settings=c.fingerprint;
     operation.offset=m_core->offset;operation.home=c.home;operation.limits=c.limits;
+    if(!referenceOnly)beginLiveJob(request.prepared,"homing");
     m_attendedStartFailure.clear();
     m_attendedStart=std::move(operation);m_attendedStartReason=referenceOnly?"Laserfreie Referenzfahrt bestätigt; danach kein Auftrag und keine weitere Anfahrt.":"Start bestätigt: zuerst kalibrierte Referenzfahrt, dann genau dieser Auftrag.";
     m_dispatchProof.reset(); // This is a committed bounded operation, never a renewed native event.

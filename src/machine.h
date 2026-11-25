@@ -1,5 +1,6 @@
 #pragma once
 #include "controllersession.h"
+#include "preparedcontrollerjob.h"
 #include "simulator.h"
 #include "accessorycontract.h"
 #include <QElapsedTimer>
@@ -8,8 +9,10 @@
 class Document;
 class NativeInputIntentAdapter;
 class PreparedControllerJob;
+class ControllerJobPreparation;
 class Machine : public Simulator {
     Q_OBJECT
+    Q_PROPERTY(QVariantMap liveJob READ liveJob NOTIFY liveJobChanged)
     Q_PROPERTY(bool simulation READ simulation NOTIFY changed)
     Q_PROPERTY(QVariantList capabilities READ capabilities CONSTANT)
     Q_PROPERTY(bool connectionVerified READ connectionVerified NOTIFY changed)
@@ -145,8 +148,15 @@ class Machine : public Simulator {
     double x() const override { return live ? session->status().position.x() : Simulator::x(); }
     double y() const override { return live ? session->status().position.y() : Simulator::y(); }
     double progress() const override {
-        return live ? session->status().progress : Simulator::progress();
+        if(!live)return Simulator::progress();
+        const auto s=session->status();
+        if(s.liveJob.value("valid").toBool() && (s.liveJob.value("active").toBool() || !s.busy))
+            return s.liveJob.value("percent").toDouble()/100.;
+        return s.progress;
     }
+    QVariantMap liveJob() const;
+    PreparedControllerJob::Visualization::Ptr liveJobVisualization() const;
+    QVector<QPointF> liveJobTrail() const;
     bool firing() const override { return live ? session->status().firing : Simulator::firing(); }
     bool busy() const override { return live ? session->status().busy : Simulator::busy(); }
     bool paused() const override {
@@ -171,6 +181,7 @@ class Machine : public Simulator {
     void disconnectFault() override;
 
   signals:
+    void liveJobChanged();
     void connectionRequestFinished(quint64 requestId, bool opened, const QString &reason);
     void nativeActionDenied(const QString &action, const QString &reason);
 
@@ -200,4 +211,12 @@ class Machine : public Simulator {
     QPointF previewPoint;
     quint64 previewPositionRevision = 0;
     bool updatingPreview = false;
+    ControllerJobPreparation *simulatedVisualizationPreparation=nullptr;
+    PreparedControllerJob::Visualization::Ptr simulatedVisualization;
+    quint64 simulatedVisualizationGeneration=0;
+    bool simulatedJobValid=false,simulatedJobActive=false;
+    QString simulatedJobPhase="idle";
+    double simulatedJobPercent=0,simulatedJobSeconds=0;
+    QVector<QPointF> simulatedTrail;
+    void observeSimulatedJob();
 };

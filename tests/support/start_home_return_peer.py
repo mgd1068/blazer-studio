@@ -17,8 +17,21 @@ class StartHomeReturnPlant(AutoHomePlant):
         self.hold_powered_ack = False
         self.pending_powered_ack = False
         self.held_powered_once = False
+        self.hold_return_move = False
+        self.pending_return_move = False
 
     def command(self, line):
+        if self.hold_return_move and line.startswith('G53 G1 '):
+            before = self.ack_enabled
+            self.ack_enabled = False
+            try:
+                super().command(line)
+            finally:
+                self.ack_enabled = before
+            self.hold_return_move = False
+            self.pending_return_move = True
+            self.event('returnMoveAckHeld', line)
+            return
         park_barrier = (self.hold_park_m5 and line.replace(' ', '').startswith('M5')
                         and self.counts['powered'] > 0 and not self.pending_park_m5)
         power_words = re.findall(r'S([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))', line)
@@ -56,6 +69,15 @@ class StartHomeReturnPlant(AutoHomePlant):
         if request.get('action') == 'startSequenceFixture':
             self.hold_park_m5 = bool(request.get('holdParkM5', False))
             self.hold_powered_ack = bool(request.get('holdPoweredAck', False))
+            self.hold_return_move = bool(request.get('holdReturnMove', False))
+            return {'accepted': True}
+        if request.get('action') == 'releaseReturnMove':
+            if not self.pending_return_move:
+                return {'accepted': False}
+            self.pending_return_move = False
+            self.reply('ok\r\n')
+            self.event('ack')
+            self.event('returnMoveAckReleased')
             return {'accepted': True}
         if request.get('action') == 'releaseParkM5':
             if not self.pending_park_m5:

@@ -1,4 +1,5 @@
 #include "workspace.h"
+#include "machine.h"
 #include "geometry.h"
 #include "imageprocessing.h"
 #include <QMouseEvent>
@@ -37,7 +38,7 @@ void Workspace::setDocument(Document *d) {
                 m_selectedGuide.clear();
                 emit selectedGuideChanged();
             }
-            ensureSelectionVisible();
+            if(!m_liveJobView)ensureSelectionVisible();
             update();
         });
     }
@@ -75,10 +76,53 @@ void Workspace::setSimulator(Simulator *s) {
         connect(s, &Simulator::changed, this, [this] { update(); });
     emit simulatorChanged();
 }
+PreparedControllerJob::Visualization::Ptr Workspace::liveVisualization() const {
+    const auto machine=qobject_cast<Machine *>(m_simulator.data());
+    return machine?machine->liveJobVisualization():PreparedControllerJob::Visualization::Ptr{};
+}
+QSizeF Workspace::workArea() const {
+    if(m_liveJobView)if(const auto frozen=liveVisualization();frozen && frozen->workArea.isValid())return frozen->workArea;
+    return m_document?m_document->workArea():DeviceProfile::m3Reference().workArea();
+}
+void Workspace::paintLiveJob(QPainter *p) {
+    const auto machine=qobject_cast<Machine *>(m_simulator.data());
+    if(!machine)return;
+    const auto state=machine->liveJob();
+    if(!state.value("valid").toBool())return;
+    const auto o=origin();const auto s=scale();
+    if(const auto frozen=liveVisualization();frozen && !frozen->image.isNull()) {
+        const auto r=worldToCanvas(frozen->workBounds);
+        p->save();p->setRenderHint(QPainter::SmoothPixmapTransform,true);
+        p->drawImage(QRectF(o+r.topLeft()*s,r.size()*s),frozen->image);
+        p->restore();
+    }
+    // These dots are actual received positions, never an interpolated claim
+    // about unobserved completed geometry between status samples.
+    p->setPen(Qt::NoPen);p->setBrush(QColor(39,159,141,150));
+    for(const auto point:machine->liveJobTrail()) {
+        if(!std::isfinite(point.x())||!std::isfinite(point.y()))continue;
+        const auto screen=o+worldToCanvas(point)*s;
+        p->drawEllipse(screen,1.8,1.8);
+    }
+    if(!state.value("headFresh").toBool())return;
+    const QPointF head(state.value("headX").toDouble(),state.value("headY").toDouble());
+    if(!std::isfinite(head.x())||!std::isfinite(head.y()))return;
+    const auto screen=o+worldToCanvas(head)*s;
+    const bool emitting=state.value("outputKnown").toBool() && state.value("reportedPower").toDouble()>0;
+    const auto color=!state.value("simulation").toBool() && !state.value("outputKnown").toBool()
+        ? QColor("#81929e") : emitting?QColor("#f08b32"):QColor("#298cb5");
+    p->setPen(QPen(m_dark?QColor("#15232c"):Qt::white,5));
+    p->drawEllipse(screen,7,7);
+    p->setPen(QPen(color,2));p->setBrush(emitting?QBrush(color):QBrush(Qt::NoBrush));
+    p->drawEllipse(screen,5,5);
+    p->drawLine(screen-QPointF(12,0),screen+QPointF(12,0));
+    p->drawLine(screen-QPointF(0,12),screen+QPointF(0,12));
+}
 double Workspace::scale() const {
-    return std::min(std::max(1., width() - 110) / workArea().width(),
-                    std::max(1., height() - 110) / workArea().height()) *
-           m_zoom;
+    const double horizontalMargin=m_liveJobView?90.:110.;
+    const double verticalMargin=m_liveJobView?64.:110.;
+    return std::min(std::max(1., width() - horizontalMargin) / workArea().width(),
+                    std::max(1., height() - verticalMargin) / workArea().height()) * m_zoom;
 }
 QPointF Workspace::origin() const {
     return QPointF((width() - workArea().width() * scale()) / 2,
@@ -133,7 +177,7 @@ void Workspace::mousePressEvent(QMouseEvent *e) {
         m_panning = true;
         return;
     }
-    if (!m_document || m_preview)
+    if (!m_document || m_preview || m_liveJobView)
         return;
     auto pos = toWorld(e->position());
     const auto o = origin();
@@ -338,7 +382,7 @@ void Workspace::paint(QPainter *p) {
     for (double y = 0; y <= workArea().height(); y += major)
         p->drawLine(QPointF(o.x(), o.y() + (workArea().height() - y) * s),
                     QPointF(o.x() + workArea().width() * s, o.y() + (workArea().height() - y) * s));
-    if (m_document) {
+    if (m_document && !m_liveJobView) {
         p->setClipRect(boundingRect());
         p->translate(o);
         p->scale(s, s);
@@ -465,6 +509,7 @@ void Workspace::paint(QPainter *p) {
     p->drawLine(bed.bottomLeft(), bed.bottomLeft() + QPointF(18, 0));
     p->setPen(QPen(QColor("#378f7b"), 2));
     p->drawLine(bed.bottomLeft(), bed.bottomLeft() + QPointF(0, -18));
+    if(m_liveJobView){paintLiveJob(p);return;}
     if (m_simulator && m_simulator->connected()) {
         QPointF h = o + QPointF(m_simulator->x() * s, (workArea().height() - m_simulator->y()) * s);
         bool fire = m_simulator->firing();
@@ -500,7 +545,7 @@ void Workspace::cancelGuideDrag() {
     update();
 }
 void Workspace::paintGuides(QPainter *p) {
-    if (!m_document || m_preview)
+    if (!m_document || m_preview || m_liveJobView)
         return;
     p->save();
     p->setClipRect(boundingRect());

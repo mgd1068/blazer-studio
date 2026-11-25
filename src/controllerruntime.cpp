@@ -11,7 +11,9 @@
 #include <QSignalBlocker>
 #include <QThreadPool>
 #include <chrono>
+#include <cmath>
 #include <deque>
+#include <utility>
 #include <algorithm>
 #include <time.h>
 
@@ -503,7 +505,59 @@ ControllerRuntimeWorker::ControllerRuntimeWorker(DeviceProfile profile,
                                                  std::shared_ptr<ControllerRuntimeMailbox> mailbox)
     : m_profile(std::move(profile)), m_mailbox(std::move(mailbox)) {
 }
-ControllerRuntimeWorker::~ControllerRuntimeWorker() = default;
+void ControllerRuntimeWorker::beginLiveJob(const PreparedControllerJob::Ptr &job,const QString &phase) {
+    if(!job || !job->visualization())return;
+    retireControllerJob(std::exchange(m_visualizedJob,job));
+    ++m_liveJobId;m_liveJobTrail.clear();m_liveJobPhase=phase;m_liveJobActive=true;
+    m_liveClockRunning=false;m_liveElapsedMs=0;m_livePercent=0;m_liveLastTick=nowMs();
+}
+void ControllerRuntimeWorker::finishLiveJob(const QString &phase) {
+    if(!m_liveJobActive)return;
+    updateLiveJob();m_liveJobActive=false;m_liveClockRunning=false;m_liveJobPhase=phase;
+    if(phase=="complete")m_livePercent=100;
+}
+void ControllerRuntimeWorker::updateLiveJob() {
+    if(!m_visualizedJob || !m_core)return;
+    const auto now=nowMs();
+    if(m_liveJobActive && m_liveClockRunning && m_liveLastTick>=0 && now>=m_liveLastTick)
+        m_liveElapsedMs+=now-m_liveLastTick;
+    m_liveLastTick=now;
+    if(m_liveJobActive) {
+        if(m_attendedStart && !m_attendedStart->referenceOnly)m_liveJobPhase=m_attendedStart->phase=="starting"?QString("engraving"):m_attendedStart->phase;
+        else if(m_jobActive)m_liveJobPhase=m_core->paused?"paused":
+            m_core->jobReturn && m_core->jobReturn->phase==GrblSession::JobReturn::Phase::Returning?"parking":"engraving";
+        m_liveClockRunning=m_liveJobPhase=="engraving" && m_core->statusFresh() && !m_core->paused;
+        const auto estimate=m_visualizedJob->visualization()->estimatedSeconds;
+        if(std::isfinite(estimate) && estimate>0)
+            m_livePercent=std::max(m_livePercent,std::min(99.,100.*double(m_liveElapsedMs)/(estimate*1000.)));
+        if(m_liveJobPhase=="parking")m_livePercent=99;
+        const bool local=m_core->operatorLocalPermit && m_core->localMotionSafetyError().isEmpty();
+        if(m_core->connected() && m_core->statusFresh() && m_core->knownPosition && m_core->knownOffset && m_core->knownReportedMachinePosition &&
+           !m_core->homingPending && !m_core->awaitingReset && !m_core->handshaking && (m_core->positionReferenced || local) && (m_liveJobTrail.isEmpty() || m_liveJobTrail.last()!=m_core->position)) {
+            if(m_liveJobTrail.size()==256)m_liveJobTrail.removeFirst();
+            m_liveJobTrail.append(m_core->position);
+        }
+    } else m_liveClockRunning=false;
+}
+QVariantMap ControllerRuntimeWorker::liveJobSnapshot() const {
+    const bool valid=m_visualizedJob && m_visualizedJob->visualization();
+    const bool local=m_core->operatorLocalPermit && m_core->localMotionSafetyError().isEmpty();
+    const bool fresh=m_core->connected() && m_core->statusFresh();
+    const bool headFresh=fresh && m_core->knownPosition && m_core->knownOffset && m_core->knownReportedMachinePosition &&
+        !m_core->homingPending && !m_core->awaitingReset && !m_core->handshaking && (m_core->positionReferenced || local);
+    const double estimate=valid?m_visualizedJob->visualization()->estimatedSeconds:0;
+    return {{"jobId",m_liveJobId},{"simulation",false},{"visualizationReady",valid && !m_visualizedJob->visualization()->image.isNull()},
+        {"valid",valid},{"active",m_liveJobActive},{"completed",m_liveJobPhase=="complete"},
+        {"phase",m_liveJobPhase},{"percent",m_livePercent},{"estimated",m_liveJobPhase!="complete"},
+        {"estimateKnown",estimate>0},{"estimatedSeconds",estimate},{"elapsedActiveMs",m_liveElapsedMs},
+        {"progressBasis","elapsed-planned-time"},{"headFresh",headFresh},{"headX",m_core->position.x()},{"headY",m_core->position.y()},
+        {"outputKnown",fresh && m_core->knownOutput},{"reportedPower",fresh && m_core->knownOutput?QVariant(m_core->reportedOutput):QVariant{}},
+        {"statusAgeMs",m_core->lastStatus.isValid()?m_core->lastStatus.elapsed():qint64(-1)},
+        {"sourceFingerprint",valid?QString::fromLatin1(m_visualizedJob->sourceFingerprint().toHex()):QString()}};
+}
+ControllerRuntimeWorker::~ControllerRuntimeWorker() {
+    retireControllerJob(std::move(m_visualizedJob));
+}
 std::optional<ControllerRuntimeWorker::ClockInterval> ControllerRuntimeWorker::readClockInterval() {
     timespec before{},boot{},after{};
     if (clock_gettime(CLOCK_MONOTONIC,&before)!=0 || clock_gettime(CLOCK_BOOTTIME,&boot)!=0 ||
@@ -593,6 +647,7 @@ void ControllerRuntimeWorker::drain() {
         m_core->focus(false);
     if (m_mailbox->takeControl(m_mailbox->stop)) {
         if(m_stopHandoffProbe)m_stopHandoffProbe();
+        finishLiveJob("stopped");
         invalidateLocalFrame("Lokaler Rahmen durch STOPP widerrufen.");
         cancelCommissioning("Einrichtung durch STOPP widerrufen.");
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
@@ -603,6 +658,7 @@ void ControllerRuntimeWorker::drain() {
         retirePrepared();
     }
     if (m_mailbox->takeControl(m_mailbox->close)) {
+        finishLiveJob("stopped");
         m_noOutputLifecycle=noOutputIdle();
         clearCalibrationSession();
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
@@ -742,11 +798,13 @@ void ControllerRuntimeWorker::drain() {
                 break;
             if (!beginAccessory(AccessoryContract::OperatorAction::StartJob,request.prepared?request.prepared->sourceFingerprint()+request.prepared->profileFingerprint():QByteArray()))
                 break;
+            beginLiveJob(request.prepared,"engraving");
             m_jobActive = true;
             m_activePrepared = std::move(request.prepared);
             const auto returnHome=(m_commissioning.stage=="complete" && m_commissioning.homeObserved)
                 ? std::optional<QPointF>(m_commissioning.home) : std::nullopt;
             if (!m_core->startPrepared(*m_activePrepared,returnHome)) {
+                finishLiveJob("fault");
                 m_jobActive = false;
                 discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Complete);
@@ -766,6 +824,7 @@ void ControllerRuntimeWorker::drain() {
 }
 void ControllerRuntimeWorker::discardAttendedStart(const QString &reason) {
     if(!m_attendedStart)return;
+    if(!m_attendedStart->referenceOnly && !m_jobActive)finishLiveJob("fault");
     if(!reason.isEmpty())m_attendedStartReason=m_attendedStartFailure.isEmpty()?reason:m_attendedStartFailure;
     retireControllerJob(std::move(m_attendedStart->prepared));
     m_attendedStart.reset();
@@ -861,6 +920,7 @@ void ControllerRuntimeWorker::coreChanged() {
     m_wasVerified = status.verified;
     m_wasReferenced = status.positionReferenced;
     if (!status.connected) {
+        finishLiveJob("fault");
         clearCalibrationSession();
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         if(!m_noOutputLifecycle || output)m_accessory.transition(AccessoryContract::Event::Disconnect);
@@ -872,6 +932,7 @@ void ControllerRuntimeWorker::coreChanged() {
                  m_core->setupReadback.valid && m_commissioning.fingerprint==m_core->setupReadback.fingerprint &&
                  (m_commissioning.stage=="homing" || m_commissioning.stage=="restoringHome"))) {
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
+        finishLiveJob("fault");
         m_accessory.transition(AccessoryContract::Event::Fault);
         const bool mustStop =
             (status.executing && !status.referencing && !status.resetting) || output;
@@ -885,6 +946,8 @@ void ControllerRuntimeWorker::coreChanged() {
             return;
         }
     } else if ((m_jobActive || m_focusActive) && !status.executing && !status.firing) {
+        if(m_jobActive)finishLiveJob(status.ready && status.verified && status.positionReferenced?"complete":
+            m_core->operatorLocalPermit && m_core->localMotionSafetyError().isEmpty() && status.ready?"complete":"fault");
         m_jobActive = m_focusActive = false;
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Complete);
@@ -910,6 +973,7 @@ void ControllerRuntimeWorker::watchdog() {
         (!runtimeMotionError().isEmpty() ||
          !m_accessory.preflightError(m_accessoryClock.elapsed()).isEmpty());
     if (motion || unsafeOutput) {
+        finishLiveJob("fault");
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Fault);
         m_jobActive = m_focusActive = false;
@@ -927,7 +991,11 @@ void ControllerRuntimeWorker::publish(bool finishDispatch) {
         return;
     refreshCoordinateEpoch();
     if(m_operatorWitness && (m_operatorWitnessCoordinate!=m_coordinateEpoch || m_accessoryClock.elapsed()>m_operatorWitness->expiresAtMs()))discardOperatorWitness();
+    updateLiveJob();
     auto status = m_core->status();
+    status.liveJob=liveJobSnapshot();
+    status.activeJobVisualization=m_visualizedJob?m_visualizedJob->visualization():PreparedControllerJob::Visualization::Ptr{};
+    status.activeJobTrail=m_liveJobTrail;
     status.commissioning=commissioningSnapshot();
     status.operatorLocalFrame=localFrameSnapshot();
     status.doorSubstate=m_core->doorSubstate;
@@ -985,6 +1053,7 @@ void ControllerRuntimeWorker::shutdown() {
     if (m_watchdog)
         m_watchdog->stop();
     if (m_core) {
+        finishLiveJob("stopped");
         discardAttendedStart("Programm beendet.");
         m_core->close();
         retirePrepared();

@@ -1,8 +1,10 @@
 #pragma once
 #include "cancellation.h"
 #include <QByteArray>
+#include <QImage>
 #include <QPointF>
 #include <QRectF>
+#include <QSizeF>
 #include <QStringList>
 #include <memory>
 
@@ -14,6 +16,16 @@ struct JobPlan;
 class PreparedControllerJob final {
   public:
     using Ptr = std::shared_ptr<const PreparedControllerJob>;
+    struct Visualization final {
+        using Ptr=std::shared_ptr<const Visualization>;
+        QImage image; // Bounded raster, transparent, top row = maximum work Y.
+        QSizeF workArea; // Frozen profile bed, independent of the next editor design.
+        QRectF workBounds; // Raster extent, including a small non-motion display padding.
+        QByteArray sourceFingerprint;
+        double estimatedSeconds=0;
+        qsizetype moveCount=0;
+    };
+    Visualization::Ptr visualization() const { return m_visualization; }
     static Ptr prepare(const JobPlan &plan, const Cancellation &cancel = {});
     bool valid() const { return !m_cancelled && m_errors.isEmpty() && !m_lines.isEmpty(); }
     bool cancelled() const { return m_cancelled; }
@@ -33,6 +45,7 @@ class PreparedControllerJob final {
 
   private:
     PreparedControllerJob() = default;
+    Visualization::Ptr m_visualization;
     QStringList m_lines, m_errors;
     QByteArray m_profile, m_source;
     QString m_driver, m_transport, m_media;

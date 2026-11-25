@@ -2,11 +2,13 @@
 #include "document.h"
 #include "registration.h"
 #include "simulator.h"
+#include "preparedcontrollerjob.h"
 #include <QCache>
 #include <QPointer>
 #include <QQuickPaintedItem>
 class Workspace : public QQuickPaintedItem {
     Q_OBJECT
+    Q_PROPERTY(bool liveJobView READ liveJobView WRITE setLiveJobView NOTIFY liveJobViewChanged)
     Q_PROPERTY(Registration *registration READ registration WRITE setRegistration NOTIFY
                    registrationChanged)
     Q_PROPERTY(Document *document READ document WRITE setDocument NOTIFY documentChanged)
@@ -38,6 +40,16 @@ class Workspace : public QQuickPaintedItem {
     void setDocument(Document *d);
     Simulator *simulator() const { return m_simulator; }
     void setSimulator(Simulator *s);
+    bool liveJobView() const { return m_liveJobView; }
+    void setLiveJobView(bool value) {
+        if(value==m_liveJobView)return;
+        m_liveJobView=value;
+        const QPointer<Workspace> alive(this);
+        if(value)cancelGuideDrag();
+        if(!alive)return;
+        fit();if(!alive)return;
+        emit liveJobViewChanged();if(alive)update();
+    }
     bool preview() const { return m_preview; }
     void setPreview(bool p) {
         if (p)
@@ -84,6 +96,7 @@ class Workspace : public QQuickPaintedItem {
     void paint(QPainter *p) override;
   signals:
     void documentChanged();
+    void liveJobViewChanged();
     void registrationChanged();
     void simulatorChanged();
     void previewChanged();
@@ -102,9 +115,10 @@ class Workspace : public QQuickPaintedItem {
     void mouseUngrabEvent() override;
 
   private:
-    QSizeF workArea() const {
-        return m_document ? m_document->workArea() : DeviceProfile::m3Reference().workArea();
-    }
+    QSizeF workArea() const;
+    PreparedControllerJob::Visualization::Ptr liveVisualization() const;
+    void paintLiveJob(QPainter *p);
+    bool m_liveJobView=false;
     QPointF worldToCanvas(QPointF point) const;
     QRectF worldToCanvas(QRectF rect) const;
     void syncDeviceProfile();

@@ -12,6 +12,20 @@ ApplicationWindow {
     title: (project.dirty ? "● " : "") + project.title + " — Blazer Studio"
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
+    readonly property var liveJobState: typeof machine.liveJob !== "undefined" ? machine.liveJob : ({})
+    property bool livePreviewSelected: true
+    property string lastLiveJobKey: ""
+    readonly property string liveJobKey: {
+        if (liveJobState.valid !== true) return ""
+        const hasId = typeof liveJobState.jobId !== "undefined" && liveJobState.jobId !== null && String(liveJobState.jobId).length > 0
+        return (simulationMode ? "sim:" : "real:") + (hasId ? "id:" + String(liveJobState.jobId) : "source:" + String(liveJobState.sourceFingerprint || ""))
+    }
+    onLiveJobKeyChanged: if (liveJobKey.length > 0 && liveJobKey !== lastLiveJobKey) { lastLiveJobKey=liveJobKey; livePreviewSelected=true }
+    readonly property bool liveJobAvailable: liveJobState.valid === true
+    readonly property bool showLiveJob: livePreviewSelected && liveJobAvailable
+    readonly property bool livePercentKnown: (liveJobState.completed === true || liveJobState.estimateKnown !== false) && typeof liveJobState.percent === "number" && Number.isFinite(liveJobState.percent)
+    readonly property real livePercent: !livePercentKnown ? 0 : Math.max(0, Math.min(liveJobState.completed === true ? 100 : 99, liveJobState.percent))
+    readonly property string livePhaseText: ({homing:"Referenzfahrt",approaching:"Anfahrt",engraving:"Gravur läuft",paused:"Pausiert",parking:"Rückfahrt zum Referenzpunkt",complete:"Auftrag beendet",stopped:"Gestoppt",fault:"Auftrag abgebrochen",idle:"Bereit"})[liveJobState.phase] || "Auftrag wird vorbereitet"
     readonly property var manualStartState: typeof machine.operatorLocalFrame !== "undefined" ? machine.operatorLocalFrame : ({phase:"inactive"})
     readonly property bool manualStartSupported: typeof machine.beginManualPlacement === "function"
     readonly property bool manualStartSelected: !simulationMode && manualStartSupported && (project.startMode === 1 || manualStartState.phase !== "inactive")
@@ -756,7 +770,7 @@ ApplicationWindow {
                     text: !win.basic && win.page === 0 ? "Vorschau  →" : win.manualStartSelected ? "Handstart öffnen …" : win.simulationMode ? "▶  Simulation starten" : "▶  Am Laser starten"
                     primary: true; compact: true; enabled: !win.controllerClosePending && ((!win.basic && win.page === 0) || (win.manualStartSelected ? win.manualStartCanOpen : win.startBlockReason.length === 0))
                     hint: !win.basic && win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason || "Startet den angezeigten Auftrag. Der bewusste Startklick bestätigt die eigene Anwesenheit für diesen Vorgang."
-                    onClicked: { if (!win.basic && win.page === 0) win.page = 1; else if(win.manualStartSelected) manualStartDialog.open(); else { win.page = 2; if(win.useAttendedStart)machine.startAttended();else machine.start() } }
+                    onClicked: { if (!win.basic && win.page === 0) win.page = 1; else if(win.manualStartSelected) manualStartDialog.open(); else { win.livePreviewSelected = true; win.page = 2; if(win.useAttendedStart)machine.startAttended();else machine.start() } }
                 }
             }
         }
@@ -1080,7 +1094,8 @@ ApplicationWindow {
                             Text { anchors.fill: parent; anchors.margins: 9; maximumLineCount: 3; elide: Text.ElideRight; text: project.jobSummary.valid ? project.jobSummary.segments + " Segmente · " + (project.jobSummary.workLength / 1000).toFixed(2) + " m · ca. " + Math.ceil(project.jobSummary.seconds / 60) + " min\nFarbig: Bearbeitung · Grau: Leerfahrt\nSchätzung mit konservativer Beschleunigung; Kommunikation nicht gemessen" : project.jobSummary.errors.join("\n"); color: win.muted; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                 }
                 Rectangle {
-                    visible: win.basic; color: win.panel; border.color: win.line
+                    objectName: "basicGuidePanel"
+                    visible: win.basic && !(win.page === 2 && win.showLiveJob); color: win.panel; border.color: win.line
                     Layout.fillWidth: true; Layout.preferredHeight: basicGuide.implicitHeight+20
                     ColumnLayout { id: basicGuide; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 12; y: 10; spacing: 6
                         Text { text: "Datei laden oder bearbeiten → gespeicherten Laser verwenden → Start. Die Vorschau kannst du jederzeit zusätzlich öffnen."; color: win.ink; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
@@ -1138,184 +1153,227 @@ ApplicationWindow {
                             ActionButton { text: "Einpassen"; compact: true; dark: win.night; onClicked: canvas.fit() }
                         }
                     }
-                    ScrollView {
-                        id: deviceScroll
-                        clip: true; contentWidth: availableWidth
-                        ColumnLayout {
-                            width: deviceScroll.availableWidth; spacing: 16
-                            Item { height: 4 }
+                    ColumnLayout {
+                        id: devicePage; spacing: 10
+                        Rectangle {
+                            objectName: "liveJobPanel"
+                            Layout.fillWidth: true; Layout.fillHeight: true
+                            visible: win.showLiveJob; color: win.bg; border.color: win.line; radius: 8
                             ColumnLayout {
-                                Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; spacing: 15
+                                anchors.fill: parent; anchors.margins: 14; spacing: 10
                                 RowLayout {
-                                    Text { text: "Gerät & Positionierung"; color: win.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                                    ActionButton { objectName: "disconnectControllerButton"; text: win.controllerConnectionPhase === "closing" ? "Trennung läuft …" : win.controllerConnectionPhase === "opening" ? "Verbindungsanfrage abbrechen" : win.simulationMode ? (machine.connected ? "Simulator trennen" : "Simulator verbinden") : "GRBL trennen"; dark: win.night; onClicked: machine.toggleConnection() }
-                                }
-                                ActionButton {
-                                    Layout.fillWidth:true
-                                        id: referenceHomeControl; objectName:"referenceHomeButton"
-                                        property bool nativeActionEnabled:true
-                                        property string nativeActionRole:"referenceHome"
-                                        text:"Zum Referenzpunkt – ohne Laser"; dark:win.night
-                                        visible:!win.simulationMode && typeof machine.referenceHome === "function"
-                                        enabled:!!win.extractionState.referenceReady && !win.runtimeOccupied
-                                        hint:win.extractionState.referenceError || "Referenziert am gespeicherten Maschinen-Nullpunkt; startet keine Gravur."
-                                        Component.onCompleted:if(typeof machine.referenceHome === "function")machine.registerNativeActionControl(referenceHomeControl,"referenceHome")
-                                        onClicked:machine.referenceHome()
-                                    }
-                                Text { text: win.simulationMode ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : machine.connected ? "Serieller GRBL-Anschluss geöffnet. Controllerprüfung, Maschinenreferenz und Zubehör sind getrennte Nachweise." : "Realer Controllerbetrieb angefordert; noch kein geöffneter Anschluss bestätigt."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                RowLayout {
-                                    visible: typeof machine.simulation !== "undefined"
                                     Layout.fillWidth: true
-                                    ComboBox { HelpBubble { target: parent }
-                                        id: serialPortChoice; objectName: "serialPortChoice"; Layout.fillWidth: true
-                                        model: win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0 ? [win.deviceService.active.endpoint] : []; displayText: count ? currentText : "Kein Geräteanschluss zugeordnet"
-                                        contentItem: Text { text: serialPortChoice.displayText; color: win.ink; font: serialPortChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: 20 }
-                                        indicator: Text { x: serialPortChoice.width-width-8; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink }
-                                    }
-                                    ActionButton { objectName: "editDeviceConnection"; text: "Zuordnung …"; dark: win.night; enabled: !!win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
-                                    ActionButton {
-                                        objectName: "connectGrblButton"
-                                        text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet …" : win.controllerConnectionPhase === "opening" ? "Anschluss wird geöffnet …" : win.grblVerified ? "GRBL verbunden" : (!win.simulationMode && machine.connected ? (win.controllerConnectionPhase !== "handshake" && !win.controllerStatusFresh ? "Controllerdaten veraltet" : win.controllerConnectionPhase === "handshake" ? "GRBL wird geprüft …" : "Verbunden – Einrichtung prüfen") : "GRBL verbinden")
-                                        primary: win.grblVerified; dark: win.night
-                                        enabled: win.grblVerified || (!win.runtimeOccupied && (win.simulationMode || !machine.connected) && win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0)
-                                        hint: win.grblVerified ? "Verbindung und Controllerprüfung bestätigt. Ein Klick startet keinen neuen Reset oder Auftrag. Zum erneuten Verbinden zuerst trennen." : "Öffnet den USB-Anschluss und setzt den Controller zurück. Ein alter gepufferter Auftrag wird verworfen; Referenzierung und Position danach neu prüfen."
-                                        onClicked: if (enabled && !win.runtimeOccupied && (win.simulationMode || !machine.connected) && win.deviceService) connectionSafetyDialog.open()
-                                    }
-                                    ActionButton { objectName: "openM3Setup"; text: "M3 einrichten …"; dark: win.night; enabled: !win.simulationMode && machine.connected && !win.runtimeOccupied && !win.controllerRequestPending; onClicked: commissioningDialog.open() }
-                                    ActionButton { objectName: "useSimulatorButton"; text: win.controllerConnectionPhase === "closing" ? "Simulator nach Trennung" : "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
-                                }
-                                CheckBox {
-                                    id:autoHomeOption; objectName:"autoHomeOnConnectOption"; Layout.fillWidth:true
-                                    visible:!!win.deviceService && typeof win.deviceService.autoHomeOnConnect !== "undefined"
-                                    enabled:!!win.deviceService && win.deviceService.activeId.length>0 && !win.runtimeOccupied
-                                    checked:win.autoHomeOnConnect
-                                    text:"Beim Verbinden automatisch referenzieren – nur mit passender gespeicherter Kalibrierung"
-                                    contentItem:Text { text:autoHomeOption.text; textFormat:Text.PlainText; wrapMode:Text.WordWrap; leftPadding:autoHomeOption.indicator.width+autoHomeOption.spacing; color:win.ink; verticalAlignment:Text.AlignVCenter }
-                                    onClicked:if(win.deviceService)win.deviceService.autoHomeOnConnect=checked
-                                }
-                                Text {
-                                    objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
-                                    text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet. Simulator und Gerätewechsel warten auf die bestätigte Trennung." : win.controllerConnectionPhase === "opening" ? "Anschlussöffnung angefordert · noch keine Verbindung oder Controllerprüfung bestätigt" : win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : win.controllerConnectionPhase === "handshake" ? "Anschluss geöffnet · Controllerprüfung läuft · " + machine.state : win.initializationGuidanceActive ? (win.setupState.stage === "savedHomeReady" ? "Verbunden · Kalibrierung erkannt · Referenzfahrt ausstehend" : "Verbunden · Initialisierung noch nicht abgeschlossen") : win.controllerViewState + (!win.controllerStatusFresh ? " (" + win.controllerStatusAge + ")" : machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
-                                    color: win.grblVerified ? "#209b76" : win.muted
-                                    Accessible.role: Accessible.StaticText; Accessible.name: text
-                                }
-                                DeviceInitializationPanel {
-                                    Layout.fillWidth: true; visible: !win.simulationMode && machine.connected
-                                    modelMachine: machine; dark: win.night; actionsAllowed: !win.projectDialogActive
-                                    onReviewRequested: commissioningDialog.open()
-                                }
-                                Text {
-                                    objectName: "processingSafetyStatus"
-                                    visible: !win.simulationMode && !win.initializationGuidanceActive && (win.useAttendedStart ? !!win.extractionState.attendedStartError : typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0)
-                                    Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: "#c07b2a"
-                                    text: win.useAttendedStart ? win.extractionState.attendedStartError || "" : typeof machine.processingSafetyErrors !== "undefined" ? machine.processingSafetyErrors.join("\n") : ""
-                                    Accessible.role: Accessible.StaticText; Accessible.name: text
-                                }
-                                ActionButton { objectName:"openManualStart"; visible:!win.basic; text:"Start ab Handposition …"; dark:win.night; Layout.fillWidth:true; enabled:win.manualStartCanOpen; onClicked:manualStartDialog.open() }
-                                ActionButton { visible:!win.simulationMode && !win.basic; text:"Zubehör und Sensoren …"; dark:win.night; onClicked:win.advancedAccessoryDetails=!win.advancedAccessoryDetails }
-                                ExtractionSupervisionPanel { Layout.fillWidth: true; visible: !win.simulationMode && (win.advancedAccessoryDetails || !!win.extractionState.clearanceRequired || (!win.basic && !win.useAttendedStart)); modelMachine: machine; dark: win.night; setupReady: win.setupState.stage === "complete" || !!win.manualStartState.localPositionKnown }
-                                Rectangle {
-                                    Layout.fillWidth: true; Layout.preferredHeight: Math.max(233, positionControls.implicitHeight + 44); radius: 9; color: win.panel; border.color: win.line
-                                    RowLayout {
-                                        id: positionControls
-                                        anchors.fill: parent; anchors.margins: 22; spacing: 26
-                                        ColumnLayout {
-                                            Layout.fillWidth: true; spacing: 12
-                                            SectionLabel { text: "POSITIONIEREN"; dark: win.night }
-                                            Text { objectName: "controllerPositionReadout"; Layout.fillWidth: true; wrapMode: Text.WordWrap; text: !win.simulationMode && (!win.controllerStatusFresh || !machine.positionReferenced) ? "Position unbekannt oder nicht referenziert" : "X  " + machine.x.toFixed(1) + "     Y  " + machine.y.toFixed(1) + " mm"; color: win.ink; font.pixelSize: 19; font.family: "DejaVu Sans Mono" }
-                                            Text { text: "Schrittweite"; color: win.muted; font.pixelSize: 11 }
-                                            Row {
-                                                spacing: 4
-                                                Repeater { model: [1,10,25]; delegate: ActionButton { required property int modelData; text: modelData + " mm"; dark: win.night; compact: true; selected: win.step === modelData; onClicked: win.step = modelData } }
-                                            }
-                                            ActionButton { id: workZeroControl; objectName: "workZeroButton"; property bool nativeActionEnabled: true; Component.onCompleted: machine.registerNativeActionControl(workZeroControl,"zero"); visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: win.positioningReady; onClicked: machine.setWorkZero() }
-                                            ActionButton { id: homeControl; property bool nativeActionEnabled: true; Component.onCompleted: machine.registerNativeActionControl(homeControl,"home"); objectName: "homeControllerButton"; text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !win.runtimeOccupied && (win.simulationMode || (win.controllerStatusFresh && typeof machine.homingSafetyError !== "undefined" && machine.homingSafetyError.length === 0)); onClicked: machine.home() }
-                                        }
-                                        GridLayout {
-                                            columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: win.positioningReady
-                                            Item { width: 48; height: 46 }
-                                            ActionButton { id: jogUpControl; objectName: "jogUpButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:0,dy:win.step}); Component.onCompleted: machine.registerNativeActionControl(jogUpControl,"jog"); text: "↑"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(0,win.step) }
-                                            Item { width: 48; height: 46 }
-                                            ActionButton { id: jogLeftControl; objectName: "jogLeftButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:-win.step,dy:0}); Component.onCompleted: machine.registerNativeActionControl(jogLeftControl,"jog"); text: "←"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(-win.step,0) }
-                                            Rectangle { width: 48; height: 46; radius: 7; color: win.bg; Text { anchors.centerIn: parent; text: "XY"; color: win.muted; font.pixelSize: 11 } }
-                                            ActionButton { id: jogRightControl; objectName: "jogRightButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:win.step,dy:0}); Component.onCompleted: machine.registerNativeActionControl(jogRightControl,"jog"); text: "→"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(win.step,0) }
-                                            Item { width: 48; height: 46 }
-                                            ActionButton { id: jogDownControl; objectName: "jogDownButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:0,dy:-win.step}); Component.onCompleted: machine.registerNativeActionControl(jogDownControl,"jog"); text: "↓"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(0,-win.step) }
-                                        }
-                                    }
+                                    Text { objectName: "liveJobPhase"; text: win.livePhaseText; color: win.ink; font.pixelSize: 20; font.weight: Font.DemiBold; Layout.fillWidth: true; elide: Text.ElideRight }
+                                    ActionButton { objectName: "liveDeviceDetailsButton"; text: "Gerätedetails"; dark: win.night; compact: true; onClicked: win.livePreviewSelected=false }
                                 }
                                 Rectangle {
-                                    Layout.fillWidth: true; height: 125; radius: 9; color: win.panel; border.color: win.line
-                                    RowLayout {
-                                        anchors.fill: parent; anchors.margins: 22; spacing: 20
-                                        ColumnLayout {
-                                            Layout.fillWidth: true; spacing: 8
-                                            SectionLabel { text: "POSITION & FOKUS"; dark: win.night }
-                                            Text { text: machine.firing ? project.deviceInfo.focusPower+" % angefordert" : "Fokuspunkt mit "+project.deviceInfo.focusPower+" %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
-                                            Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei "+project.deviceInfo.focusPower+" % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
-                                        }
-                                        ActionButton {
-                                            id: focusHoldControl; objectName: "focusHold"
-                                            property bool interactionHeld: false
-                                            text: "◎  Halten für "+project.deviceInfo.focusPower+" %"
-                                            primary: true; implicitHeight: 44
-                                            enabled: (win.processingReady && win.supervisionAllows("focus")) || machine.firing || interactionHeld
-                                            Component.onCompleted: machine.registerFocusControl(focusHoldControl)
-                                            onPressed: { interactionHeld=true; machine.beginFocus() }
-                                            onReleased: { machine.endFocus(); interactionHeld=false }
-                                            onCanceled: { machine.endFocus(); interactionHeld=false }
-                                            onVisibleChanged: if (!visible) { machine.endFocus(); interactionHeld=false }
-                                            Component.onDestruction: machine.endFocus()
-                                        }
+                                    Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 180
+                                    color: win.panel; radius: 6; border.color: win.line; clip: true
+                                    Workspace { id: liveWorkspace; objectName: "liveJobWorkspace"; anchors.fill: parent; document: project; simulator: machine; preview: true; liveJobView: true; dark: win.night; imperial: win.lengthUnit === "in" }
+                                    Text {
+                                        objectName: "liveJobVisualizationPending"; anchors.centerIn: parent; width: parent.width-28
+                                        visible: win.liveJobState.visualizationReady === false
+                                        text: "Vorschau wird vorbereitet …"; color: win.muted; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
                                     }
+                                    ActionButton { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 10; text: "Einpassen"; compact: true; dark: win.night; onClicked: liveWorkspace.fit() }
                                 }
-                                Text {
-                                    objectName: "nativeInputSafetyStatus"; Layout.fillWidth: true
-                                    visible: !win.simulationMode && typeof machine.nativeInputSafetyError !== "undefined" && machine.nativeInputSafetyError.length > 0
-                                    text: visible ? machine.nativeInputSafetyError : ""
-                                    textFormat: Text.PlainText; color: win.muted; wrapMode: Text.Wrap
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        objectName: "liveJobPercent"; Layout.fillWidth: true
+                                        text: (win.simulationMode || win.liveJobState.completed === true || win.liveJobState.estimated === false ? "Fortschritt " : "Fortschritt ca. ") + (win.livePercentKnown ? Math.floor(win.livePercent) + " %" : "— %")
+                                        font.pixelSize: 24; font.weight: Font.DemiBold; color: win.ink
+                                        HelpBubble { target: parent; description: "Geschätzt nach geplanter Laufzeit; 100 % nach bestätigtem Auftragsende." }
+                                    }
+                                    Text { objectName: "liveJobPositionStatus"; text: !win.simulationMode && win.liveJobState.headFresh !== true ? "Position nicht aktuell" : ""; visible: text.length > 0; color: win.muted; font.pixelSize: 12 }
                                 }
+                                ProgressBar { objectName: "liveJobProgress"; Layout.fillWidth: true; from: 0; to: 100; value: win.livePercent; indeterminate: !win.livePercentKnown && win.liveJobState.active === true }
+                            }
+                        }
+                        ScrollView {
+                            id: deviceScroll; objectName: "deviceSetupScroll"
+                            Layout.fillWidth: true; Layout.fillHeight: true; visible: !win.showLiveJob
+                            clip: true; contentWidth: availableWidth
+                            ColumnLayout {
+                                width: deviceScroll.availableWidth; spacing: 16
+                                Item { height: 4 }
                                 ColumnLayout {
-                                    Layout.fillWidth: true; spacing: 6
-                                    SectionLabel { text: "RAHMENFAHRT · LASER AUS"; dark: win.night }
-                                    ToolCombo {
-                                        id: frameTargetChoice; objectName: "frameTargetChoice"; dark: win.night; Layout.fillWidth: true
-                                        textRole: "label"; valueRole: "scope"
-                                        model: [{label:"Laserauftrag",scope:"job"},{label:"Sichtbare Auswahl",scope:"selection"},{label:"Hilfsformen T1 + T2",scope:"tools"},{label:"Nur Hilfsformen T1",scope:"t1"},{label:"Nur Hilfsformen T2",scope:"t2"}]
-                                        currentIndex: model.findIndex(row=>row.scope===win.frameScope)
-                                        enabled: !win.runtimeOccupied
-                                        onActivated: index=>win.frameScope=currentValue
+                                    Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; spacing: 15
+                                    RowLayout {
+                                        Text { text: "Gerät & Positionierung"; color: win.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                                        ActionButton { objectName: "disconnectControllerButton"; text: win.controllerConnectionPhase === "closing" ? "Trennung läuft …" : win.controllerConnectionPhase === "opening" ? "Verbindungsanfrage abbrechen" : win.simulationMode ? (machine.connected ? "Simulator trennen" : "Simulator verbinden") : "GRBL trennen"; dark: win.night; onClicked: machine.toggleConnection() }
+                                    }
+                                    ActionButton {
+                                        Layout.fillWidth:true
+                                            id: referenceHomeControl; objectName:"referenceHomeButton"
+                                            property bool nativeActionEnabled:true
+                                            property string nativeActionRole:"referenceHome"
+                                            text:"Zum Referenzpunkt – ohne Laser"; dark:win.night
+                                            visible:!win.simulationMode && typeof machine.referenceHome === "function"
+                                            enabled:!!win.extractionState.referenceReady && !win.runtimeOccupied
+                                            hint:win.extractionState.referenceError || "Referenziert am gespeicherten Maschinen-Nullpunkt; startet keine Gravur."
+                                            Component.onCompleted:if(typeof machine.referenceHome === "function")machine.registerNativeActionControl(referenceHomeControl,"referenceHome")
+                                            onClicked:{win.livePreviewSelected=false;machine.referenceHome()}
+                                        }
+                                    Text { text: win.simulationMode ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : machine.connected ? "Serieller GRBL-Anschluss geöffnet. Controllerprüfung, Maschinenreferenz und Zubehör sind getrennte Nachweise." : "Realer Controllerbetrieb angefordert; noch kein geöffneter Anschluss bestätigt."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    RowLayout {
+                                        visible: typeof machine.simulation !== "undefined"
+                                        Layout.fillWidth: true
+                                        ComboBox { HelpBubble { target: parent }
+                                            id: serialPortChoice; objectName: "serialPortChoice"; Layout.fillWidth: true
+                                            model: win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0 ? [win.deviceService.active.endpoint] : []; displayText: count ? currentText : "Kein Geräteanschluss zugeordnet"
+                                            contentItem: Text { text: serialPortChoice.displayText; color: win.ink; font: serialPortChoice.font; verticalAlignment: Text.AlignVCenter; rightPadding: 20 }
+                                            indicator: Text { x: serialPortChoice.width-width-8; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: win.ink }
+                                        }
+                                        ActionButton { objectName: "editDeviceConnection"; text: "Zuordnung …"; dark: win.night; enabled: !!win.deviceService && win.deviceService.changeBlockReason.length === 0; onClicked: deviceDialog.open() }
+                                        ActionButton {
+                                            objectName: "connectGrblButton"
+                                            text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet …" : win.controllerConnectionPhase === "opening" ? "Anschluss wird geöffnet …" : win.grblVerified ? "GRBL verbunden" : (!win.simulationMode && machine.connected ? (win.controllerConnectionPhase !== "handshake" && !win.controllerStatusFresh ? "Controllerdaten veraltet" : win.controllerConnectionPhase === "handshake" ? "GRBL wird geprüft …" : "Verbunden – Einrichtung prüfen") : "GRBL verbinden")
+                                            primary: win.grblVerified; dark: win.night
+                                            enabled: win.grblVerified || (!win.runtimeOccupied && (win.simulationMode || !machine.connected) && win.deviceService && win.deviceService.activeId.length > 0 && win.deviceService.active.endpoint.length > 0)
+                                            hint: win.grblVerified ? "Verbindung und Controllerprüfung bestätigt. Ein Klick startet keinen neuen Reset oder Auftrag. Zum erneuten Verbinden zuerst trennen." : "Öffnet den USB-Anschluss und setzt den Controller zurück. Ein alter gepufferter Auftrag wird verworfen; Referenzierung und Position danach neu prüfen."
+                                            onClicked: if (enabled && !win.runtimeOccupied && (win.simulationMode || !machine.connected) && win.deviceService) connectionSafetyDialog.open()
+                                        }
+                                        ActionButton { objectName: "openM3Setup"; text: "M3 einrichten …"; dark: win.night; enabled: !win.simulationMode && machine.connected && !win.runtimeOccupied && !win.controllerRequestPending; onClicked: commissioningDialog.open() }
+                                        ActionButton { objectName: "useSimulatorButton"; text: win.controllerConnectionPhase === "closing" ? "Simulator nach Trennung" : "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
+                                    }
+                                    CheckBox {
+                                        id:autoHomeOption; objectName:"autoHomeOnConnectOption"; Layout.fillWidth:true
+                                        visible:!!win.deviceService && typeof win.deviceService.autoHomeOnConnect !== "undefined"
+                                        enabled:!!win.deviceService && win.deviceService.activeId.length>0 && !win.runtimeOccupied
+                                        checked:win.autoHomeOnConnect
+                                        text:"Beim Verbinden automatisch referenzieren – nur mit passender gespeicherter Kalibrierung"
+                                        contentItem:Text { text:autoHomeOption.text; textFormat:Text.PlainText; wrapMode:Text.WordWrap; leftPadding:autoHomeOption.indicator.width+autoHomeOption.spacing; color:win.ink; verticalAlignment:Text.AlignVCenter }
+                                        onClicked:if(win.deviceService)win.deviceService.autoHomeOnConnect=checked
                                     }
                                     Text {
-                                        objectName: "frameRegionSummary"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: win.muted; font.pixelSize: 11
-                                        text: {if(!win.simulationMode && project.startMode !== 0)return "Relative Rahmenfahrt ist für dieses reale Gerät noch nicht eingerichtet.";let r=win.frameRegion;if(!r.valid)return r.reason;let f=win.lengthUnit==="in" ? 25.4 : 1;let digits=win.lengthUnit==="in" ? 4 : 2;return "X "+(r.x/f).toFixed(digits)+" · Y "+(r.y/f).toFixed(digits)+" · "+(r.width/f).toFixed(digits)+" × "+(r.height/f).toFixed(digits)+" "+win.lengthUnit}
+                                        objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+                                        text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet. Simulator und Gerätewechsel warten auf die bestätigte Trennung." : win.controllerConnectionPhase === "opening" ? "Anschlussöffnung angefordert · noch keine Verbindung oder Controllerprüfung bestätigt" : win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : win.controllerConnectionPhase === "handshake" ? "Anschluss geöffnet · Controllerprüfung läuft · " + machine.state : win.initializationGuidanceActive ? (win.setupState.stage === "savedHomeReady" ? "Verbunden · Kalibrierung erkannt · Referenzfahrt ausstehend" : "Verbunden · Initialisierung noch nicht abgeschlossen") : win.controllerViewState + (!win.controllerStatusFresh ? " (" + win.controllerStatusAge + ")" : machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
+                                        color: win.grblVerified ? "#209b76" : win.muted
+                                        Accessible.role: Accessible.StaticText; Accessible.name: text
                                     }
-                                    Text { text: win.frameScope==="job" ? "Geplante Bearbeitungswege einschließlich Überlauf. Hilfsformen bleiben außerhalb des Laserauftrags." : "Sichtbare Objektgrenzen des aktiven Blatts. Die Rahmenwahl aktiviert keine Laserausgabe."; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                    DeviceInitializationPanel {
+                                        Layout.fillWidth: true; visible: !win.simulationMode && machine.connected
+                                        modelMachine: machine; dark: win.night; actionsAllowed: !win.projectDialogActive
+                                        onReviewRequested: commissioningDialog.open()
+                                    }
+                                    Text {
+                                        objectName: "processingSafetyStatus"
+                                        visible: !win.simulationMode && !win.initializationGuidanceActive && (win.useAttendedStart ? !!win.extractionState.attendedStartError : typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0)
+                                        Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: "#c07b2a"
+                                        text: win.useAttendedStart ? win.extractionState.attendedStartError || "" : typeof machine.processingSafetyErrors !== "undefined" ? machine.processingSafetyErrors.join("\n") : ""
+                                        Accessible.role: Accessible.StaticText; Accessible.name: text
+                                    }
+                                    ActionButton { objectName:"openManualStart"; visible:!win.basic; text:"Start ab Handposition …"; dark:win.night; Layout.fillWidth:true; enabled:win.manualStartCanOpen; onClicked:manualStartDialog.open() }
+                                    ActionButton { visible:!win.simulationMode && !win.basic; text:"Zubehör und Sensoren …"; dark:win.night; onClicked:win.advancedAccessoryDetails=!win.advancedAccessoryDetails }
+                                    ExtractionSupervisionPanel { Layout.fillWidth: true; visible: !win.simulationMode && (win.advancedAccessoryDetails || !!win.extractionState.clearanceRequired || (!win.basic && !win.useAttendedStart)); modelMachine: machine; dark: win.night; setupReady: win.setupState.stage === "complete" || !!win.manualStartState.localPositionKnown }
+                                    Rectangle {
+                                        Layout.fillWidth: true; Layout.preferredHeight: Math.max(233, positionControls.implicitHeight + 44); radius: 9; color: win.panel; border.color: win.line
+                                        RowLayout {
+                                            id: positionControls
+                                            anchors.fill: parent; anchors.margins: 22; spacing: 26
+                                            ColumnLayout {
+                                                Layout.fillWidth: true; spacing: 12
+                                                SectionLabel { text: "POSITIONIEREN"; dark: win.night }
+                                                Text { objectName: "controllerPositionReadout"; Layout.fillWidth: true; wrapMode: Text.WordWrap; text: !win.simulationMode && (!win.controllerStatusFresh || !machine.positionReferenced) ? "Position unbekannt oder nicht referenziert" : "X  " + machine.x.toFixed(1) + "     Y  " + machine.y.toFixed(1) + " mm"; color: win.ink; font.pixelSize: 19; font.family: "DejaVu Sans Mono" }
+                                                Text { text: "Schrittweite"; color: win.muted; font.pixelSize: 11 }
+                                                Row {
+                                                    spacing: 4
+                                                    Repeater { model: [1,10,25]; delegate: ActionButton { required property int modelData; text: modelData + " mm"; dark: win.night; compact: true; selected: win.step === modelData; onClicked: win.step = modelData } }
+                                                }
+                                                ActionButton { id: workZeroControl; objectName: "workZeroButton"; property bool nativeActionEnabled: true; Component.onCompleted: machine.registerNativeActionControl(workZeroControl,"zero"); visible: typeof machine.simulation !== "undefined" && !machine.simulation; text: "Arbeitsnullpunkt hier setzen"; dark: win.night; enabled: win.positioningReady; onClicked: machine.setWorkZero() }
+                                                ActionButton { id: homeControl; property bool nativeActionEnabled: true; Component.onCompleted: machine.registerNativeActionControl(homeControl,"home"); objectName: "homeControllerButton"; text: "⌂  Referenzfahrt"; dark: win.night; enabled: machine.connected && !win.runtimeOccupied && (win.simulationMode || (win.controllerStatusFresh && typeof machine.homingSafetyError !== "undefined" && machine.homingSafetyError.length === 0)); onClicked: machine.home() }
+                                            }
+                                            GridLayout {
+                                                columns: 3; rowSpacing: 7; columnSpacing: 7; enabled: win.positioningReady
+                                                Item { width: 48; height: 46 }
+                                                ActionButton { id: jogUpControl; objectName: "jogUpButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:0,dy:win.step}); Component.onCompleted: machine.registerNativeActionControl(jogUpControl,"jog"); text: "↑"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(0,win.step) }
+                                                Item { width: 48; height: 46 }
+                                                ActionButton { id: jogLeftControl; objectName: "jogLeftButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:-win.step,dy:0}); Component.onCompleted: machine.registerNativeActionControl(jogLeftControl,"jog"); text: "←"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(-win.step,0) }
+                                                Rectangle { width: 48; height: 46; radius: 7; color: win.bg; Text { anchors.centerIn: parent; text: "XY"; color: win.muted; font.pixelSize: 11 } }
+                                                ActionButton { id: jogRightControl; objectName: "jogRightButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:win.step,dy:0}); Component.onCompleted: machine.registerNativeActionControl(jogRightControl,"jog"); text: "→"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(win.step,0) }
+                                                Item { width: 48; height: 46 }
+                                                ActionButton { id: jogDownControl; objectName: "jogDownButton"; property bool nativeActionEnabled: true; property var nativeActionArguments: ({dx:0,dy:-win.step}); Component.onCompleted: machine.registerNativeActionControl(jogDownControl,"jog"); text: "↓"; implicitWidth: 48; implicitHeight: 46; dark: win.night; onClicked: machine.jog(0,-win.step) }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true; height: 125; radius: 9; color: win.panel; border.color: win.line
+                                        RowLayout {
+                                            anchors.fill: parent; anchors.margins: 22; spacing: 20
+                                            ColumnLayout {
+                                                Layout.fillWidth: true; spacing: 8
+                                                SectionLabel { text: "POSITION & FOKUS"; dark: win.night }
+                                                Text { text: machine.firing ? project.deviceInfo.focusPower+" % angefordert" : "Fokuspunkt mit "+project.deviceInfo.focusPower+" %"; color: machine.firing ? "#d58d39" : win.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+                                                Text { text: typeof machine.simulation === "undefined" || machine.simulation ? "Gedrückt halten · max. 3 Sekunden\nFokus manuell einstellen; Z-Achse laut Profil aus." : "Ein 0,2-s-Puls bei "+project.deviceInfo.focusPower+" % · Loslassen bricht ab.\nBei Verbindungsverlust ist Laser-Aus nicht garantiert."; color: win.muted; font.pixelSize: 12 }
+                                            }
+                                            ActionButton {
+                                                id: focusHoldControl; objectName: "focusHold"
+                                                property bool interactionHeld: false
+                                                text: "◎  Halten für "+project.deviceInfo.focusPower+" %"
+                                                primary: true; implicitHeight: 44
+                                                enabled: (win.processingReady && win.supervisionAllows("focus")) || machine.firing || interactionHeld
+                                                Component.onCompleted: machine.registerFocusControl(focusHoldControl)
+                                                onPressed: { interactionHeld=true; machine.beginFocus() }
+                                                onReleased: { machine.endFocus(); interactionHeld=false }
+                                                onCanceled: { machine.endFocus(); interactionHeld=false }
+                                                onVisibleChanged: if (!visible) { machine.endFocus(); interactionHeld=false }
+                                                Component.onDestruction: machine.endFocus()
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        objectName: "nativeInputSafetyStatus"; Layout.fillWidth: true
+                                        visible: !win.simulationMode && typeof machine.nativeInputSafetyError !== "undefined" && machine.nativeInputSafetyError.length > 0
+                                        text: visible ? machine.nativeInputSafetyError : ""
+                                        textFormat: Text.PlainText; color: win.muted; wrapMode: Text.Wrap
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true; spacing: 6
+                                        SectionLabel { text: "RAHMENFAHRT · LASER AUS"; dark: win.night }
+                                        ToolCombo {
+                                            id: frameTargetChoice; objectName: "frameTargetChoice"; dark: win.night; Layout.fillWidth: true
+                                            textRole: "label"; valueRole: "scope"
+                                            model: [{label:"Laserauftrag",scope:"job"},{label:"Sichtbare Auswahl",scope:"selection"},{label:"Hilfsformen T1 + T2",scope:"tools"},{label:"Nur Hilfsformen T1",scope:"t1"},{label:"Nur Hilfsformen T2",scope:"t2"}]
+                                            currentIndex: model.findIndex(row=>row.scope===win.frameScope)
+                                            enabled: !win.runtimeOccupied
+                                            onActivated: index=>win.frameScope=currentValue
+                                        }
+                                        Text {
+                                            objectName: "frameRegionSummary"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: win.muted; font.pixelSize: 11
+                                            text: {if(!win.simulationMode && project.startMode !== 0)return "Relative Rahmenfahrt ist für dieses reale Gerät noch nicht eingerichtet.";let r=win.frameRegion;if(!r.valid)return r.reason;let f=win.lengthUnit==="in" ? 25.4 : 1;let digits=win.lengthUnit==="in" ? 4 : 2;return "X "+(r.x/f).toFixed(digits)+" · Y "+(r.y/f).toFixed(digits)+" · "+(r.width/f).toFixed(digits)+" × "+(r.height/f).toFixed(digits)+" "+win.lengthUnit}
+                                        }
+                                        Text { text: win.frameScope==="job" ? "Geplante Bearbeitungswege einschließlich Überlauf. Hilfsformen bleiben außerhalb des Laserauftrags." : "Sichtbare Objektgrenzen des aktiven Blatts. Die Rahmenwahl aktiviert keine Laserausgabe."; color: win.muted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                    }
+                                    RowLayout {
+                                        id: overrideInputs
+                                        visible: !win.basic && typeof machine.setOverrides!=="undefined"
+                                        readonly property bool valid: Number.isInteger(feedOverride.numericValue()) && feedOverride.numericValue() >= 10 && feedOverride.numericValue() <= 200 && Number.isInteger(powerOverride.numericValue()) && powerOverride.numericValue() >= 10 && powerOverride.numericValue() <= 100
+                                        NumberField { id: feedOverride; objectName: "feedOverrideInput"; label: "v"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
+                                        NumberField { id: powerOverride; objectName: "powerOverrideInput"; label: "P"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
+                                        ActionButton { id: overridesControl; property bool nativeActionEnabled: overrideInputs.valid; property var nativeActionArguments: ({feed:feedOverride.numericValue(),power:powerOverride.numericValue()}); Component.onCompleted: machine.registerNativeActionControl(overridesControl,"override"); objectName: "applyLiveOverrides"; text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && win.controllerStatusFresh && !win.controllerRequestPending && typeof machine.overridesReady !== "undefined" && machine.overridesReady && overrideInputs.valid; onClicked: { if (!enabled) return; if(!machine.setOverrides(feedOverride.numericValue(),powerOverride.numericValue()))project.notify("Live-Override abgelehnt. Aktuelle Gerätefreigabe und Rückmeldung prüfen.") } }
+                                    }
+                                    Text { objectName: "overrideReadinessReason"; visible: overrideInputs.visible; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.muted; font.pixelSize: 11; text: !win.simulationMode && !win.controllerStatusFresh ? "Controllerdaten fehlen oder sind veraltet; Live-Änderung gesperrt." : !overrideInputs.valid ? "Ganzzahlige Werte eingeben: Vorschub 10–200 %, Leistung 10–100 %. Ungültige Eingaben werden nicht durch alte Werte ersetzt." : typeof machine.overridesSafetyError !== "undefined" ? machine.overridesSafetyError : "Live-Overrides sind für diese Verbindung nicht eingerichtet." }
+                                    Repeater { model: !win.basic && typeof machine.capabilities!=="undefined" ? machine.capabilities : []
+                                        Text { required property var modelData; text: modelData.name+": "+modelData.status+" · "+modelData.detail; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    }
+                                    SectionLabel { text: "EREIGNISSE"; dark: win.night; Layout.topMargin: 6 }
+                                    Repeater { model: machine.log.slice(0,6); delegate: Text { required property string modelData; text: modelData; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true } }
+                                    ActionButton { text: "Verbindungsfehler testen"; visible: !win.basic && (typeof machine.simulation === "undefined" || machine.simulation); dark: win.night; compact: true; enabled: machine.connected; onClicked: machine.disconnectFault() }
                                 }
-                                RowLayout {
-                                    Layout.fillWidth: true; spacing: 8
-                                    ActionButton { id: frameControl; property bool nativeActionEnabled: true; property var nativeActionArguments: ({scope:win.frameScope}); Component.onCompleted: machine.registerNativeActionControl(frameControl,"frame"); objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: win.positioningReady && (win.simulationMode || project.startMode === 0) && !project.planningBusy && win.frameRegion.valid; onClicked: machine.frame(project.framingBounds(win.frameScope)) }
-                                    ActionButton { id: pauseControl; property bool nativeActionEnabled: machine.paused && (win.simulationMode || !!machine.holdConfirmed); Component.onCompleted: machine.registerNativeActionControl(pauseControl,"resume"); objectName: "pauseJobButton"; text: machine.paused ? (!win.simulationMode && !machine.holdConfirmed ? "Pause wird bestätigt…" : "▶  Fortsetzen") : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || (machine.paused && win.supervisionAllows("resume") && (win.simulationMode || (!!machine.holdConfirmed && win.controllerStatusFresh && !win.controllerRequestPending && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))); onClicked: machine.pause() }
-                                    ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
-                                }
-                                ProgressBar { Layout.fillWidth: true; value: machine.progress; visible: machine.busy }
-                                RowLayout {
-                                    id: overrideInputs
-                                    visible: !win.basic && typeof machine.setOverrides!=="undefined"
-                                    readonly property bool valid: Number.isInteger(feedOverride.numericValue()) && feedOverride.numericValue() >= 10 && feedOverride.numericValue() <= 200 && Number.isInteger(powerOverride.numericValue()) && powerOverride.numericValue() >= 10 && powerOverride.numericValue() <= 100
-                                    NumberField { id: feedOverride; objectName: "feedOverrideInput"; label: "v"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
-                                    NumberField { id: powerOverride; objectName: "powerOverrideInput"; label: "P"; value: 100; unit: "%"; Layout.fillWidth: true; dark: win.night; resetOnFinish: false; onEdited: n=>{value=n;resetInput()} }
-                                    ActionButton { id: overridesControl; property bool nativeActionEnabled: overrideInputs.valid; property var nativeActionArguments: ({feed:feedOverride.numericValue(),power:powerOverride.numericValue()}); Component.onCompleted: machine.registerNativeActionControl(overridesControl,"override"); objectName: "applyLiveOverrides"; text: "Live übernehmen"; dark: win.night; enabled: !win.simulationMode && win.controllerStatusFresh && !win.controllerRequestPending && typeof machine.overridesReady !== "undefined" && machine.overridesReady && overrideInputs.valid; onClicked: { if (!enabled) return; if(!machine.setOverrides(feedOverride.numericValue(),powerOverride.numericValue()))project.notify("Live-Override abgelehnt. Aktuelle Gerätefreigabe und Rückmeldung prüfen.") } }
-                                }
-                                Text { objectName: "overrideReadinessReason"; visible: overrideInputs.visible; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.muted; font.pixelSize: 11; text: !win.simulationMode && !win.controllerStatusFresh ? "Controllerdaten fehlen oder sind veraltet; Live-Änderung gesperrt." : !overrideInputs.valid ? "Ganzzahlige Werte eingeben: Vorschub 10–200 %, Leistung 10–100 %. Ungültige Eingaben werden nicht durch alte Werte ersetzt." : typeof machine.overridesSafetyError !== "undefined" ? machine.overridesSafetyError : "Live-Overrides sind für diese Verbindung nicht eingerichtet." }
-                                Repeater { model: !win.basic && typeof machine.capabilities!=="undefined" ? machine.capabilities : []
-                                    Text { required property var modelData; text: modelData.name+": "+modelData.status+" · "+modelData.detail; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                }
-                                SectionLabel { text: "EREIGNISSE"; dark: win.night; Layout.topMargin: 6 }
-                                Repeater { model: machine.log.slice(0,6); delegate: Text { required property string modelData; text: modelData; color: win.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true } }
-                                ActionButton { text: "Verbindungsfehler testen"; visible: !win.basic && (typeof machine.simulation === "undefined" || machine.simulation); dark: win.night; compact: true; enabled: machine.connected; onClicked: machine.disconnectFault() }
+                                Item { height: 20 }
                             }
-                            Item { height: 20 }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; Layout.leftMargin: 14; Layout.rightMargin: 14
+                            ActionButton { objectName: "showLiveJobButton"; visible: win.liveJobAvailable && !win.showLiveJob; text: "Auftragsvorschau anzeigen"; compact: true; dark: win.night; onClicked: win.livePreviewSelected=true }
+                            Item { Layout.fillWidth: true }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 8
+                            ActionButton { id: frameControl; property bool nativeActionEnabled: true; property var nativeActionArguments: ({scope:win.frameScope}); Component.onCompleted: machine.registerNativeActionControl(frameControl,"frame"); objectName: "frameJobButton"; text: "□  Rahmenfahrt"; Layout.fillWidth: true; dark: win.night; enabled: win.positioningReady && (win.simulationMode || project.startMode === 0) && !project.planningBusy && win.frameRegion.valid; onClicked: {win.livePreviewSelected=false;machine.frame(project.framingBounds(win.frameScope))} }
+                            ActionButton { id: pauseControl; property bool nativeActionEnabled: machine.paused && (win.simulationMode || !!machine.holdConfirmed); Component.onCompleted: machine.registerNativeActionControl(pauseControl,"resume"); objectName: "pauseJobButton"; text: machine.paused ? (!win.simulationMode && !machine.holdConfirmed ? "Pause wird bestätigt…" : "▶  Fortsetzen") : "Ⅱ  Pause"; Layout.fillWidth: true; dark: win.night; enabled: machine.running || (machine.paused && win.supervisionAllows("resume") && (win.simulationMode || (!!machine.holdConfirmed && win.controllerStatusFresh && !win.controllerRequestPending && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length === 0))); onClicked: machine.pause() }
+                            ActionButton { objectName: "stopJobButton"; text: "■  Stop"; Layout.fillWidth: true; dark: win.night; destructive: true; onClicked: machine.stop() }
                         }
                     }
                     ReliefPanel { dark: win.night; onImportRequested: reliefDialog.open(); onPhotoRequested: photoDepth.open() }

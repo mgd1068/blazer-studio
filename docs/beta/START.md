@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.10.8-dev
+# Blazer Studio – Einstieg in beta.10.9-dev
 
 Die [Anforderungen an den einfachen Standardworkflow](USABILITY_REQUIREMENTS.md) gelten für die weitere Entwicklung.
 
@@ -128,3 +128,11 @@ Oben im Bereich **03 Gerät** steht dauerhaft **Zum Referenzpunkt – ohne Laser
 Ein normaler Start bindet den ursprünglichen Klick und den exakt vorbereiteten Auftrag für höchstens 120 Sekunden an Controller, Kalibrierung, Arbeitsursprung und Fensterkontext. Quellenänderung, verlorener Fensterkontext, STOPP, Trennung oder Fehler verwerfen den vorbereiteten Ablauf. Der Klick wird nicht nachträglich als frisch erzeugt. Explizite Sensor-/externe Zubehörmodi behalten ihren eigenen Startvertrag.
 
 Nach erfolgreicher Gravur wartet Blazer auf einen frischen Idle-Status mit Leistung null. Erst danach fährt der Kopf mit **M5 S0** und einer langsamen absoluten **G53-Maschinenfahrt** zum bestätigten Home zurück. Ein verschobener G54-Werkstückursprung wird dabei nicht als Maschinen-Nullpunkt verwendet. Fertig ist der Auftrag erst, wenn der Controller den Rückkehrpunkt mit Leistung null bestätigt. Nach STOPP, Alarm, Türereignis oder Verbindungsfehler erfolgt keine automatische Rückfahrt oder Wiederaufnahme. Ein abgebrochener Auftrag wird nicht als erfolgreich abgeschlossen behandelt.
+
+## Laufenden Auftrag verfolgen (beta.10.9)
+
+Nach **Start** zeigt der Gerätebereich automatisch die große Live-Auftragsvorschau. Die geplanten Bahnen gehören fest zum gestarteten Auftrag: Änderungen am nächsten Entwurf ersetzen dieses Bild nicht. Das Fadenkreuz folgt frischen gemeldeten Controllerpositionen. Orange kennzeichnet gemeldete Leistung, blau eine Position ohne gemeldete Laserleistung. Kleine Punkte zeigen empfangene Positionsproben; dazwischen wird keine ungemessene Bahn als abgeschlossen eingefärbt. Während der Referenzierung bleibt ein noch nicht verlässlich bestimmter Kopfstandort ausgeblendet.
+
+Die Anzeige unterscheidet Referenzierung, Anfahrt, Gravieren, Pause, Rückfahrt, Abschluss und Abbruch. Der Prozentwert am realen Gerät ist ausdrücklich **ca.**: Er schätzt die Bearbeitung anhand der geplanten Laufzeit. Eine empfangene GCode-Quittierung bedeutet noch keine abgeschlossene Bewegung. Pause hält die Schätzung an; **100 %** erscheint erst nach bestätigtem erfolgreichem Ende einschließlich Rückfahrt. STOPP oder Fehler behalten den erreichten Teilstand. Veraltete Positionsdaten werden als solche angezeigt, ohne einen aktuellen Kopfstandort vorzutäuschen.
+
+Pause/Fortsetzen und Stop bleiben direkt unter der Vorschau erreichbar. **Gerätedetails** wechselt zur Einrichtung; **Auftragsvorschau anzeigen** bringt den gestarteten Auftrag zurück. Die Simulation verwendet denselben Ablauf mit virtuellen Positionen und ihrem simulierten Fortschritt. Sie belegt keine Hardwarebewegung.
