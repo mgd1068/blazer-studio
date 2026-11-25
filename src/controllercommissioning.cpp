@@ -5,6 +5,7 @@
 #include <QDataStream>
 #include <chrono>
 #include <cmath>
+#include <algorithm>
 namespace {
 qint64 setupNow(){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 bool closePoint(QPointF a,QPointF b){return std::abs(a.x()-b.x())<=0.002 && std::abs(a.y()-b.y())<=0.002;}
@@ -57,11 +58,15 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
     } else if(op=="homeObserved" && c.stage=="geometry" && !c.homeObserved) {
         if(!m_core->positionReferenced || !m_core->knownReportedMachinePosition){denied("Referenzreadback fehlt.");return;}
         c.homeObserved=true;c.home=m_core->reportedMachinePosition;
+        c.observedMin=c.observedMax=c.home;
         m_core->commissionedEnvelope=QRectF(c.home-QPointF(2,2),QSizeF(4,4));
         m_core->commissionedModalContract=true;
         c.reason="Tatsächlichen Homeort bestätigt. Kleine X- und Y-Probe (höchstens 1 mm) beobachten und vermessene Strecke/Richtung bestätigen.";
     } else if(op=="probeObserved" && c.stage=="probeConfirm") {
         if(!closePoint(m_core->reportedMachinePosition,c.target)){cancelCommissioning("Probenposition hat sich verändert.");return;}
+        const auto observed=m_core->reportedMachinePosition;
+        c.observedMin={std::min({c.observedMin.x(),observed.x(),c.target.x()}),std::min({c.observedMin.y(),observed.y(),c.target.y()})};
+        c.observedMax={std::max({c.observedMax.x(),observed.x(),c.target.x()}),std::max({c.observedMax.y(),observed.y(),c.target.y()})};
         ++c.probesConfirmed;c.stage=c.xConfirmed&&c.yConfirmed?"limits":"geometry";
         c.reason=c.xConfirmed&&c.yConfirmed?"X/Y geprüft. Gemessenen konservativen Innenfahrraum in Maschinenkoordinaten eingeben.":"Zweite Achse mit kleiner Probe prüfen und Strecke/Richtung bestätigen.";
     } else if(op=="limits" && c.stage=="limits" && c.homeObserved && c.xConfirmed && c.yConfirmed) {
@@ -73,21 +78,27 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
         if(!finiteSetup(minX)||!finiteSetup(minY)||!finiteSetup(maxX)||!finiteSetup(maxY)||minX>=maxX||minY>=maxY ||
            maxX-minX>m_profile.workArea().width()+0.001 || maxY-minY>m_profile.workArea().height()+0.001 ||
            std::abs(minX)>10000||std::abs(minY)>10000||std::abs(maxX)>10000||std::abs(maxY)>10000) {denied("Innenraum muss endlich, positiv groß und höchstens nominal 200×150 mm sein; Vorzeichen werden nicht vorgegeben.");return;}
-        c.limits=QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
+        const QRectF limits(QPointF(minX,minY),QPointF(maxX,maxY));
         // The operator attests the complete rectangle including the approach from
         // observed home. A home outside the interior is allowed; shrink only once
         // the head is inside after all four corner probes.
-        auto approach=c.limits.united(QRectF(c.home-QPointF(2,2),QSizeF(4,4)));
+        // The +/-2 mm box authorizes only the explicitly attested probe phase.
+        // It is not evidence that unvisited space on both sides of Home belongs
+        // to the machine travel. Keep every confirmed probe endpoint, including
+        // any outside the requested interior, when checking the approach span.
+        const QRectF approach(QPointF(std::min(minX,c.observedMin.x()),std::min(minY,c.observedMin.y())),
+                              QPointF(std::max(maxX,c.observedMax.x()),std::max(maxY,c.observedMax.y())));
         if(approach.width()>m_profile.workArea().width()+.001 || approach.height()>m_profile.workArea().height()+.001) {
             denied("Innenraum samt bestätigtem Home-/Probenraum überschreitet den gemeldeten Fahrweg; Maschinenvorzeichen und Messwerte prüfen.");return;
         }
-        for(const auto point:{c.limits.topLeft(),c.limits.topRight(),c.limits.bottomLeft(),c.limits.bottomRight()}) {
+        for(const auto point:{limits.topLeft(),limits.topRight(),limits.bottomLeft(),limits.bottomRight()}) {
             const auto work=point-m_core->offset;
             const QPointF actual(GrblWireNumbers::coordinate(work.x())+m_core->offset.x(),GrblWireNumbers::coordinate(work.y())+m_core->offset.y());
-            if(actual.x()<c.limits.left()||actual.x()>c.limits.right()||actual.y()<c.limits.top()||actual.y()>c.limits.bottom()) {
+            if(actual.x()<limits.left()||actual.x()>limits.right()||actual.y()<limits.top()||actual.y()>limits.bottom()) {
                 denied("Ecken liegen nach tatsächlicher 0,001-mm-GCode-Formatierung außerhalb des Innenraums. Grenzen passend zum WCO mit Sicherheitsabstand wählen.");return;
             }
         }
+        c.limits=limits;
         m_core->commissionedEnvelope=approach;
         c.cornerIndex=c.cornersConfirmed=0;c.target=c.limits.bottomLeft();c.stage="cornerReady";
         c.reason="Gemessenen freien Anfahrtsraum von Home und Sicherheitsabstand bestätigen; Ecke 1 laserfrei anfahren.";

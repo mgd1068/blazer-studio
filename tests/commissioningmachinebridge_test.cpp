@@ -120,7 +120,9 @@ ApplicationWindow {
         QTRY_COMPARE(item("extractionActionChoice")->property("currentValue").toString(),QString("resume"));
         QVERIFY(attest());QTRY_COMPARE(machine.extractionSupervision().value("pendingAction").toString(),QString("resume"));
         QVERIFY(native("bridgeResume","resume"));QTRY_VERIFY(!machine.paused());
-        bool resumed=false;for(const auto &entry:peer.snapshot().object.value("events").toArray()){const auto e=entry.toObject();if(e.value("kind")=="realtime"&&e.value("value").toInt()==int('~'))resumed=true;}QVERIFY(resumed);
+        // The GUI state can update before the independent peer consumes the serial byte.
+        const auto resumeReceived=[&]{for(const auto &entry:peer.snapshot().object.value("events").toArray()){const auto e=entry.toObject();if(e.value("kind")=="realtime"&&e.value("value").toInt()==int('~'))return true;}return false;};
+        QTRY_VERIFY(resumeReceived());
         QVERIFY(invoke("revokeExternalAttendance"));QTRY_COMPARE(stage(),QString("fault"));QVERIFY(!machine.positionReferenced());QVERIFY(!machine.motionSafetyError().isEmpty());
         machine.useSimulator();QTRY_VERIFY(machine.simulation()&&machine.connectionPhase()=="closed");
     }

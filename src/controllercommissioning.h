@@ -10,7 +10,7 @@ struct ControllerCommissioning {
     QString stage = "inactive", reason;
     QByteArray fingerprint;
     QRectF limits;
-    QPointF home, target;
+    QPointF home, target, observedMin, observedMax;
     int cornerIndex = 0, cornersConfirmed = 0, probesConfirmed = 0;
     quint64 connectionEpoch = 0;
     qint64 deadline = -1;

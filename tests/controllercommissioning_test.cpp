@@ -33,13 +33,15 @@ class ControllerCommissioningTest:public QObject {
     static QString stage(ControllerRuntimeSession&r){return r.status().commissioning.value("stage").toString();}
     static int count(RuntimePeer&p,const QString&kind){return p.snapshot().object.value("counts").toObject().value(kind).toInt();}
     static bool data(ControllerRuntimeSession&r,const QString&op){return r.commissioningData({{"op",op}});}
-    void startSetup(RuntimePeer &peer,ControllerRuntimeSession &r) {
-        QVERIFY(peer.start(script).ok);QVERIFY(r.requestOpen(peer.port(),QByteArray(64,'a')).enqueued);QTRY_VERIFY(r.status().ready);
+    void startSetup(RuntimePeer &peer,ControllerRuntimeSession &r,bool positive=false) {
+        QVERIFY(peer.start(script).ok);
+        if(positive)QVERIFY(peer.control({{"action","plantConfig"},{"positiveMachineSpace",true}}).ok);
+        QVERIFY(r.requestOpen(peer.port(),QByteArray(64,'a')).enqueued);QTRY_VERIFY(r.status().ready);
         QCOMPARE(count(peer,"physicalMove"),0);QVERIFY(data(r,"begin"));QTRY_COMPARE(stage(r),QString("mechanics"));
         QVERIFY(!r.status().motionSafetyError.isEmpty());
     }
-    void home(RuntimePeer &peer,ControllerRuntimeSession&r) {
-        startSetup(peer,r);if(QTest::currentTestFailed())return;
+    void home(RuntimePeer &peer,ControllerRuntimeSession&r,bool positive=false) {
+        startSetup(peer,r,positive);if(QTest::currentTestFailed())return;
         QVERIFY(r.commissioningData({{"op","mechanics"},{"switches",true},{"direction",true},{"freeTravel",true},{"laserDisabled",true}}));QTRY_COMPARE(stage(r),QString("homeReady"));
         QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupHome));QTRY_COMPARE(stage(r),QString("geometry"));
         QVERIFY(data(r,"homeObserved"));QTRY_VERIFY(r.status().commissioning.value("homeObserved").toBool());
@@ -56,6 +58,53 @@ class ControllerCommissioningTest:public QObject {
         QVERIFY(r.commissioningData({{"op","limits"},{"minX",-190.0},{"minY",-140.0},{"maxX",-10.0},{"maxY",-10.0}}));QTRY_COMPARE(stage(r),QString("cornerReady"));
     }
 private slots:
+    void positiveHomeDoesNotInventUnvisitedNegativeTravel_data() {
+        QTest::addColumn<double>("maxX");QTest::addColumn<double>("maxY");QTest::addColumn<bool>("accepted");
+        QTest::newRow("user-measured-interior")<<199.0<<149.0<<true;
+        QTest::newRow("full-nominal-span")<<200.0<<150.0<<true;
+        QTest::newRow("actual-wire-corner-outside")<<199.0006<<149.0<<false;
+        QTest::newRow("beyond-profile-span")<<200.01<<149.0<<false;
+    }
+    void positiveHomeDoesNotInventUnvisitedNegativeTravel() {
+        QFETCH(double,maxX);QFETCH(double,maxY);QFETCH(bool,accepted);
+        RuntimePeer peer;ControllerRuntimeSession r(DeviceProfile::m3Reference());home(peer,r,true);if(QTest::currentTestFailed())return;
+        for(const auto step:{QPointF(1,0),QPointF(0,1)}) {
+            QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupProbe,step.x(),step.y()));QTRY_COMPARE(stage(r),QString("probeConfirm"));
+            QVERIFY(data(r,"probeObserved"));QTRY_COMPARE(stage(r),step.y()!=0?QString("limits"):QString("geometry"));
+        }
+        const auto beforeMoves=count(peer,"physicalMove");
+        QVERIFY(r.commissioningData({{"op","limits"},{"minX",0.0},{"minY",0.0},{"maxX",maxX},{"maxY",maxY}}));
+        if(!accepted) {
+            QTRY_VERIFY(!r.status().requestPending);QCOMPARE(stage(r),QString("limits"));
+            QCOMPARE(count(peer,"physicalMove"),beforeMoves);
+        } else {
+            QTRY_COMPARE(stage(r),QString("cornerReady"));QCOMPARE(count(peer,"physicalMove"),beforeMoves);
+            for(int i=0;i<4;++i) {
+                QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupCorner,i));QTRY_COMPARE(stage(r),QString("cornerConfirm"));
+                QVERIFY(data(r,"cornerObserved"));QTRY_COMPARE(stage(r),i==3?QString("workCoordinates"):QString("cornerReady"));
+            }
+        }
+        QCOMPARE(count(peer,"collision"),0);QCOMPARE(count(peer,"powered"),0);
+        r.close();QTRY_VERIFY(!r.status().connected);
+    }
+    void confirmedEarlierProbeStillCountsAfterReturningTowardHome() {
+        RuntimePeer peer;ControllerRuntimeSession r(DeviceProfile::m3Reference());home(peer,r);if(QTest::currentTestFailed())return;
+        // The independent negative-space plant visits -200, then returns to -199.
+        // The approach must retain -200, not just Home(-198) or current(-199).
+        const QList<QPointF> steps{{-1,0},{-1,0},{1,0},{0,1}};
+        for(int i=0;i<steps.size();++i) {
+            QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::SetupProbe,steps[i].x(),steps[i].y()));QTRY_COMPARE(stage(r),QString("probeConfirm"));
+            QVERIFY(data(r,"probeObserved"));QTRY_COMPARE(stage(r),i==steps.size()-1?QString("limits"):QString("geometry"));
+        }
+        const auto beforeMoves=count(peer,"physicalMove");
+        QVERIFY(r.commissioningData({{"op","limits"},{"minX",-199.0},{"minY",-149.0},{"maxX",1.0},{"maxY",0.0}}));
+        QTRY_VERIFY(r.status().commissioning.value("reason").toString().contains("überschreitet"));
+        QCOMPARE(stage(r),QString("limits"));QCOMPARE(count(peer,"physicalMove"),beforeMoves);
+        QVERIFY(r.commissioningData({{"op","limits"},{"minX",-199.0},{"minY",-149.0},{"maxX",0.0},{"maxY",0.0}}));
+        QTRY_COMPARE(stage(r),QString("cornerReady"));QCOMPARE(count(peer,"physicalMove"),beforeMoves);
+        QCOMPARE(count(peer,"collision"),0);QCOMPARE(count(peer,"powered"),0);
+        r.close();QTRY_VERIFY(!r.status().connected);
+    }
     void fullSignedShiftedSession() {
         RuntimePeer peer;ControllerRuntimeSession r(DeviceProfile::m3Reference());geometry(peer,r);if(QTest::currentTestFailed())return;
         for(int i=0;i<4;++i) {
@@ -125,7 +174,9 @@ private slots:
         QTRY_COMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString("resume"));
         QVERIFY(r.status().extractionSafetyError.isEmpty());
         QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::Resume));QTRY_VERIFY(!r.status().paused);
-        bool resumed=false;for(const auto &entry:peer.snapshot().object.value("events").toArray()){const auto e=entry.toObject();if(e.value("kind")=="realtime"&&e.value("value").toInt()==int('~'))resumed=true;}QVERIFY(resumed);
+        // The GUI state can update before the independent peer consumes the serial byte.
+        const auto resumeReceived=[&]{for(const auto &entry:peer.snapshot().object.value("events").toArray()){const auto e=entry.toObject();if(e.value("kind")=="realtime"&&e.value("value").toInt()==int('~'))return true;}return false;};
+        QTRY_VERIFY(resumeReceived());
 
         r.stop();QTRY_COMPARE(stage(r),QString("fault"));QVERIFY(!r.status().positionReferenced);QVERIFY(!r.status().motionSafetyError.isEmpty());
         r.close();QTRY_VERIFY(!r.status().connected);

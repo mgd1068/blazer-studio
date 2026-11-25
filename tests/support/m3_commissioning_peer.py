@@ -12,6 +12,8 @@ class Plant(Peer):
     def __init__(self):
         super().__init__()
         self.actual = [-70.0, -80.0]
+        self.home_actual = [-198.0, -148.0]
+        self.physical_limits = [(-200.0, 0.0), (-150.0, 0.0)]
         self.bias = [70.0, 80.0]
         self.offset = [-180.0, -130.0]
         self.units = 1.0
@@ -38,7 +40,7 @@ class Plant(Peer):
         elif line == '$#': self.reply(f'[G54:{self.offset[0]},{self.offset[1]},0]\r\n[G92:0,0,0]\r\n[TLO:0]\r\n')
         elif line == '$G': self.reply(f'[GC:G0 G54 G17 G{21 if self.units==1 else 20} G{90 if self.absolute else 91} G94 M{self.spindle} M9 T0 F0 S{self.power:g}]\r\n')
         elif line == '$H':
-            self.actual = [-198.0, -148.0]; self.bias = [0.0,0.0]
+            self.actual = list(self.home_actual); self.bias = [0.0,0.0]
             self.state = 'Idle'; self.event('homed',list(self.actual))
         elif line.startswith('$'): raise ValueError('unsupported plant command')
         else:
@@ -70,7 +72,7 @@ class Plant(Peer):
                     if k not in ('X','Y'):continue
                     i=0 if k=='X' else 1
                     target[i]=float(v)*self.units+self.offset[i]-self.bias[i] if self.absolute else target[i]+float(v)*self.units
-                if not (-200<=target[0]<=0 and -150<=target[1]<=0):
+                if not all(lo<=value<=hi for value,(lo,hi) in zip(target,self.physical_limits)):
                     self.event('collision',target);self.reply('ALARM:1\r\n');return
                 moved=target!=self.actual
                 self.actual=target
@@ -107,6 +109,10 @@ class Plant(Peer):
             self.pending_zero_modal_ack=False;self.reply('ok\r\n');self.event('ack');self.event('zeroAckReleased')
             return {'accepted':True}
         if request.get('action')=='plantConfig':
+            if request.get('positiveMachineSpace'):
+                self.physical_limits = [(0.0,200.0),(0.0,150.0)]
+                self.home_actual = [0.0,0.0]
+                self.actual = [70.0,80.0];self.bias = [-70.0,-80.0];self.offset=[0.0,0.0]
             if 'manualPosition' in request:
                 target=request['manualPosition']
                 if len(target)!=2:raise ValueError('manual fixture XY')

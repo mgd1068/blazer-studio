@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.10.3-dev
+# Blazer Studio – Einstieg in beta.10.4-dev
 
 **Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.8-dev ergänzt eine geführte, nur für die aktuelle Verbindung geltende M3-Einrichtung und einen ausdrücklich bestätigten Absaugmodus ohne Sensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
@@ -46,6 +46,8 @@ Für einen hilfreichen Bericht: genaue Version, Schritte, erwartetes und tatsäc
 Ab beta.10.2 zeigt „M3 einrichten“ abgelehnte Eingabeaktionen direkt im Dialog an. Ein Klick ohne gültige Eingabefreigabe löst weiterhin keine Bewegung aus; die sichtbare Fehlermeldung ersetzt keine Referenz- oder Fahrraumprüfung.
 
 Beta.10.3 korrigiert die Erkennung von Mausklicks auf Geräteschaltflächen in Dialogen. Der Dialoghintergrund wurde zuvor fälschlich als Überdeckung des sichtbaren Knopfs behandelt. Tatsächlich überlagerte, deaktivierte oder abgeschnittene Bedienelemente bleiben gesperrt. Die Gerätefreigaben und notwendigen Prüfungen bleiben bestehen.
+
+Beta.10.4 prüft den gemessenen Innenfahrraum zusammen mit dem bestätigten Referenzort und allen bestätigten Prüfwegen. Der nur für kleine Achsprüfungen vorgesehene ±2-mm-Raum wird nicht mehr pauschal auf beiden Seiten hinzugerechnet. Dadurch lassen sich beispielsweise 0–199 × 0–149 mm bei Home 0,0 und positiven 1-mm-Proben einrichten. Außerhalb liegende bestätigte Prüfwege werden weiterhin mitgeprüft. Die vier Eckfahrten und die Koordinatenprüfung bleiben erforderlich; auch Rasterüberlauf muss innerhalb des freigegebenen Fahrraums liegen.
 
 Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Gerätebereich. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
 
