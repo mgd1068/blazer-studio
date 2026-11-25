@@ -75,7 +75,19 @@ ApplicationWindow {
         auto setup=root->property("setup").value<QObject*>();QVERIFY(setup);QVERIFY(QMetaObject::invokeMethod(setup,"open"));QTRY_COMPARE(stage(),QString("mechanics"));
         for(const auto name:{"setupSwitchesWitness","setupDirectionWitness","setupFreeTravelWitness","setupLaserDisabledWitness"})QVERIFY(check(name));
         QVERIFY(invoke("attestSetupMechanics"));QTRY_COMPARE(stage(),QString("homeReady"));
+        QSignalSpy denied(&machine,&Machine::nativeActionDenied);
+        const int homesBefore=count(peer,"homed");
+        machine.commissioningHome(); // No native activation: reject, explain, never send $H.
+        QTRY_COMPARE(denied.count(),1);
+        QCOMPARE(denied.first().at(0).toString(),QString("setupHome"));
+        auto rejection=item("commissioningActionError");QVERIFY(rejection);
+        QTRY_VERIFY(rejection->isVisible());
+        QCOMPARE(rejection->property("text").toString(),denied.first().at(1).toString());
+        QCOMPARE(count(peer,"homed"),homesBefore);
+        QCOMPARE(stage(),QString("homeReady"));
+        QTRY_VERIFY(!machine.requestPending());
         QVERIFY(native("setupHomeButton","setupHome"));QTRY_COMPARE(stage(),QString("geometry"));
+        QTRY_VERIFY(!rejection->isVisible());
         QVERIFY(check("setupObservedHome"));QVERIFY(invoke("confirmSetupHome"));QTRY_VERIFY(machine.commissioning().value("homeObserved").toBool());
         QVERIFY(native("setupProbe_1_0","setupProbe",{{"dx",1.},{"dy",0.}}));QTRY_COMPARE(stage(),QString("probeConfirm"));
         QVERIFY(check("setupMeasuredProbe"));QVERIFY(invoke("confirmSetupProbe"));QTRY_COMPARE(stage(),QString("geometry"));

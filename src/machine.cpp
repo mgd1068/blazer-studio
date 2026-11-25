@@ -297,15 +297,28 @@ bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,
     const auto snapshot=runtime->status();
     const auto binding=nativeBinding(action,arguments,snapshot);
     const QPointer<Machine> alive(this);
+    const auto denied=[this,alive,action](const QString &reason) {
+        document->notify(reason);
+        if (alive) emit nativeActionDenied(action,reason);
+        return false;
+    };
     const auto input=binding.isEmpty()?std::nullopt:nativeInput->consumeMatching(action,binding);
     if(!alive)return false;
-    if(!input){document->notify("Geräteaktion gesperrt: frischer nativer Druck und zugehöriges Loslassen am passenden Bedienelement fehlen.");return false;}
+    if(!input) {
+        const auto platformReason=nativeInput->reason();
+        return denied(!platformReason.isEmpty() ? platformReason : binding.isEmpty()
+            ? QString("Geräteaktion gesperrt: aktueller Controller- oder Einrichtungskontext gibt diese Aktion nicht frei.")
+            : QString("Geräteaktion gesperrt: frischer nativer Druck und zugehöriges Loslassen am passenden Bedienelement fehlen."));
+    }
     QByteArray source;if(prepared)source=prepared->sourceFingerprint()+prepared->profileFingerprint();
     const auto digest=ControllerNativeDigest::request(*kind,action=="override"?double(feed):x,action=="override"?double(power):y,bounds,source);
     const auto stamp=runtime->sealNativeAction(*kind,input->interaction,input->observedAtMs,input->expiresAtMs,digest,
         input->contextToken,snapshot.connectionEpoch,snapshot.coordinateEpoch);
-    if(!stamp.proof){document->notify("Geräteaktion gesperrt: Eingabe oder Referenzrahmen inzwischen verändert.");return false;}
-    return runtime->submitNativeAction(*kind,stamp,x,y,bounds,std::move(prepared),feed,power);
+    if(!stamp.proof)return denied("Geräteaktion gesperrt: Eingabe oder Referenzrahmen inzwischen verändert.");
+    const bool accepted=runtime->submitNativeAction(*kind,stamp,x,y,bounds,std::move(prepared),feed,power);
+    if (!alive) return accepted;
+    if (!accepted) return denied("Geräteaktion nicht angenommen: aktuelle Runtime-Freigabe fehlt. Es wurde keine Bewegung freigegeben.");
+    return true;
 }
 void Machine::beginManualPlacement(){
     if(auto r=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&r){

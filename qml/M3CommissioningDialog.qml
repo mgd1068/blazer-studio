@@ -7,6 +7,7 @@ Dialog {
     objectName: "m3CommissioningDialog"
     property var modelMachine: null
     property bool dark: false
+    property string actionError: ""
     readonly property var state: modelMachine && typeof modelMachine.commissioning !== "undefined" ? modelMachine.commissioning : ({stage:"inactive",reason:"Geräteeinrichtung ist in dieser Ansicht nicht verfügbar."})
     readonly property string stage: state.stage || "inactive"
     readonly property bool idle: modelMachine && !modelMachine.requestPending && !modelMachine.busy && !modelMachine.firing
@@ -22,6 +23,7 @@ Dialog {
     closePolicy: Popup.NoAutoClose
     background: Rectangle { radius: 9; color: dialog.dark ? "#202e39" : "white"; border.color: "#708290" }
     onAboutToShow: {
+        actionError=""
         switches.checked=false; direction.checked=false; freeTravel.checked=false; laserDisabled.checked=false
         observedHome.checked=false; measuredProbe.checked=false; observedCorner.checked=false; coordinates.checked=false
         if (modelMachine && typeof modelMachine.beginCommissioning !== "undefined" && (!state.active || stage === "fault")) modelMachine.beginCommissioning()
@@ -30,6 +32,7 @@ Dialog {
     Component.onCompleted: controlsReady=true
     onStageChanged: {
         if(!controlsReady)return
+        actionError=""
         if (stage === "mechanics" || stage === "fault") { switches.checked=false; direction.checked=false; freeTravel.checked=false; laserDisabled.checked=false }
         if (stage === "homing") observedHome.checked=false
         if (stage === "probePending") measuredProbe.checked=false
@@ -37,6 +40,13 @@ Dialog {
         if (stage === "zeroPending") coordinates.checked=false
     }
     onClosed: if (modelMachine && typeof modelMachine.cancelCommissioning !== "undefined" && stage !== "complete") modelMachine.cancelCommissioning()
+    Connections {
+        target: dialog.modelMachine
+        ignoreUnknownSignals: true
+        function onNativeActionDenied(action, reason) {
+            if (dialog.visible && action.indexOf("setup") === 0) dialog.actionError=reason
+        }
+    }
     component Witness: CheckBox {
         id: witness
         Layout.fillWidth: true
@@ -52,6 +62,7 @@ Dialog {
                 text: ({inactive:"Einrichtung beginnen",readback:"1 · Controllerdaten lesen",mechanics:"2 · Mechanik prüfen",homeReady:"3 · Referenzfahrt",homing:"3 · Referenzfahrt läuft",geometry:"4 · Referenz und Maßstab prüfen",probePending:"4 · Prüfschritt läuft",probeConfirm:"4 · Prüfschritt bestätigen",limits:"5 · Gemessenen Innenfahrraum eingeben",cornerReady:"5 · Innenraum prüfen",cornerPending:"5 · Ecke wird angefahren",cornerConfirm:"5 · Tatsächliche Ecke bestätigen",workCoordinates:"6 · Zeichnungskoordinaten zuordnen",zeroPending:"6 · Arbeitsnullpunkt wird geprüft",complete:"Einrichtung dieser Verbindung abgeschlossen",fault:"Einrichtung unterbrochen"})[dialog.stage] || dialog.stage
             }
             Label { objectName: "commissioningReason"; Layout.fillWidth: true; textFormat: Text.PlainText; wrapMode: Text.WordWrap; color: dialog.stage === "fault" ? "#c05242" : dialog.muted; text: dialog.state.reason || "" }
+            Label { objectName: "commissioningActionError"; Layout.fillWidth: true; visible: text.length > 0; textFormat: Text.PlainText; wrapMode: Text.WordWrap; color: "#c05242"; text: dialog.actionError }
             Label { objectName: "commissioningPosition"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.ink; text: "Maschinenposition: X " + dialog.mm(dialog.state.machineX) + " · Y " + dialog.mm(dialog.state.machineY) + "\nArbeitsposition: X " + dialog.mm(dialog.state.workX) + " · Y " + dialog.mm(dialog.state.workY) + "\nWCO: X " + dialog.mm(dialog.state.wcoX) + " · Y " + dialog.mm(dialog.state.wcoY) }
             Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: dialog.muted; visible: !!dialog.state.fingerprint && dialog.state.fingerprint.length > 0; text: "Controller- und Einstellungsstand: " + (dialog.state.fingerprint || "") }
             ColumnLayout {

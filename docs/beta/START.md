@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.10.1-dev
+# Blazer Studio – Einstieg in beta.10.2-dev
 
 **Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.8-dev ergänzt eine geführte, nur für die aktuelle Verbindung geltende M3-Einrichtung und einen ausdrücklich bestätigten Absaugmodus ohne Sensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
@@ -42,6 +42,8 @@ Unter **Hilfe / Beta** findest du Versionsdaten, Einschränkungen und die Einfü
 Für einen hilfreichen Bericht: genaue Version, Schritte, erwartetes und tatsächliches Ergebnis sowie eine kleine unkritische Beispieldatei angeben. Das [Testprotokoll](TEST_PROTOCOL.md) hilft beim strukturierten Test.
 
 ## Geräteanschluss
+
+Ab beta.10.2 zeigt „M3 einrichten“ abgelehnte Eingabeaktionen direkt im Dialog an. Ein Klick ohne gültige Eingabefreigabe löst weiterhin keine Bewegung aus; die sichtbare Fehlermeldung ersetzt keine Referenz- oder Fahrraumprüfung.
 
 Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Gerätebereich. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
 

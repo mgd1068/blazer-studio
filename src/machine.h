@@ -170,6 +170,7 @@ class Machine : public Simulator {
 
   signals:
     void connectionRequestFinished(quint64 requestId, bool opened, const QString &reason);
+    void nativeActionDenied(const QString &action, const QString &reason);
 
   private:
     friend class GrblTest; // Synthetic PTY commissioning, never a public release switch.

@@ -125,6 +125,7 @@ class CommissioningModel : public QObject {
     }
   signals:
     void changed();
+    void nativeActionDenied(const QString &action, const QString &reason);
 };
 
 namespace {
@@ -425,6 +426,24 @@ class CommissioningUiTest : public QObject {
         QVERIFY(!h.item("confirmSetupCoordinates")->isEnabled());
         QVERIFY(h.press("confirmSetupCoordinates", false));
         QCOMPARE(h.model.confirms, 0);
+    }
+    void deniedNativeActionIsVisibleInsideModalDialog() {
+        Harness h;
+        QVERIFY2(h.create(false), qPrintable(h.error));
+        QTRY_COMPARE(h.model.begins, 1);
+        h.model.setStage("homeReady");
+        const QString reason="Keine frische Eingabe <Prüftext>";
+        emit h.model.nativeActionDenied("setupHome",reason);
+        auto label=h.item("commissioningActionError");
+        QVERIFY(label);
+        QTRY_VERIFY(label->isVisible());
+        QCOMPARE(label->property("text").toString(),reason);
+        QCOMPARE(label->property("textFormat").toInt(),int(Qt::PlainText));
+        QCOMPARE(h.model.motions(),0);
+        emit h.model.nativeActionDenied("start","Unrelated action");
+        QCOMPARE(label->property("text").toString(),reason);
+        h.model.setStage("homing");
+        QTRY_VERIFY(!label->isVisible());
     }
 };
 QTEST_MAIN(CommissioningUiTest)
