@@ -19,6 +19,7 @@ class DeviceManager : public QObject {
     Q_PROPERTY(QString connectionStatusText READ connectionStatusText NOTIFY changed)
     Q_PROPERTY(QString changeBlockReason READ changeBlockReason NOTIFY changed)
     Q_PROPERTY(QStringList endpoints READ endpoints NOTIFY changed)
+    Q_PROPERTY(bool autoHomeOnConnect READ autoHomeOnConnect WRITE setAutoHomeOnConnect NOTIFY changed)
   public:
     explicit DeviceManager(Document *document, Machine *machine, QString path = {},
                            QObject *parent = nullptr);
@@ -32,6 +33,10 @@ class DeviceManager : public QObject {
     QString connectionStatusText() const;
     QString changeBlockReason() const;
     QStringList endpoints() const { return discoveredEndpoints; }
+    // Local preference only. Changing it never opens a port or requests motion;
+    // it is sampled once by the next deliberate connectSelected() call.
+    bool autoHomeOnConnect() const;
+    void setAutoHomeOnConnect(bool enabled);
     Q_INVOKABLE void refreshEndpoints();
     Q_INVOKABLE QVariantMap details(const QString &id) const { return library.instance(id); }
     Q_INVOKABLE QString addCurrent(QString name, QString endpoint);
@@ -46,6 +51,7 @@ class DeviceManager : public QObject {
   signals:
     void changed();
   private:
+    bool readAutoHomeOnConnect(QString *error = nullptr) const;
     bool allowChange();
     bool fail(QString text);
     void invalidateSelection();

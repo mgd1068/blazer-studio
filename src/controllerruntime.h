@@ -1,4 +1,5 @@
 #pragma once
+#include "connectionhomepermit.h"
 #include "controllerjobpreparation.h"
 #include "controllersession.h"
 #include "job.h"
@@ -83,6 +84,11 @@ class ControllerRuntimeSession final : public ControllerSession {
     friend class ControllerRuntimeTestAccess;
     friend class Machine;
     friend class ControllerRuntimeWorker;
+    ControllerSubmission requestOpenAndHome(const QString &endpoint,const QByteArray &binding,
+        quint64 interaction,qint64 observedAt,qint64 expiresAt,const QByteArray &expectedContextDigest);
+    ControllerSubmission requestOpenImpl(const QString &endpoint,const QByteArray &binding,
+        quint64 interaction=0,qint64 observedAt=0,qint64 expiresAt=0,const QByteArray &expectedContextDigest={});
+    quint64 m_lastConnectionIntent=0;
     void cancelPendingOpen();
     const DeviceProfile m_profile;
     std::shared_ptr<ControllerRuntimeHost> m_host;

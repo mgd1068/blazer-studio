@@ -88,6 +88,8 @@ class GrblSession : public ControllerSession {
     friend class ControllerRuntimeTestAccess;
     std::function<bool()> dispatchCancelled;
     std::function<bool()> dispatchPreflight;
+    std::function<bool()> homingDispatchAllowed; // Exact $H write boundary, if supplied.
+    std::function<void()> homingDispatchAccepted;
     std::function<void()> dispatchAccepted; // Host write acceptance, never physical movement proof.
     QTimer ackTimeout;
     QElapsedTimer ackClock;

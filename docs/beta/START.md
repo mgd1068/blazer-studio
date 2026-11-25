@@ -1,4 +1,6 @@
-# Blazer Studio – Einstieg in beta.10.5-dev
+# Blazer Studio – Einstieg in beta.10.6-dev
+
+Die [Anforderungen an den einfachen Standardworkflow](USABILITY_REQUIREMENTS.md) gelten für die weitere Entwicklung.
 
 **Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.10.5 ergänzt gespeicherte Gerätekalibrierung mit automatischem Controllerabgleich. Die Maschinenposition wird bei jeder Verbindung neu referenziert. Der beaufsichtigte Gerätezyklus benötigt keinen externen Absaugsensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
@@ -50,6 +52,14 @@ Beta.10.3 korrigiert die Erkennung von Mausklicks auf Geräteschaltflächen in D
 Beta.10.4 prüft den gemessenen Innenfahrraum zusammen mit dem bestätigten Referenzort und allen bestätigten Prüfwegen. Der nur für kleine Achsprüfungen vorgesehene ±2-mm-Raum wird nicht mehr pauschal auf beiden Seiten hinzugerechnet. Dadurch lassen sich beispielsweise 0–199 × 0–149 mm bei Home 0,0 und positiven 1-mm-Proben einrichten. Außerhalb liegende bestätigte Prüfwege werden weiterhin mitgeprüft. Die vier Eckfahrten und die Koordinatenprüfung bleiben erforderlich; auch Rasterüberlauf muss innerhalb des freigegebenen Fahrraums liegen.
 
 Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Gerätebereich. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
+
+### Automatisch beim Verbinden referenzieren
+
+Ab beta.10.6 kann für jedes ausgewählte physische Gerät **Beim Verbinden automatisch referenzieren** aktiviert werden. Die Option wird für diese Gerätezuordnung gespeichert und wirkt beim nächsten bewusst bestätigten Verbindungsaufbau. Die Verbindungstaste heißt dann **Verbinden und referenzieren**; den Referenzweg freihalten und die Fahrt beobachten.
+
+Blazer prüft zuerst Controllerkennung, Profil, Einstellungen und die gespeicherte Kalibrierung. Erst bei Übereinstimmung folgt eine Referenzfahrt ohne Laseremission. Ohne passende Kalibrierung, bei STOPP, Verbindungswechsel, Fehler oder abgelaufener Verbindungsautorisierung startet keine automatische Referenzfahrt. Ein eventuell erforderlicher Anlauf in einen Innenraum außerhalb von Home und ein Laserauftrag benötigen weiterhin ihre eigenen Startaktionen.
+
+Die Automatik ersetzt die Referenzfahrt-Taste, nicht den Positionsnachweis: Kalibrierung speichert die Maschinengeometrie; Homing bestimmt die aktuelle Kopfposition nach einem Controllerneustart. Ein Positionszähler von 0/0 ist dafür allein kein Nachweis.
 
 ### Ein bekanntes M3 initialisieren
 

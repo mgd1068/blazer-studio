@@ -1,6 +1,7 @@
 #include "machine.h"
 #include "controllerruntime.h"
 #include "controllerruntimemailbox.h"
+#include "connectionhomepermit.h"
 #include "nativeinputintent.h"
 #include "document.h"
 #include <QPointer>
@@ -12,6 +13,7 @@
 #include <cmath>
 namespace {
 std::optional<ControllerNativeAction> nativeAction(const QString &name) {
+    if(name=="connectHome")return ControllerNativeAction::ConnectHome;
     if(name=="localCapture")return ControllerNativeAction::LocalCapture;
     if(name=="localStart")return ControllerNativeAction::LocalStart;
     if(name=="localFrame")return ControllerNativeAction::LocalFrame;
@@ -174,7 +176,7 @@ QStringList Machine::ports() const {
 bool Machine::connectHardware(const QString &port) {
     return requestConnectHardware(port, {}).enqueued;
 }
-ControllerSubmission Machine::requestConnectHardware(const QString &port, const QByteArray &binding) {
+ControllerSubmission Machine::requestConnectHardware(const QString &port, const QByteArray &binding, bool autoHome) {
     if (hardwareAccess == HardwareAccess::Disabled)
         return {0,false,"Hardwareanschluss in diesem Offline-Lauf deaktiviert."};
     const auto error = DeviceBackends::runtimeSupportError(document->deviceProfile());
@@ -182,14 +184,31 @@ ControllerSubmission Machine::requestConnectHardware(const QString &port, const 
     if (!session || occupied() || session->status().connected)
         return {0,false,"Verbindung oder Geräteaktion noch belegt."};
     const QPointer<Machine> alive(this);
-    nativeInput->revoke();
+    std::optional<NativeInputIntentAdapter::Intent> connectionInput;
+    QByteArray connectionContext;
+    if(autoHome) {
+        connectionContext=nativeBinding("connectHome",{{"endpoint",port},{"binding",QString::fromLatin1(binding)}},session->status());
+        if(!connectionContext.isEmpty())connectionInput=nativeInput->consumeMatching("connectHome",connectionContext);
+        if(!alive)return {0,false,"Verbindungsbesitzer beendet."};
+        if(!connectionInput)return {0,false,"Verbinden mit Referenzfahrt benötigt einen frischen bewussten Klick auf die passende Verbindungstaste. "+nativeInput->reason()};
+    } else nativeInput->revoke();
     if (!alive) return {0,false,"Verbindungsbesitzer beendet."};
     Simulator::stop();
     if (!alive) return {0,false,"Verbindungsbesitzer beendet."};
     live = true; pendingSimulator = false;
     document->clearPreviewPosition();
     if (!alive) return {0,false,"Verbindungsbesitzer beendet."};
-    const auto result=session->requestOpen(port,binding);
+    ControllerSubmission result;
+    if(autoHome) {
+        auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());
+        if(!runtime || nativeBinding("connectHome",{{"endpoint",port},{"binding",QString::fromLatin1(binding)}},session->status())!=connectionContext)
+            return {0,false,"Gerätezuordnung vor der Verbindung verändert; erneut ausdrücklich verbinden."};
+        result=runtime->requestOpenAndHome(port,binding,connectionInput->interaction,connectionInput->observedAtMs,connectionInput->expiresAtMs,connectionContext);
+        if(!alive)return result;
+        // The accepted connection operation now owns its bounded Home intent.
+        // Closing the popup/revoking the consumed click must not mint a new one.
+        nativeInput->revoke();
+    } else result=session->requestOpen(port,binding);
     if (!alive) return result;
     if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()); runtime && !document->planningBusy()) runtime->prepare(document->job());
     if (!alive) return result;
@@ -230,6 +249,14 @@ void Machine::registerNativeActionControl(QObject *control,const QString &action
     });
 }
 QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &arguments,const ControllerStatus &status) const {
+    if(action=="connectHome") {
+        if(hardwareAccess!=HardwareAccess::Allowed || !session || pendingSimulator || status.connected || status.busy || status.occupied || status.opening || status.closing || status.requestPending || status.resetting ||
+           arguments.size()!=2 || arguments.value("endpoint").metaType().id()!=QMetaType::QString || arguments.value("binding").metaType().id()!=QMetaType::QString)return {};
+        const auto endpoint=arguments.value("endpoint").toString();const auto binding=arguments.value("binding").toString().toLatin1();
+        if(endpoint.isEmpty()||endpoint.size()>4096||endpoint.contains(QChar(0))||binding.size()!=64||binding!=previewDeviceBinding)return {};
+        for(const auto c:binding)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return {};
+        return ControllerConnectionHomeDigest::context(endpoint,binding,session->deviceProfile().outputFingerprint());
+    }
     const auto kind=nativeAction(action);if(!kind||!live||!session||!status.connected||!status.statusFresh||
         status.opening||status.closing||status.requestPending||status.referencing||status.resetting||status.coordinateUpdatePending)return {};
     if(action.startsWith("local")) {

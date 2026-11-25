@@ -78,7 +78,7 @@ class Machine : public Simulator {
 
     bool connectHardware(const QString &port);
     ControllerSubmission requestConnectHardware(const QString &port,
-                                                const QByteArray &bindingDigest);
+                                                const QByteArray &bindingDigest, bool autoHome = false);
     bool occupied() const;
     bool requestPending() const;
     bool statusFresh() const;

@@ -1201,10 +1201,16 @@ void GrblSession::pump() {
         if ((dispatchCancelled && dispatchCancelled()) ||
             (dispatchPreflight && dispatchPreflight()))
             return;
+        const bool homingBlock=queue[index]=="$H";
+        if(homingBlock && homingDispatchAllowed && !homingDispatchAllowed()) {
+            fail("Referenzfahrt: Verbindungsautorisierung vor dem tatsächlichen Home-Befehl abgelaufen oder widerrufen.");
+            return;
+        }
         if (serial.write(bytes) != bytes.size()) {
             fail("Serieller Schreibfehler.", ControllerDiagnostics::FaultCause::WriteFailure);
             return;
         }
+        if(homingBlock && homingDispatchAccepted)homingDispatchAccepted();
         if(dispatchAccepted)dispatchAccepted();
         // Conservative host policy, NOT a proven GRBL planner-full bound.
         // Status traffic must never renew an outstanding command's deadline.

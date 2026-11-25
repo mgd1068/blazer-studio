@@ -45,6 +45,14 @@ class ControllerRuntimeWorker final : public QObject {
     QByteArray m_calibrationBinding;
     QVariantMap m_calibrationCandidate;
     QString m_restoreReason;
+    std::shared_ptr<const ConnectionHomePermit> m_connectionHomePermit;
+    quint64 m_connectionHomeEpoch=0,m_connectionHomeRequestId=0;
+    QString m_connectionHomeEndpoint;
+    bool m_connectionHomeStarted=false;
+    bool validateConnectionHomePermitAtWrite();
+    bool acceptConnectionHomePermit(const ControllerRuntimeRequest &request);
+    void discardConnectionHomePermit();
+    void startCalibratedHome();
     void beginCalibrationRestore(const QVariantMap &record,const QByteArray &binding);
     void clearCalibrationSession();
     bool matchCalibrationCandidate();

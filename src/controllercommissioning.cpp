@@ -12,7 +12,60 @@ qint64 setupNow(){return std::chrono::duration_cast<std::chrono::milliseconds>(s
 bool closePoint(QPointF a,QPointF b){return std::abs(a.x()-b.x())<=0.002 && std::abs(a.y()-b.y())<=0.002;}
 bool finiteSetup(double x){return std::isfinite(x);}
 }
+void ControllerRuntimeWorker::discardConnectionHomePermit() {
+    m_connectionHomePermit.reset();m_connectionHomeEpoch=m_connectionHomeRequestId=0;m_connectionHomeEndpoint.clear();
+    // Keep the started marker until $H is written or its queue is cancelled.
+    // Losing a permit while $H waits behind M5 must never turn into an ordinary Home.
+}
+bool ControllerRuntimeWorker::acceptConnectionHomePermit(const ControllerRuntimeRequest &request) {
+    const auto &p=request.connectionHomePermit;const auto now=setupNow();
+    if(!p || p->issuer!=m_mailbox->inputIssuer || p->requestId!=request.id ||
+       p->generation!=request.generation || p->generation!=m_mailbox->generation.load() ||
+       p->preOpenEpoch!=request.connectionEpoch || p->preOpenEpoch+1!=m_connectionEpoch ||
+       p->endpoint!=request.endpoint || p->binding!=request.binding ||
+       p->profileFingerprint!=m_profile.outputFingerprint() ||
+       p->recordDigest!=ControllerConnectionHomeDigest::record(request.calibrationRecord) ||
+       p->contextDigest!=ControllerConnectionHomeDigest::context(request.endpoint,request.binding,m_profile.outputFingerprint()) ||
+       !p->interaction || p->observedAt<=0 || p->admittedAt<p->observedAt ||
+       p->admittedAt-p->observedAt>250 || p->deadline-p->observedAt!=15000 ||
+       now<p->admittedAt || now>p->deadline || m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load())return false;
+    m_connectionHomePermit=p;m_connectionHomeEpoch=m_connectionEpoch;m_connectionHomeRequestId=request.id;
+    m_connectionHomeEndpoint=request.endpoint;m_connectionHomeStarted=false;
+    return true;
+}
+bool ControllerRuntimeWorker::validateConnectionHomePermitAtWrite() {
+    if(!m_connectionHomeStarted)return true; // Ordinary genuine native Home keeps its existing contract.
+    if(!checkClockContinuity())return false;
+    const auto &p=m_connectionHomePermit;const auto now=setupNow();const auto &r=m_core->setupReadback;
+    if(!p || now<p->admittedAt || now>p->deadline || m_connectionHomeEpoch!=m_connectionEpoch ||
+       p->generation!=m_mailbox->generation.load() || p->issuer!=m_mailbox->inputIssuer ||
+       p->preOpenEpoch+1!=m_connectionEpoch || p->requestId!=m_connectionHomeRequestId ||
+       p->endpoint!=m_connectionHomeEndpoint ||
+       p->contextDigest!=ControllerConnectionHomeDigest::context(m_connectionHomeEndpoint,m_calibrationBinding,m_profile.outputFingerprint()) ||
+       m_calibrationBinding!=p->binding || m_profile.outputFingerprint()!=p->profileFingerprint ||
+       ControllerConnectionHomeDigest::record(m_calibrationCandidate)!=p->recordDigest ||
+       !r.valid || r.fingerprint!=m_commissioning.fingerprint ||
+       !m_commissioning.restoring || m_commissioning.stage!="restoringHome" ||
+       !m_core->connected() || m_core->awaitingReset || m_core->handshaking || m_core->paused ||
+       !m_core->statusFresh() || !m_core->configurationValid() ||
+       !m_core->knownReportedMachinePosition || !m_core->knownOffset || !m_core->knownOutput ||
+       m_core->reportedOutput!=0 || m_core->activeInputs || m_core->offset!=r.g54 ||
+       (m_core->controllerState!="Idle"&&m_core->controllerState!="Alarm") ||
+       m_accessory.activeLease() || m_jobActive || m_focusActive || m_core->firing ||
+       m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load())return false;
+    return true;
+}
+void ControllerRuntimeWorker::startCalibratedHome() {
+    auto &c=m_commissioning;
+    m_core->commissionedHomingContract=true;
+    c.stage=c.restoring?"restoringHome":"homing";c.deadline=setupNow()+90000;
+    c.reason=c.restoring?"Gespeicherte Kalibrierung passt; die bewusst autorisierte Referenzfahrt läuft.":"Referenzfahrt läuft; tatsächlichen Homeort anschließend bestätigen.";
+    m_core->home();m_core->commissionedHomingContract=false;
+    if(!m_core->homingPending)cancelCommissioning("Referenzfahrt wurde nicht angenommen.");
+}
+
 void ControllerRuntimeWorker::clearCalibrationSession() {
+    discardConnectionHomePermit();m_connectionHomeStarted=false;
     m_calibrationReadbackPending=false;
     m_calibrationCandidate.clear();m_calibrationBinding.clear();
 }
@@ -95,6 +148,7 @@ void ControllerRuntimeWorker::publishCalibrationRecord() {
 }
 
 void ControllerRuntimeWorker::cancelCommissioning(const QString &reason) {
+    discardConnectionHomePermit();
     m_calibrationReadbackPending=false; // STOP/cancel cannot restart the connect readback later.
     m_calibrationCandidate.clear();
     if(m_commissioning.stage=="inactive" || m_commissioning.stage=="fault")return;
@@ -137,6 +191,7 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
             m_core->setupReadback.valid && c.fingerprint==m_core->setupReadback.fingerprint))return;
         // Begin from savedHomeReady remains an explicit full recalibration.
         if(!m_core->setupReadyForAttestation()){denied("Frischer geprüfter Idle- oder Homing-Alarmstatus mit S0 für Einrichtung erforderlich.");return;}
+        discardConnectionHomePermit();
         m_calibrationCandidate.clear();m_restoreReason.clear();
         c={};c.connectionEpoch=m_connectionEpoch;c.stage="readback";c.reason="Lese Einstellungen, Modalzustand, Offsets und Startupblöcke.";c.deadline=setupNow()+15000;
         if(!m_core->beginSetupReadback())cancelCommissioning("Controllerdaten konnten nicht angefordert werden.");
@@ -215,10 +270,8 @@ void ControllerRuntimeWorker::setupMotion(const ControllerRuntimeRequest &reques
     if(m_accessory.activeLease()||m_jobActive||m_focusActive||m_core->firing||m_core->paused||m_core->busy()||!m_core->statusFresh()||
        !m_core->setupReadback.valid || c.fingerprint!=m_core->setupReadback.fingerprint)return;
     if(request.kind==ControllerRuntimeRequestKind::SetupHome && (c.stage=="homeReady"||c.stage=="savedHomeReady")) {
-        m_core->commissionedHomingContract=true;
-        c.stage=c.restoring?"restoringHome":"homing";c.deadline=setupNow()+90000;c.reason="Referenzfahrt läuft; tatsächlichen Homeort anschließend bestätigen.";
-        m_core->home();m_core->commissionedHomingContract=false; // Exactly one intended Home.
-        if(!m_core->homingPending)cancelCommissioning("Referenzfahrt wurde nicht angenommen.");
+        discardConnectionHomePermit();m_connectionHomeStarted=false;
+        startCalibratedHome();
         return;
     }
     if(!m_core->ready()||!m_core->verified()||!m_core->positionReferenced||!c.homeObserved)return;
@@ -251,6 +304,11 @@ void ControllerRuntimeWorker::setupMotion(const ControllerRuntimeRequest &reques
 }
 void ControllerRuntimeWorker::updateCommissioning() {
     if(m_setupUpdating)return;
+    if(m_connectionHomePermit && setupNow()>m_connectionHomePermit->deadline) {
+        discardConnectionHomePermit();
+        m_restoreReason="Automatische Referenzfahrt verworfen: 15-Sekunden-Verbindungsfrist abgelaufen. Referenzfahrt erneut bewusst starten.";
+        if(m_connectionHomeStarted){cancelCommissioning(m_restoreReason);return;}
+    }
     if(m_calibrationReadbackPending) {
         if(!m_core->connected()||m_core->awaitingReset||m_core->handshaking||m_core->busy()||m_local.engaged())return;
         if(!m_core->setupReadyForAttestation()) {
@@ -273,8 +331,18 @@ void ControllerRuntimeWorker::updateCommissioning() {
             if(m_core->setupReadyForAttestation()) {
                 if(!closePoint(m_core->offset,m_core->setupReadback.g54)){cancelCommissioning("G54-Readback und aktueller WCO widersprechen sich.");return;}
                 c.fingerprint=m_core->setupReadback.fingerprint;
-                if(matchCalibrationCandidate()) {c.stage="savedHomeReady";c.reason="Kalibrierung passt. Bewusste Referenzfahrt starten; beim Verbinden erfolgt keine Bewegung.";}
-                else {c.stage="mechanics";c.reason="Controllerdaten frisch gelesen. "+m_restoreReason+" Endschalter, Richtung, freie Mechanik und deaktivierte Laseremission prüfen.";}}
+                if(matchCalibrationCandidate()) {
+                    c.stage="savedHomeReady";c.reason="Kalibrierung passt. Bewusste Referenzfahrt starten; ohne passenden Verbindungsklick erfolgt keine Bewegung.";
+                    if(m_connectionHomePermit) {
+                        m_connectionHomeStarted=true;
+                        // At-write validation expects the exact homing transaction phase.
+                        c.stage="restoringHome";
+                        if(validateConnectionHomePermitAtWrite())startCalibratedHome();
+                        else {discardConnectionHomePermit();m_connectionHomeStarted=false;c.stage="savedHomeReady";
+                            c.reason="Verbindungsautorisierung nicht mehr gültig; Referenzfahrt erneut bewusst starten.";}
+                    }
+                }
+                else {discardConnectionHomePermit();c.stage="mechanics";c.reason="Controllerdaten frisch gelesen. "+m_restoreReason+" Endschalter, Richtung, freie Mechanik und deaktivierte Laseremission prüfen.";}}
         }
         return;
     }

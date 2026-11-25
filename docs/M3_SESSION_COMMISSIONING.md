@@ -116,3 +116,21 @@ beaufsichtigten aktiven Lease wird kein fiktiver 3-s-Flowwert erneuert.
 `revokeExternalAttendance()` fordert STOPP und entwertet die Beaufsichtigung;
 externe Absaugung wird dabei nicht ausgeschaltet. Live-Overrides bleiben in
 diesem Modus gesperrt. Siehe [Vertragsdetails](OPERATOR_ATTENDED_EXTRACTION.md).
+
+## Bewusstes Verbinden mit anschließender Referenzfahrt
+
+Die gerätebezogene Auto-Home-Präferenz ist Konfiguration und erteilt selbst keine
+Bewegungsfreigabe. Nur der passende native ConnectHome-Klick wird am Eintritt mit
+der bisherigen maximalen Eingabefrist von 250 ms verbraucht. Daraus entsteht ein
+privater einmaliger Verbindungsvorgang, gebunden an Endpoint, Geräteinstanz,
+Profil, Open-ID, Epoch, Widerrufsgeneration und authentifizierten Kalibrierdatensatz.
+Er ist höchstens 15 Sekunden ab dem ursprünglichen Eingabezeitpunkt gültig.
+
+Der unveränderte öffentliche requestOpen-Pfad führt niemals selbst Home aus. Nach
+erfolgreichem frischem Kalibrierabgleich kann ausschließlich der angenommene
+ConnectHome-Vorgang eine Referenzfahrt auslösen. Vor dem tatsächlichen $H-Write
+werden alle Bindungen, Fristen und Sperren erneut geprüft; ein verspätetes M5-ACK
+verlängert die Freigabe nicht. Der Permit wird erst nach dem $H-Write verbraucht.
+Erwartetes Schließen des Verbindungsdialogs widerruft den bereits angenommenen
+Verbindungsvorgang nicht; STOPP, Trennung oder ein Widerspruch tun dies weiterhin.
+Die Autorisierung umfasst weder Anlauf noch Jobstart oder Entriegelung.

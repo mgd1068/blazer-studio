@@ -34,6 +34,7 @@ struct ControllerRuntimeRequest {
     qint64 issuedAt = 0, expiresAt = 0;
     QString endpoint;
     QByteArray binding;
+    std::shared_ptr<const ConnectionHomePermit> connectionHomePermit;
     QVariantMap calibrationRecord; // Authenticated data; worker revalidates against fresh readbacks.
     double x = 0, y = 0;
     int feed = 100, power = 100;

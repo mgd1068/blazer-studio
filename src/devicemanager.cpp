@@ -7,7 +7,151 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
+#include <QSettings>
+#include <QFileInfo>
+#include <QTemporaryDir>
+#include <optional>
 #include <algorithm>
+
+namespace {
+QString autoHomeKey(const QString &binding) {
+    if (binding.size() != 64) return {};
+    for (const auto c : binding)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return {};
+    return QStringLiteral("devices/autoHomeOnConnect/v1/") + binding;
+}
+bool preferenceFileReadableWithoutSharedCache(QString *error) {
+    // fileName() does not mutate settings. Do not sync/value/setValue on this
+    // shared handle: Qt may have cached a partial parse of a malformed INI.
+    const auto path = QSettings().fileName();
+    const QFileInfo info(path);
+    if (!info.isAbsolute() || (!info.exists() && info.isSymLink()) ||
+        (info.exists() && !info.isFile())) {
+        if (error) *error = "Einstellungen nicht lesbar; Home-Option wurde nicht geändert.";
+        return false;
+    }
+    if (!info.exists()) return true; // Ordinary first local preference write.
+    constexpr qint64 maximumSettingsBytes = 1024 * 1024;
+    QFile original(path);
+    if (!original.open(QIODevice::ReadOnly) || original.size() > maximumSettingsBytes) {
+        if (error) *error = "Einstellungen nicht lesbar oder größer als 1 MiB; Home-Option wurde nicht geändert.";
+        return false;
+    }
+    const auto bytes = original.read(maximumSettingsBytes + 1);
+    if (original.error() != QFileDevice::NoError || !original.atEnd() ||
+        bytes.size() > maximumSettingsBytes) {
+        if (error) *error = "Einstellungen nicht vollständig lesbar; Home-Option wurde nicht geändert.";
+        return false;
+    }
+    original.close();
+    QTemporaryDir isolated;
+    if (!isolated.isValid()) {
+        if (error) *error = "Einstellungen nicht sicher prüfbar; Home-Option wurde nicht geändert.";
+        return false;
+    }
+    const auto copyPath = isolated.filePath("settings.ini");
+    QFile copy(copyPath);
+    if (!copy.open(QIODevice::WriteOnly | QIODevice::NewOnly) ||
+        copy.write(bytes) != bytes.size() || !copy.flush()) {
+        if (error) *error = "Einstellungen nicht sicher prüfbar; Home-Option wurde nicht geändert.";
+        return false;
+    }
+    copy.close();
+    // Unique filename means an actually fresh parser, not the application-wide
+    // QSettings cache. Force lazy parsing of every section before any write.
+    QSettings parsed(copyPath, QSettings::IniFormat);
+    parsed.setFallbacksEnabled(false);
+    parsed.sync();
+    (void)parsed.allKeys();
+    if (parsed.status() != QSettings::NoError) {
+        if (error) *error = "Einstellungen nicht lesbar; Home-Option wurde nicht geändert.";
+        return false;
+    }
+    return true;
+}
+std::optional<bool> strictPreference(const QVariant &value) {
+    if (value.metaType().id() == QMetaType::Bool) return value.toBool();
+    // NativeFormat on Linux is INI: Qt may reopen its own boolean as text.
+    // Only these exact round-trip tokens are accepted, never generic toBool().
+    if (value.metaType().id() == QMetaType::QString) {
+        if (value.toString() == "true") return true;
+        if (value.toString() == "false") return false;
+    }
+    return {};
+}
+} // namespace
+bool DeviceManager::readAutoHomeOnConnect(QString *error) const {
+    if (error) error->clear();
+    const auto key = autoHomeKey(bindingKey());
+    if (key.isEmpty()) return false;
+    QSettings settings;
+    settings.setFallbacksEnabled(false);
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        if (error) *error = "Einstellungen nicht lesbar; automatische Referenzfahrt bleibt ausgeschaltet.";
+        return false;
+    }
+    const bool present=settings.contains(key);
+    const auto stored=present?settings.value(key):QVariant();
+    if(settings.status()!=QSettings::NoError) {
+        if(error)*error="Einstellungen nicht lesbar; automatische Referenzfahrt bleibt ausgeschaltet.";
+        return false;
+    }
+    if (!present) return false;
+    const auto value = strictPreference(stored);
+    if (!value) {
+        if (error) *error = "Gespeicherte Home-Option ungültig; automatische Referenzfahrt bleibt ausgeschaltet.";
+        return false;
+    }
+    return *value;
+}
+bool DeviceManager::autoHomeOnConnect() const { return readAutoHomeOnConnect(); }
+void DeviceManager::setAutoHomeOnConnect(bool enabled) {
+    if (changing) {
+        lastMessage = "Geräteänderung läuft; Home-Option wurde nicht geändert.";
+        return; // The enclosing mutation will notify; never recurse through changed.
+    }
+    QScopedValueRollback<bool> mutation(changing, true);
+    if (connectionRequestPending() || machine->requestPending() || machine->occupied() ||
+        machine->busy() || machine->firing()) {
+        fail("Home-Option während einer offenen Anfrage oder Geräteaktion unverändert lassen.");
+        return;
+    }
+    const auto key = autoHomeKey(bindingKey());
+    if (key.isEmpty()) { fail("Home-Option benötigt ein ausgewähltes, unverändert zugeordnetes Gerät."); return; }
+    QString preflightError;
+    if (!preferenceFileReadableWithoutSharedCache(&preflightError)) {
+        fail(preflightError); return;
+    }
+    QSettings settings;
+    settings.setFallbacksEnabled(false);
+    settings.setAtomicSyncRequired(true);
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        fail("Einstellungen nicht lesbar; Home-Option wurde nicht geändert."); return;
+    }
+    const bool existed = settings.contains(key);
+    const auto previous = settings.value(key);
+    if(settings.status()!=QSettings::NoError) {
+        fail("Einstellungen nicht lesbar; Home-Option wurde nicht geändert.");return;
+    }
+    const auto parsed = strictPreference(previous);
+    if ((existed && parsed && *parsed == enabled) || (!existed && !enabled)) return;
+    settings.setValue(key, enabled);
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        // Undo pending cache state too: a later destructor/retry may not persist
+        // an enabling value after this call has reported failure.
+        if (existed) settings.setValue(key, previous); else settings.remove(key);
+        settings.sync();
+        fail("Home-Option konnte nicht gespeichert werden; keine Verbindung oder Fahrt ausgelöst.");
+        return;
+    }
+    lastMessage = enabled
+        ? "Automatische Referenzfahrt beim nächsten ausdrücklichen Verbinden gewählt. Jetzt wurde nichts verbunden oder bewegt."
+        : "Automatische Referenzfahrt beim nächsten Verbinden ausgeschaltet. Jetzt wurde nichts verbunden oder bewegt.";
+    emit changed();
+}
 
 DeviceManager::DeviceManager(Document *d, Machine *m, QString path, QObject *parent)
     : QObject(parent), document(d), machine(m), library(std::move(path)) {
@@ -173,6 +317,9 @@ bool DeviceManager::activate(const QString &id) {
     if (!document->setDeviceProfile(*profile)) return fail(document->message());
     selectedId = id; selectedBinding = library.bindingKey(id);
     lastMessage = "Gerät ausgewählt. Material und Kalibrierung für dieses einzelne Gerät prüfen. Keine Verbindung geöffnet.";
+    QString preferenceError;
+    readAutoHomeOnConnect(&preferenceError);
+    if (!preferenceError.isEmpty()) lastMessage += ' ' + preferenceError;
     emit changed(); return true;
 }
 bool DeviceManager::update(const QString &id, QString name, QString endpoint) {
@@ -217,14 +364,18 @@ bool DeviceManager::connectSelected() {
     const auto error = DeviceBackends::runtimeSupportError(*library.profile(selectedId));
     if (!error.isEmpty()) return fail(error);
     const auto binding = bindingKey();
-    const auto submission = machine->requestConnectHardware(endpoint, binding.toUtf8());
+    QString preferenceError;
+    const bool autoHome = readAutoHomeOnConnect(&preferenceError);
+    const auto submission = machine->requestConnectHardware(endpoint, binding.toUtf8(), autoHome);
     if (!submission.enqueued)
         return fail(submission.reason.isEmpty()
                         ? "Verbindungsanfrage nicht angenommen; kein Anschluss geöffnet."
                         : submission.reason);
     pendingConnectionRequestId = submission.requestId;
     pendingConnectionBinding = binding;
-    lastMessage = "Verbindungsanfrage angenommen. Anschlussöffnung und Controllerprüfung sind noch "
-                  "nicht bestätigt.";
+    lastMessage = autoHome
+        ? "Verbindungsanfrage mit anschließender Referenzfahrt nach frischer Prüfung angenommen. Anschlussöffnung, Prüfung und Referenzfahrt sind noch nicht bestätigt."
+        : "Verbindungsanfrage angenommen. Anschlussöffnung und Controllerprüfung sind noch nicht bestätigt.";
+    if (!preferenceError.isEmpty()) lastMessage += ' ' + preferenceError;
     emit changed(); return true;
 }

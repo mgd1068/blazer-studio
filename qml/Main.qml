@@ -73,6 +73,8 @@ ApplicationWindow {
     onControllerJobPreparedChanged: if (controllerJobPrepared) refreshFraming()
     onSynchronousWorkReadyChanged: if (synchronousWorkReady) refreshFraming()
     readonly property var setupState: typeof machine.commissioning !== "undefined" ? machine.commissioning : ({})
+    readonly property bool autoHomeOnConnect: !!win.deviceService && typeof win.deviceService.autoHomeOnConnect !== "undefined" && win.deviceService.autoHomeOnConnect
+    readonly property bool initializationGuidanceActive: ["readback","savedHomeReady","restoringHome","savedApproachReady","restoringApproach","restoredOriginReview"].indexOf(setupState.stage) >= 0 && controllerStatusFresh && !setupState.activeInputs && setupState.controllerState !== "Door"
     readonly property var extractionState: typeof machine.extractionSupervision !== "undefined" ? machine.extractionSupervision : ({mode:"sensorVerified",pendingAction:""})
     function supervisionAllows(action) { return simulationMode || (extractionState.mode !== "operatorAttendedExternal" && extractionState.mode !== "operatorSupervisedDeviceCycle") || extractionState.pendingAction === action }
     readonly property string liveAreaError: {
@@ -245,21 +247,31 @@ ApplicationWindow {
         id: connectionSafetyDialog; objectName: "connectionSafetyDialog"
         title: "Reales Gerät verbinden"; anchors.centerIn: parent; modal: true; focus: true
         width: Math.min(parent.width-48,650); closePolicy: Popup.NoAutoClose
-        onAboutToShow: { safeConnection.checked=false; machine.focus(false) }
+        property string actionError: ""
+        onAboutToShow: { actionError=""; safeConnection.checked=false; machine.focus(false) }
         background: Rectangle { color: win.night ? "#202e39" : "white"; radius: 9; border.color: "#708290" }
         contentItem: ColumnLayout {
             spacing: 12
-            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: win.ink; text: "Beim Öffnen der USB-Verbindung wird der Controller zurückgesetzt. Vor der ersten Einrichtung sind seine Startupblöcke noch unbekannt. Die Erstprüfung muss deshalb mit sicher deaktivierter Laseremission und gegen unbeabsichtigte Bewegung abgesichertem Gerät erfolgen." }
+            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: win.ink; text: win.autoHomeOnConnect ? "Nach dem Verbinden werden Controller und gespeicherte Kalibrierung geprüft. Bei passender Einrichtung folgt automatisch eine Referenzfahrt ohne Laser. Den Fahrweg freihalten und die Fahrt beobachten. Ein Laserauftrag wird nicht gestartet." : "Beim Öffnen der USB-Verbindung wird der Controller zurückgesetzt. Vor der ersten Einrichtung sind seine Startupblöcke noch unbekannt. Die Erstprüfung muss deshalb mit sicher deaktivierter Laseremission und gegen unbeabsichtigte Bewegung abgesichertem Gerät erfolgen." }
             CheckBox {
                 id: safeConnection; objectName: "safeInitialConnection"
-                Layout.fillWidth: true; text: "Die Erstverbindung ist am Gerät entsprechend abgesichert; ich bin anwesend."
+                Layout.fillWidth: true; text: win.autoHomeOnConnect ? "Der Referenzweg ist frei; ich bin am Gerät und beobachte die anschließende Referenzfahrt." : "Die Erstverbindung ist am Gerät entsprechend abgesichert; ich bin anwesend."
                 contentItem: Text { text: safeConnection.text; wrapMode: Text.WordWrap; textFormat: Text.PlainText; leftPadding: safeConnection.indicator.width+safeConnection.spacing; verticalAlignment: Text.AlignVCenter; color: win.ink }
             }
+            Label { objectName:"connectionActionError"; Layout.fillWidth:true; visible:text.length>0; text:connectionSafetyDialog.actionError; textFormat:Text.PlainText; wrapMode:Text.WordWrap; color:"#c05242" }
         }
         footer: RowLayout {
             Item { Layout.fillWidth: true }
             ActionButton { objectName: "cancelInitialConnection"; text: "Abbrechen"; dark: win.night; onClicked: connectionSafetyDialog.close() }
-            ActionButton { objectName: "confirmInitialConnection"; text: "Controller verbinden"; dark: win.night; primary: true; enabled: safeConnection.checked && !!win.deviceService && win.deviceService.activeId.length>0 && !win.runtimeOccupied; onClicked: { if(win.deviceService.connectSelected())connectionSafetyDialog.close() } }
+            ActionButton {
+                id:connectHomeControl; objectName: "confirmInitialConnection"
+                property bool nativeActionEnabled: connectionSafetyDialog.visible && win.autoHomeOnConnect && safeConnection.checked
+                property var nativeActionArguments: ({endpoint:win.deviceService ? win.deviceService.active.endpoint || "" : "",binding:win.deviceService ? win.deviceService.bindingKey || "" : ""})
+                Component.onCompleted: if(typeof machine.registerNativeActionControl === "function")machine.registerNativeActionControl(connectHomeControl,"connectHome")
+                text: win.autoHomeOnConnect ? "Verbinden und referenzieren" : "Controller verbinden"
+                dark: win.night; primary: true; enabled: safeConnection.checked && !!win.deviceService && win.deviceService.activeId.length>0 && !win.runtimeOccupied
+                onClicked: { if(win.deviceService.connectSelected())connectionSafetyDialog.close();else connectionSafetyDialog.actionError=win.deviceService.message || "Verbindung nicht angenommen." }
+            }
         }
     }
     DeviceManagerDialog { id: deviceDialog; manager: win.deviceService; dark: win.night; onAboutToShow: machine.focus(false) }
@@ -1152,9 +1164,18 @@ ApplicationWindow {
                                     ActionButton { objectName: "openM3Setup"; text: "M3 einrichten …"; dark: win.night; enabled: !win.simulationMode && machine.connected && !win.runtimeOccupied && !win.controllerRequestPending; onClicked: commissioningDialog.open() }
                                     ActionButton { objectName: "useSimulatorButton"; text: win.controllerConnectionPhase === "closing" ? "Simulator nach Trennung" : "Simulator"; dark: win.night; onClicked: machine.useSimulator() }
                                 }
+                                CheckBox {
+                                    id:autoHomeOption; objectName:"autoHomeOnConnectOption"; Layout.fillWidth:true
+                                    visible:!!win.deviceService && typeof win.deviceService.autoHomeOnConnect !== "undefined"
+                                    enabled:!!win.deviceService && win.deviceService.activeId.length>0 && !win.runtimeOccupied
+                                    checked:win.autoHomeOnConnect
+                                    text:"Beim Verbinden automatisch referenzieren – nur mit passender gespeicherter Kalibrierung"
+                                    contentItem:Text { text:autoHomeOption.text; textFormat:Text.PlainText; wrapMode:Text.WordWrap; leftPadding:autoHomeOption.indicator.width+autoHomeOption.spacing; color:win.ink; verticalAlignment:Text.AlignVCenter }
+                                    onClicked:if(win.deviceService)win.deviceService.autoHomeOnConnect=checked
+                                }
                                 Text {
                                     objectName: "grblConnectionStatus"; Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
-                                    text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet. Simulator und Gerätewechsel warten auf die bestätigte Trennung." : win.controllerConnectionPhase === "opening" ? "Anschlussöffnung angefordert · noch keine Verbindung oder Controllerprüfung bestätigt" : win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : win.controllerConnectionPhase === "handshake" ? "Anschluss geöffnet · Controllerprüfung läuft · " + machine.state : win.controllerViewState + (!win.controllerStatusFresh ? " (" + win.controllerStatusAge + ")" : machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
+                                    text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet. Simulator und Gerätewechsel warten auf die bestätigte Trennung." : win.controllerConnectionPhase === "opening" ? "Anschlussöffnung angefordert · noch keine Verbindung oder Controllerprüfung bestätigt" : win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : win.controllerConnectionPhase === "handshake" ? "Anschluss geöffnet · Controllerprüfung läuft · " + machine.state : win.initializationGuidanceActive ? (win.setupState.stage === "savedHomeReady" ? "Verbunden · Kalibrierung erkannt · Referenzfahrt ausstehend" : "Verbunden · Initialisierung noch nicht abgeschlossen") : win.controllerViewState + (!win.controllerStatusFresh ? " (" + win.controllerStatusAge + ")" : machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
                                     color: win.grblVerified ? "#209b76" : win.muted
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
                                 }
@@ -1165,7 +1186,7 @@ ApplicationWindow {
                                 }
                                 Text {
                                     objectName: "processingSafetyStatus"
-                                    visible: !win.simulationMode && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0
+                                    visible: !win.simulationMode && !win.initializationGuidanceActive && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0
                                     Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: "#c07b2a"
                                     text: typeof machine.processingSafetyErrors !== "undefined" ? machine.processingSafetyErrors.join("\n") : ""
                                     Accessible.role: Accessible.StaticText; Accessible.name: text

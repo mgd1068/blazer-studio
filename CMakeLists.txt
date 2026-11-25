@@ -384,6 +384,21 @@ install(FILES tools/photo_depth.py tools/setup_depth.py DESTINATION share/blazer
 
 include(packaging/Packaging.cmake)
 
+if(BUILD_TESTING AND UNIX)
+    qt_add_executable(blazer-deviceautohomepreference-tests tests/deviceautohomepreference_test.cpp)
+    target_link_libraries(blazer-deviceautohomepreference-tests PRIVATE blazer-core Qt6::Test)
+    add_test(NAME deviceautohomepreference COMMAND blazer-deviceautohomepreference-tests -platform offscreen)
+    set_tests_properties(deviceautohomepreference PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+endif()
+
+if(BUILD_TESTING)
+    qt_add_executable(blazer-autohomeconnection-tests tests/autohomeconnection_test.cpp)
+    target_link_libraries(blazer-autohomeconnection-tests PRIVATE blazer-core Qt6::Test)
+    target_compile_definitions(blazer-autohomeconnection-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME autohomeconnection COMMAND blazer-autohomeconnection-tests -platform offscreen)
+    set_tests_properties(autohomeconnection PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen")
+endif()
+
 if(BUILD_TESTING)
     qt_add_executable(blazer-calibrationreconnect-tests tests/calibrationreconnect_test.cpp)
     target_link_libraries(blazer-calibrationreconnect-tests PRIVATE blazer-core Qt6::Test)

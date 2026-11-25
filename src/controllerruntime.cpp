@@ -208,6 +208,28 @@ QVariantMap ControllerRuntimeSession::diagnosticSnapshot() const {
 }
 ControllerSubmission ControllerRuntimeSession::requestOpen(const QString &endpoint,
                                                            const QByteArray &binding) {
+    return requestOpenImpl(endpoint,binding);
+}
+ControllerSubmission ControllerRuntimeSession::requestOpenAndHome(const QString &endpoint,
+        const QByteArray &binding,quint64 interaction,qint64 observedAt,qint64 expiresAt,
+        const QByteArray &expectedContextDigest) {
+    if(!interaction)return {0,false,"Frische native Verbindungsaktion fehlt."};
+    return requestOpenImpl(endpoint,binding,interaction,observedAt,expiresAt,expectedContextDigest);
+}
+ControllerSubmission ControllerRuntimeSession::requestOpenImpl(const QString &endpoint,
+        const QByteArray &binding,quint64 interaction,qint64 observedAt,qint64 expiresAt,
+        const QByteArray &expectedContextDigest) {
+    const auto admitted=nowMs();
+    if(interaction) {
+        const bool hexBinding=binding.size()==64&&std::all_of(binding.cbegin(),binding.cend(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');});
+        if(interaction<=m_lastConnectionIntent || observedAt<=0 || observedAt>admitted ||
+           expiresAt<admitted || expiresAt<observedAt || expiresAt-observedAt>250 ||
+           !hexBinding || expectedContextDigest!=ControllerConnectionHomeDigest::context(endpoint,binding,m_profile.outputFingerprint()))
+            return {0,false,"Verbinden und Referenzieren abgelehnt: frische passende native Verbindungsaktion fehlt."};
+        m_lastConnectionIntent=interaction; // A rejected admission cannot replay this click later.
+    } else if(observedAt||expiresAt||!expectedContextDigest.isEmpty()) {
+        return {0,false,"Unvollständige native Verbindungsaktion."};
+    }
     if (endpoint.isEmpty() || status().occupied || status().connected)
         return {0, false, "Verbindung bereits belegt oder Anschluss fehlt."};
     const auto id = ++m_nextRequest;
@@ -226,6 +248,14 @@ ControllerSubmission ControllerRuntimeSession::requestOpen(const QString &endpoi
     }
     request.issuedAt = nowMs();
     request.expiresAt = request.issuedAt + 3000;
+    if(interaction) {
+        if(request.issuedAt>observedAt+15000)return {id,false,"Verbindungsautorisierung während Datenprüfung abgelaufen."};
+        QMutexLocker lock(&m_mailbox->mutex);
+        request.connectionHomePermit=std::shared_ptr<const ConnectionHomePermit>(new ConnectionHomePermit(
+            m_mailbox->inputIssuer,interaction,id,m_mailbox->generation.load(),m_mailbox->latest.connectionEpoch,
+            observedAt,admitted,endpoint,binding,m_profile.outputFingerprint(),
+            ControllerConnectionHomeDigest::record(request.calibrationRecord),expectedContextDigest));
+    }
     if (!m_mailbox->enqueue(std::move(request)))
         return {id, false, "Runtime-Anforderung nicht eingereiht."};
     m_pendingOpen = id;
@@ -354,6 +384,7 @@ bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,
         double x,double y,const QVariantMap &bounds,PreparedControllerJob::Ptr prepared,int feed,int power,PreparedLocalJob::Ptr local) {
     Kind kind=Kind::Start;
     switch(action){
+    case ControllerNativeAction::ConnectHome:return false; // Only the bounded connection admission path may use it.
     case ControllerNativeAction::FocusHold:kind=Kind::Focus;break;
     case ControllerNativeAction::StartJob:kind=Kind::Start;break;
     case ControllerNativeAction::Jog:kind=Kind::Jog;break;
@@ -535,6 +566,8 @@ void ControllerRuntimeWorker::initialize() {
     };
     m_core->dispatchPreflight = [this] { return cancelDispatch(); };
     m_core->dispatchAccepted = [this] { m_dispatchProof.reset(); };
+    m_core->homingDispatchAllowed=[this]{return validateConnectionHomePermitAtWrite();};
+    m_core->homingDispatchAccepted=[this]{if(m_connectionHomeStarted){discardConnectionHomePermit();m_connectionHomeStarted=false;}};
     connect(m_core.get(), &ControllerSession::changed, this, &ControllerRuntimeWorker::coreChanged);
     m_watchdog->start();
     checkClockContinuity();
@@ -608,8 +641,11 @@ void ControllerRuntimeWorker::drain() {
             discardOperatorWitness();m_operatorSession.clear();m_activeOperatorOperation.clear();m_operatorPaused=false;
             m_accessory = AccessoryContract(true);
             const bool opened = m_core->open(request.endpoint) && checkClockContinuity();
-            if(opened)beginCalibrationRestore(request.calibrationRecord,request.binding);
-            else clearCalibrationSession();
+            if(opened) {
+                beginCalibrationRestore(request.calibrationRecord,request.binding);
+                if(request.connectionHomePermit && !acceptConnectionHomePermit(request))
+                    m_restoreReason="Automatische Referenzfahrt verworfen: Verbindungsautorisierung ist abgelaufen oder nicht mehr passend.";
+            } else clearCalibrationSession();
             emit openFinished(
                 request.id, opened,
                 opened ? QString() : QString("Controlleranschluss konnte nicht geöffnet werden."));

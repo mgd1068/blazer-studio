@@ -8,7 +8,7 @@
 #include <atomic>
 #include <memory>
 
-enum class ControllerNativeAction { FocusHold, StartJob, Jog, Home, Frame, WorkZero, Resume, Override, SetupHome, SetupProbe, SetupCorner, SetupZero, LocalCapture, LocalStart, LocalFrame, LocalResume };
+enum class ControllerNativeAction { FocusHold, StartJob, Jog, Home, Frame, WorkZero, Resume, Override, SetupHome, SetupProbe, SetupCorner, SetupZero, LocalCapture, LocalStart, LocalFrame, LocalResume, ConnectHome };
 // Revocation can remove input authority only. This token grants no motion or flow.
 struct NativeInputContextToken { std::atomic_bool valid{true}; };
 namespace ControllerNativeDigest {

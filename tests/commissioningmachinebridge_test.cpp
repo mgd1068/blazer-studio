@@ -72,6 +72,7 @@ private slots:
         QVERIFY(document.setStartMode(Document::AbsoluteCoordinates));
         Machine machine(&document);QVERIFY(machine.requestConnectHardware(peer.port(),QByteArray(64,'a')).enqueued);QTRY_VERIFY(machine.ready());QTRY_VERIFY(machine.jobPrepared());
         QQmlEngine engine;engine.rootContext()->setContextProperty("actualMachine",&machine);
+        engine.rootContext()->setContextProperty("bridgeEndpoint",peer.port());
         QString qmlDir=qEnvironmentVariable("BLAZER_REAL_COMMISSIONING_QML_DIR");if(qmlDir.isEmpty())qmlDir=QStringLiteral(BLAZER_TEST_SOURCE_DIR "/qml");
         QQmlComponent component(&engine);
         component.setData(QString(R"(import QtQuick
@@ -85,6 +86,7 @@ ApplicationWindow {
  App.ExtractionSupervisionPanel { id:supervision; anchors.fill:parent; visible:actualMachine.commissioning.stage === "complete"; modelMachine:actualMachine; commissioningComplete:actualMachine.commissioning.stage === "complete" }
  Button { id:start; objectName:"bridgeStart"; x:900; y:850; text:"Start"; property bool nativeActionEnabled:true; Component.onCompleted:actualMachine.registerNativeActionControl(start,"start"); onClicked:actualMachine.start() }
  Button { id:resume; objectName:"bridgeResume"; x:1000; y:850; text:"Resume"; property bool nativeActionEnabled:true; Component.onCompleted:actualMachine.registerNativeActionControl(resume,"resume"); onClicked:actualMachine.pause() }
+ Button { id:connectHome; objectName:"bridgeConnectHome"; x:900; y:930; text:"Connect and Home"; property bool nativeActionEnabled:true; property var nativeActionArguments:({endpoint:bridgeEndpoint,binding:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}); Component.onCompleted:actualMachine.registerNativeActionControl(connectHome,"connectHome") }
 })").arg(QUrl::fromLocalFile(qmlDir).toString()).toUtf8(),QUrl());
         std::unique_ptr<QObject> root(component.create());QVERIFY2(root,qPrintable(component.errorString()));
         auto window=qobject_cast<QQuickWindow *>(root.get());QVERIFY(window);window->requestActivate();QVERIFY(QTest::qWaitForWindowActive(window,1000));
@@ -160,6 +162,19 @@ ApplicationWindow {
         const auto resumeReceived=[&]{for(const auto &entry:peer.snapshot().object.value("events").toArray()){const auto e=entry.toObject();if(e.value("kind")=="realtime"&&e.value("value").toInt()==int('~'))return true;}return false;};
         QTRY_VERIFY(resumeReceived());
         QVERIFY(invoke("revokeExternalAttendance"));QTRY_COMPARE(stage(),QString("fault"));QVERIFY(!machine.positionReferenced());QVERIFY(!machine.motionSafetyError().isEmpty());
+        machine.useSimulator();QTRY_VERIFY(machine.simulation()&&machine.connectionPhase()=="closed");
+        machine.setPreviewDeviceBinding(QByteArray(64,'a'));
+        QVERIFY(peer.control({{"action","set"},{"values",QJsonObject{{"ackEnabled",true}}}}).ok);
+        const auto homesBeforeAuto=count(peer,"homed"),movesBeforeAuto=count(peer,"physicalMove"),powerBeforeAuto=count(peer,"powered");
+        // Neither a preference nor a programmatic invocation authorizes motion.
+        QVERIFY(!machine.requestConnectHardware(peer.port(),QByteArray(64,'a'),true).enqueued);
+        QCOMPARE(count(peer,"homed"),homesBeforeAuto);
+        QVERIFY2(NativeInputIntentTestAccess::hit(window,item("bridgeConnectHome")),"Connect-and-Home control must be reachable");
+        QVERIFY(native("bridgeConnectHome","connectHome",{{"endpoint",peer.port()},{"binding",QString(64,'a')}}));
+        QVERIFY(machine.requestConnectHardware(peer.port(),QByteArray(64,'a'),true).enqueued);
+        QTRY_VERIFY2(stage()=="savedApproachReady",qPrintable(machine.commissioning().value("reason").toString()+" / "+machine.log().join(" | ")));
+        QCOMPARE(count(peer,"homed"),homesBeforeAuto+1);
+        QCOMPARE(count(peer,"physicalMove"),movesBeforeAuto);QCOMPARE(count(peer,"powered"),powerBeforeAuto);
         machine.useSimulator();QTRY_VERIFY(machine.simulation()&&machine.connectionPhase()=="closed");
         // The normal public reconnect loads the saved DATA. The real QML compact
         // controls must still produce a new typed native Home and approach intent.
