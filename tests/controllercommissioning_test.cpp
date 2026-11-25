@@ -170,6 +170,15 @@ private slots:
         const auto powered=count(peer,"powered");QVERIFY(ControllerRuntimeTestAccess::start(r,prepared));QTest::qWait(100);QCOMPARE(count(peer,"powered"),powered);
         QVERIFY(!r.status().overridesReady);
         QVERIFY(ControllerRuntimeTestAccess::sensorUnknown(r));
+        // Successful jobs now park at the calibrated Home. In this signed
+        // fixture Home lies outside the usable engraving interior: explicitly
+        // move to the verified interior before asking for an emitting focus.
+        const auto target=QPointF(r.status().commissioning.value("workMinX").toDouble(),r.status().commissioning.value("workMinY").toDouble());
+        const auto delta=target-r.status().position;
+        const auto powerBeforeApproach=count(peer,"powered");
+        QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::Jog,delta.x(),delta.y()));
+        QTRY_VERIFY(!r.status().occupied);QTRY_VERIFY((r.status().position-target).manhattanLength()<0.001);
+        QCOMPARE(count(peer,"powered"),powerBeforeApproach);QCOMPARE(count(peer,"collision"),0);
         const auto beforeFocus=count(peer,"physicalMove"),beforeFocusPower=count(peer,"powered");
         QVERIFY(r.operatorData({{"op","attest"},{"action","focus"},{"extractionOn",true},{"operatorPresent",true}}));
         QTRY_COMPARE(r.status().extractionSupervision.value("pendingAction").toString(),QString("focus"));

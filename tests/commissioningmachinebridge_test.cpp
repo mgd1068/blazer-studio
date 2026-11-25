@@ -94,6 +94,7 @@ ApplicationWindow {
  Button { id:start; objectName:"bridgeStart"; x:900; y:850; text:"Start"; property bool nativeActionEnabled:true; Component.onCompleted:actualMachine.registerNativeActionControl(start,"start"); onClicked:actualMachine.start() }
  Button { id:startAttended; objectName:"bridgeStartAttended"; x:750; y:850; text:"Start attended"; property bool nativeActionEnabled:true; property string nativeActionRole:"startAttended"; Component.onCompleted:{actualMachine.registerNativeActionControl(startAttended,"start");actualMachine.registerNativeActionControl(startAttended,"startAttended")} onClicked:actualMachine.startAttended() }
  Button { id:resume; objectName:"bridgeResume"; x:1000; y:850; text:"Resume"; property bool nativeActionEnabled:true; Component.onCompleted:actualMachine.registerNativeActionControl(resume,"resume"); onClicked:actualMachine.pause() }
+ Button { id:referenceHome; objectName:"bridgeReferenceHome"; x:900; y:850; text:"Reference Home"; property bool nativeActionEnabled:true; property string nativeActionRole:"referenceHome"; Component.onCompleted:actualMachine.registerNativeActionControl(referenceHome,"referenceHome"); onClicked:actualMachine.referenceHome() }
  Button { id:connectHome; objectName:"bridgeConnectHome"; x:900; y:930; text:"Connect and Home"; property bool nativeActionEnabled:true; property var nativeActionArguments:({endpoint:bridgeEndpoint,binding:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}); Component.onCompleted:actualMachine.registerNativeActionControl(connectHome,"connectHome") }
 })").arg(QUrl::fromLocalFile(qmlDir).toString()).toUtf8(),QUrl());
         std::unique_ptr<QObject> root(component.create());QVERIFY2(root,qPrintable(component.errorString()));
@@ -101,7 +102,13 @@ ApplicationWindow {
         auto item=[&](const QString&name){return find(window->contentItem(),name);};
         auto invoke=[&](const QString&name){QCoreApplication::processEvents();auto control=item(name);return control&&control->isEnabled()&&QMetaObject::invokeMethod(control,"clicked");};
         auto check=[&](const QString&name){QCoreApplication::processEvents();auto control=item(name);return control&&control->setProperty("checked",true);};
-        auto native=[&](const QString&name,const QString&action,const QVariantMap&args=QVariantMap{}){auto control=item(name);return control&&control->isEnabled()&&ControllerRuntimeTestAccess::seed(machine,*control,action,args)&&QMetaObject::invokeMethod(control,"clicked");};
+        auto native=[&](const QString&name,const QString&action,const QVariantMap&args=QVariantMap{}) {
+            auto control=item(name);
+            // Wait for the ordered data acknowledgement and QML enable binding
+            // BEFORE creating one fresh input; never retry or refresh that input.
+            if(!QTest::qWaitFor([&]{return control&&control->isEnabled()&&!machine.requestPending();},1000))return false;
+            return ControllerRuntimeTestAccess::seed(machine,*control,action,args)&&QMetaObject::invokeMethod(control,"clicked");
+        };
         auto stage=[&]{auto setup=root->property("setup").value<QObject*>();return setup?setup->property("stage").toString():QString();};
         auto setup=root->property("setup").value<QObject*>();QVERIFY(setup);QVERIFY(QMetaObject::invokeMethod(setup,"open"));QTRY_COMPARE(stage(),QString("mechanics"));
         for(const auto name:{"setupSwitchesWitness","setupDirectionWitness","setupFreeTravelWitness","setupLaserDisabledWitness"})QVERIFY(check(name));
@@ -153,7 +160,14 @@ ApplicationWindow {
         QCOMPARE(stage(),QString("complete"));QVERIFY(invoke("closeSetup"));QTRY_VERIFY(!setup->property("visible").toBool());
         QVERIFY(machine.positionReferenced());QCOMPARE(resets(),beforeFinishResets);
         QTRY_VERIFY(machine.commissioning().value("calibrationStored").toBool());
-        QTRY_VERIFY2(machine.extractionSupervision().value("attendedStartReady").toBool(),qPrintable(machine.extractionSupervision().value("attendedStartError").toString()));
+        QTRY_VERIFY2(machine.extractionSupervision().value("referenceReady").toBool(),qPrintable(machine.extractionSupervision().value("referenceError").toString()));
+        const auto powerBeforeReference=count(peer,"powered"),homesBeforeReference=count(peer,"homed");
+        machine.referenceHome();QTest::qWait(60);QCOMPARE(count(peer,"homed"),homesBeforeReference);
+        QVERIFY(native("bridgeReferenceHome","referenceHome"));
+        QTRY_COMPARE(count(peer,"homed"),homesBeforeReference+1);
+        QTRY_VERIFY(!machine.occupied());QCOMPARE(count(peer,"powered"),powerBeforeReference);
+
+        QTRY_VERIFY2(machine.extractionSupervision().value("attendedStartReady").toBool(),qPrintable(machine.extractionSupervision().value("attendedStartError").toString()+" / "+machine.commissioning().value("stage").toString()+" / "+machine.commissioning().value("reason").toString()+" / "+machine.extractionSupervision().value("startSequenceReason").toString()+" / "+machine.log().join(" | ")));
         const auto poweredBeforeSingle=count(peer,"powered");
         machine.startAttended();QTest::qWait(60);QCOMPARE(count(peer,"powered"),poweredBeforeSingle);
         // One genuine-shaped native intent, no clearance, mode selection or

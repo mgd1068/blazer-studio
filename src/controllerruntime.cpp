@@ -283,6 +283,12 @@ void ControllerRuntimeSession::close() {
     m_mailbox->revoke(true);
     emit changed();
 }
+void ControllerRuntimeSession::invalidatePendingSequenceContext() {
+    m_mailbox->sequenceContextEpoch.fetch_add(1);
+}
+void ControllerRuntimeSession::cancelPendingStartSequence() {
+    m_mailbox->startSequenceGeneration.fetch_add(1);
+}
 void ControllerRuntimeSession::stop() {
     cancelPendingOpen();
     m_mailbox->revoke(false);
@@ -388,6 +394,7 @@ bool ControllerRuntimeSession::submitNativeAction(ControllerNativeAction action,
     case ControllerNativeAction::FocusHold:kind=Kind::Focus;break;
     case ControllerNativeAction::StartJob:kind=Kind::Start;break;
     case ControllerNativeAction::StartAttended:kind=Kind::StartAttended;break;
+    case ControllerNativeAction::ReferenceHome:kind=Kind::ReferenceHome;break;
     case ControllerNativeAction::Jog:kind=Kind::Jog;break;
     case ControllerNativeAction::Home:kind=Kind::Home;break;
     case ControllerNativeAction::Frame:kind=Kind::Frame;break;
@@ -563,12 +570,12 @@ void ControllerRuntimeWorker::initialize() {
     m_watchdog->setInterval(50);
     connect(m_watchdog, &QTimer::timeout, this, &ControllerRuntimeWorker::watchdog);
     m_core->dispatchCancelled = [this] {
-        return !checkClockContinuity() || m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load();
+        return !checkClockContinuity() || (m_attendedStart && !validateAttendedStart()) || m_mailbox->stop.load() || m_mailbox->close.load() || m_mailbox->shutdown.load();
     };
     m_core->dispatchPreflight = [this] { return cancelDispatch(); };
     m_core->dispatchAccepted = [this] { m_dispatchProof.reset(); };
-    m_core->homingDispatchAllowed=[this]{return validateConnectionHomePermitAtWrite();};
-    m_core->homingDispatchAccepted=[this]{if(m_connectionHomeStarted){discardConnectionHomePermit();m_connectionHomeStarted=false;}};
+    m_core->homingDispatchAllowed=[this]{return validateConnectionHomePermitAtWrite() && (!m_attendedStart || (checkClockContinuity() && validateAttendedStart(true)));};
+    m_core->homingDispatchAccepted=[this]{if(m_attendedStart)m_attendedStart->homeWritten=true;if(m_connectionHomeStarted){discardConnectionHomePermit();m_connectionHomeStarted=false;}};
     connect(m_core.get(), &ControllerSession::changed, this, &ControllerRuntimeWorker::coreChanged);
     m_watchdog->start();
     checkClockContinuity();
@@ -629,11 +636,14 @@ void ControllerRuntimeWorker::drain() {
             m_core->append("Native Geräteaktion abgelehnt: Eingabe, Argumente, Referenzrahmen oder Frist nicht bestätigt.");
         } else {
         m_dispatchProof=request.input.proof;
-        if(m_local.engaged() && request.kind!=Kind::LocalData && request.kind!=Kind::LocalCapture && request.kind!=Kind::LocalStart && request.kind!=Kind::LocalFrame && request.kind!=Kind::LocalResume && request.kind!=Kind::OperatorData && request.kind!=Kind::Hold && request.kind!=Kind::FocusOff && request.kind!=Kind::Open) {
+        if(m_attendedStart && request.kind!=Kind::FocusOff &&
+           !(request.kind==Kind::OperatorData && request.bounds.value("op")=="withdraw")) {
+            m_core->append("Gebundene Startreferenz läuft; andere Geräteaktionen bis Abschluss gesperrt.");
+        } else if(m_local.engaged() && request.kind!=Kind::LocalData && request.kind!=Kind::LocalCapture && request.kind!=Kind::LocalStart && request.kind!=Kind::LocalFrame && request.kind!=Kind::LocalResume && request.kind!=Kind::OperatorData && request.kind!=Kind::Hold && request.kind!=Kind::FocusOff && request.kind!=Kind::Open) {
             m_core->append("Manueller lokaler Rahmen: globale Geräteaktion gesperrt.");
         } else if(m_commissioning.active() && m_commissioning.stage!="complete" &&
            !(request.kind==Kind::LocalData && request.bounds.value("op")=="begin" && m_commissioning.stage!="readback" && !m_commissioning.moving()) &&
-           request.kind!=Kind::SetupData && request.kind!=Kind::OperatorData && request.kind!=Kind::SetupHome && request.kind!=Kind::SetupProbe && request.kind!=Kind::SetupCorner && request.kind!=Kind::SetupZero && request.kind!=Kind::Open && request.kind!=Kind::Hold) {
+           request.kind!=Kind::SetupData && request.kind!=Kind::OperatorData && request.kind!=Kind::StartAttended && request.kind!=Kind::ReferenceHome && request.kind!=Kind::SetupHome && request.kind!=Kind::SetupProbe && request.kind!=Kind::SetupCorner && request.kind!=Kind::SetupZero && request.kind!=Kind::Open && request.kind!=Kind::Hold) {
             m_core->append("Einrichtung aktiv: normale Geräteaktion gesperrt.");
         } else switch (request.kind) {
         case Kind::Open: {
@@ -720,17 +730,23 @@ void ControllerRuntimeWorker::drain() {
         case Kind::FocusOff:
             m_core->focus(false);
             break;
+        case Kind::ReferenceHome:
+            beginReferenceHome(request);
+            break;
         case Kind::StartAttended:
+            beginAttendedStart(request);
+            break;
         case Kind::Start:
             if (!m_core->ready() || !m_core->verified() || !m_core->positionReferenced ||
                 !m_core->motionSafetyError().isEmpty())
                 break;
-            if (request.kind==Kind::StartAttended ? !beginAttendedStart(request) :
-                !beginAccessory(AccessoryContract::OperatorAction::StartJob,request.prepared?request.prepared->sourceFingerprint()+request.prepared->profileFingerprint():QByteArray()))
+            if (!beginAccessory(AccessoryContract::OperatorAction::StartJob,request.prepared?request.prepared->sourceFingerprint()+request.prepared->profileFingerprint():QByteArray()))
                 break;
             m_jobActive = true;
             m_activePrepared = std::move(request.prepared);
-            if (!m_core->startPrepared(*m_activePrepared)) {
+            const auto returnHome=(m_commissioning.stage=="complete" && m_commissioning.homeObserved)
+                ? std::optional<QPointF>(m_commissioning.home) : std::nullopt;
+            if (!m_core->startPrepared(*m_activePrepared,returnHome)) {
                 m_jobActive = false;
                 discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Complete);
@@ -747,6 +763,12 @@ void ControllerRuntimeWorker::drain() {
     if (!m_mailbox->normal.empty() || m_mailbox->stop.load() || m_mailbox->close.load() ||
         m_mailbox->focusOff.load())
         m_mailbox->wakeLocked();
+}
+void ControllerRuntimeWorker::discardAttendedStart(const QString &reason) {
+    if(!m_attendedStart)return;
+    if(!reason.isEmpty())m_attendedStartReason=m_attendedStartFailure.isEmpty()?reason:m_attendedStartFailure;
+    retireControllerJob(std::move(m_attendedStart->prepared));
+    m_attendedStart.reset();
 }
 void ControllerRuntimeWorker::retirePrepared() {
     if (!m_activePrepared)
@@ -770,6 +792,7 @@ bool ControllerRuntimeWorker::nativeActionAllowed(const Request &request) {
     case Kind::Start:action=request.kind==Kind::StartAttended?ControllerNativeAction::StartAttended:ControllerNativeAction::StartJob;
         if(!request.prepared)return false;
         source=request.prepared->sourceFingerprint()+request.prepared->profileFingerprint();break;
+    case Kind::ReferenceHome:action=ControllerNativeAction::ReferenceHome;break;
     case Kind::LocalCapture:action=ControllerNativeAction::LocalCapture;break;
     case Kind::LocalResume:action=ControllerNativeAction::LocalResume;break;
     case Kind::LocalStart:case Kind::LocalFrame:
@@ -798,6 +821,7 @@ bool ControllerRuntimeWorker::nativeActionAllowed(const Request &request) {
 }
 bool ControllerRuntimeWorker::cancelDispatch() {
     if (!checkClockContinuity()) return true;
+    if(m_attendedStart && !validateAttendedStart()) {m_mailbox->revoke(false);return true;}
     if(m_dispatchProof && (m_dispatchProof->expiresAt<nowMs()||
        (m_dispatchProof->contextToken&&!m_dispatchProof->contextToken->valid)||
        (m_dispatchProof->action==ControllerNativeAction::FocusHold&&
@@ -826,6 +850,7 @@ void ControllerRuntimeWorker::coreChanged() {
         return;
     updateCommissioning();
     updateLocalFrame();
+    scheduleAttendedStart();
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     if(status.paused && m_accessory.activeLease() && !m_operatorPaused) {
@@ -873,6 +898,7 @@ void ControllerRuntimeWorker::watchdog() {
     if (!checkClockContinuity()) return;
     updateCommissioning();
     updateLocalFrame();
+    updateAttendedStart();
     const auto status = m_core->status();
     const bool output = m_accessory.activeLease() || m_jobActive || m_focusActive || status.firing;
     const bool coordinate = status.coordinateUpdatePending && !output;
@@ -924,6 +950,7 @@ void ControllerRuntimeWorker::publish(bool finishDispatch) {
     if(m_accessory.supervisionMode()!=AccessoryContract::SupervisionMode::SensorVerified) {
         status.overridesReady=false;status.overridesSafetyError=m_accessory.overridesError(m_accessoryClock.elapsed());
     }
+    if(m_attendedStart){status.ready=false;status.busy=true;status.requestPending=true;}
     status.occupied = status.busy || status.firing || status.opening ||
                       status.accessoryLeaseActive || m_jobActive || m_focusActive;
     status.connectionPhase = !status.connected       ? (status.state == "Verbindungsfehler" ? QString("fault") : QString("closed"))
@@ -958,6 +985,7 @@ void ControllerRuntimeWorker::shutdown() {
     if (m_watchdog)
         m_watchdog->stop();
     if (m_core) {
+        discardAttendedStart("Programm beendet.");
         m_core->close();
         retirePrepared();
         publish(true); // Complete any control reservation with the actual closed snapshot.

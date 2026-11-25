@@ -346,13 +346,17 @@ void NativeInputIntentAdapter::invalidateAction(const QString &key,bool revokeSu
     if (key=="focus") emit invalidated();
 }
 void NativeInputIntentAdapter::revokeFocus() { invalidateAction("focus",true); }
-void NativeInputIntentAdapter::revoke() {
+void NativeInputIntentAdapter::revoke() { revokeImpl(true); }
+void NativeInputIntentAdapter::revokeActionIntents() { revokeImpl(false); }
+void NativeInputIntentAdapter::revokeImpl(bool globalContext) {
     ++m_context;
     m_contextStarted=nowMs();
     m_pending.clear();m_rawPress.clear();m_armed.clear();
     for(const auto &token:m_tokens)token->valid=false;
     m_tokens.clear();
-    emit invalidated();
+    const QPointer<NativeInputIntentAdapter> alive(this);
+    if(globalContext)emit contextInvalidated();
+    if(alive)emit invalidated();
 }
 bool NativeInputIntentAdapter::eligible(QObject *control,bool click) {
     if(!control)return false;

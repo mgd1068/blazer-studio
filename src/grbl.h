@@ -119,7 +119,19 @@ class GrblSession : public ControllerSession {
     bool beginLocalCoordinateCapture(QPointF workHead);
     bool startLocalPrepared(const PreparedControllerJob &job);
     bool frameLocalPrepared(const QStringList &lines);
-    bool startPrepared(const PreparedControllerJob &job);
+    bool startPrepared(const PreparedControllerJob &job, std::optional<QPointF> machineHome = {});
+    struct JobReturn {
+        enum class Phase { Engraving, Returning, Parked } phase=Phase::Engraving;
+        QPointF home, wco, from;
+        QRectF allowed;
+        bool queryArmed=false, initialApproach=false;
+    };
+    std::optional<JobReturn> jobReturn;
+    quint64 jobReturnEpoch=0;
+    void clearJobReturn();
+    void armJobReturnReadback(quint64 epoch);
+    bool beginJobReturn();
+    bool jobReturnPositionAllowed() const;
     bool commands(const QStringList &lines, bool buffered = false);
     bool statusFresh() const;
     ControllerDiagnostics::LiveState diagnosticState() const;

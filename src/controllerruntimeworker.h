@@ -43,6 +43,8 @@ class ControllerRuntimeWorker final : public QObject {
     ControllerCommissioning m_commissioning;
     bool m_setupUpdating=false, m_calibrationReadbackPending=false;
     QByteArray m_calibrationBinding;
+    QPointF m_attestedWorkOffset;
+    bool m_attestedWorkOffsetKnown=false;
     QVariantMap m_calibrationCandidate;
     QString m_restoreReason;
     std::shared_ptr<const ConnectionHomePermit> m_connectionHomePermit;
@@ -68,7 +70,29 @@ class ControllerRuntimeWorker final : public QObject {
     bool beginAccessory(AccessoryContract::OperatorAction action,const QByteArray &source = {});
     bool singleClickStartEligible() const;
     QString attendedStartError() const;
+    QString referenceHomeError() const;
+    QString calibratedHomeError(bool allowApproach) const;
+    struct AttendedStartOperation {
+        PreparedControllerJob::Ptr prepared;
+        quint64 connection=0,generation=0,sourceGeneration=0,window=0;
+        qint64 observedAt=0,admittedAt=0,deadline=0,relativeObservedAt=0,relativeAdmittedAt=0;
+        QByteArray binding,profile,settings;
+        QPointF offset,home;
+        QRectF limits;
+        QString phase="homing";
+        bool homeWritten=false,referenceOnly=false;
+    };
+    std::optional<AttendedStartOperation> m_attendedStart;
+    bool m_updatingAttendedStart=false,m_attendedStartUpdateQueued=false;
+    QString m_attendedStartReason,m_attendedStartFailure;
     bool beginAttendedStart(const ControllerRuntimeRequest &request);
+    bool beginReferenceHome(const ControllerRuntimeRequest &request);
+    bool commitCalibratedReference(const ControllerRuntimeRequest &request,bool referenceOnly);
+    QString attendedStartInvalidationReason(bool atHomeWrite) const;
+    bool validateAttendedStart(bool atHomeWrite=false);
+    void updateAttendedStart();
+    void scheduleAttendedStart();
+    void discardAttendedStart(const QString &reason={});
     bool noOutputIdle() const;
     // True only before first Open or for an explicitly observed safe idle Close.
     bool m_noOutputLifecycle=true;

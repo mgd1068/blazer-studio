@@ -65,6 +65,8 @@ void ControllerRuntimeWorker::startCalibratedHome() {
 }
 
 void ControllerRuntimeWorker::clearCalibrationSession() {
+    discardAttendedStart("Verbindung oder Kalibrierung beendet.");
+    m_attestedWorkOffsetKnown=false;
     discardConnectionHomePermit();m_connectionHomeStarted=false;
     m_calibrationReadbackPending=false;
     m_calibrationCandidate.clear();m_calibrationBinding.clear();
@@ -121,9 +123,19 @@ bool ControllerRuntimeWorker::matchCalibrationCandidate() {
 void ControllerRuntimeWorker::finishCalibrationReference() {
     auto &c=m_commissioning;
     if(!m_core->insideReportedMachineBed()){cancelCommissioning("Frischer Maschinenpunkt liegt nicht im gespeicherten Innenraum.");return;}
-    const QPointF origin(m_calibrationCandidate.value("workOriginX").toDouble(),m_calibrationCandidate.value("workOriginY").toDouble());
+    if(m_attendedStart) {
+        if(m_attendedStart->referenceOnly && !(m_attestedWorkOffsetKnown && m_attestedWorkOffset==m_core->offset) && !m_calibrationCandidate.isEmpty() &&
+           QPointF(m_calibrationCandidate.value("workOriginX").toDouble(),m_calibrationCandidate.value("workOriginY").toDouble())!=m_core->offset) {
+            c.stage="restoredOriginReview";c.reason="Referenz bestätigt. Geänderten G54-Arbeitsursprung vor Bearbeitung ausdrücklich prüfen.";return;
+        }
+        m_attestedWorkOffset=m_core->offset;m_attestedWorkOffsetKnown=true;
+        c.stage="complete";c.reason="Startreferenz und unveränderter G54 frisch bestätigt.";return;
+    }
+    const QPointF origin=m_attestedWorkOffsetKnown?m_attestedWorkOffset:
+        QPointF(m_calibrationCandidate.value("workOriginX").toDouble(),m_calibrationCandidate.value("workOriginY").toDouble());
     c.restored=true;
     if(origin==m_core->offset) {
+        m_attestedWorkOffset=m_core->offset;m_attestedWorkOffsetKnown=true;
         c.stage="complete";c.reason="Gespeicherte Kalibrierung und aktueller G54 bestätigt; Maschinenreferenz frisch erneuert.";
     } else {
         c.stage="restoredOriginReview";c.reason="Maschinenraum und Referenz bestätigt. Aktueller G54-Arbeitsursprung hat sich verändert; die angezeigte Zuordnung ausdrücklich bestätigen.";
@@ -132,6 +144,7 @@ void ControllerRuntimeWorker::finishCalibrationReference() {
 void ControllerRuntimeWorker::publishCalibrationRecord() {
     const auto &c=m_commissioning;const auto &live=m_core->setupReadback;
     if(c.stage!="complete")return;
+    m_attestedWorkOffset=m_core->offset;m_attestedWorkOffsetKnown=true;
     if(live.deviceIdentityHash.size()!=32||m_calibrationBinding.size()!=64) {
         m_commissioning.reason="Einrichtung gilt nur für diese Verbindung; eindeutige Controllerkennung oder Gerätebindung fehlt, Speichern nicht möglich.";
         return;
@@ -148,6 +161,7 @@ void ControllerRuntimeWorker::publishCalibrationRecord() {
 }
 
 void ControllerRuntimeWorker::cancelCommissioning(const QString &reason) {
+    discardAttendedStart(reason);
     discardConnectionHomePermit();
     m_calibrationReadbackPending=false; // STOP/cancel cannot restart the connect readback later.
     m_calibrationCandidate.clear();
@@ -362,7 +376,7 @@ void ControllerRuntimeWorker::updateCommissioning() {
         if(m_core->ready() && m_core->positionReferenced && !m_core->verified())return;
         if(!m_core->ready() || !m_core->verified() || !m_core->positionReferenced){cancelCommissioning("Frischer Idle/S0-Referenzreadback fehlt.");return;}
         if(c.stage=="restoringHome") {
-            if(!closePoint(m_core->reportedMachinePosition,c.home)||!closePoint(m_core->offset,m_core->setupReadback.g54)){cancelCommissioning("Frische Referenz stimmt nicht mit gespeichertem Home/G54 überein; erneut kalibrieren.");return;}
+            if(!closePoint(m_core->reportedMachinePosition,c.home)||!closePoint(m_core->offset,m_attendedStart?m_attendedStart->offset:m_core->setupReadback.g54)){cancelCommissioning("Frische Referenz stimmt nicht mit gespeichertem Home/G54 überein; erneut kalibrieren.");return;}
             c.homeObserved=true;m_core->commissionedModalContract=true;
             const auto current=m_core->reportedMachinePosition;
             const bool inside=current.x()>=c.limits.left()&&current.x()<=c.limits.right()&&current.y()>=c.limits.top()&&current.y()<=c.limits.bottom();

@@ -42,6 +42,16 @@ class Plant(Peer):
         elif line == '$H':
             self.actual = list(self.home_actual); self.bias = [0.0,0.0]
             self.state = 'Idle'; self.event('homed',list(self.actual))
+        elif line.startswith('$J='):
+            # The application uses a bounded relative millimetre jog. Model
+            # that exact independent wire contract without changing G54/modal G90.
+            match = re.fullmatch(r'\$J=G91 G21 X([+-]?[0-9.]+) Y([+-]?[0-9.]+) F600', line)
+            if not match or self.spindle != 5:
+                raise ValueError('unsupported or powered jog')
+            target = [self.actual[0] + float(match.group(1)), self.actual[1] + float(match.group(2))]
+            if not all(lo <= value <= hi for value, (lo, hi) in zip(target, self.physical_limits)):
+                self.event('collision', target); self.reply('ALARM:1\r\n'); return
+            self.actual = target; self.state = 'Idle'; self.event('physicalMove', target)
         elif line.startswith('$'): raise ValueError('unsupported plant command')
         else:
             # Parenthesized comments are non-executable standard GCode.
@@ -49,7 +59,16 @@ class Plant(Peer):
             words = re.findall(r'([A-Z])([+-]?(?:\d+(?:\.\d*)?|\.\d+))',line)
             if ''.join(k+v for k,v in words) != line.replace(' ',''): raise ValueError('malformed command')
             codes = [int(float(v)) for k,v in words if k=='G']
-            if any(v not in [0,1,4,10,17,20,21,54,90,91,94] for v in codes): raise ValueError('unexpected modal code')
+            if any(v not in [0,1,4,10,17,20,21,53,54,90,91,94] for v in codes): raise ValueError('unexpected modal code')
+            machine_block = 53 in codes
+            if machine_block:
+                if (any(float(v) not in (0,1,53) for k,v in words if k == 'G') or
+                    codes.count(53) != 1 or sum(c in (0,1) for c in codes) != 1 or
+                    any(c not in (0,1,53) for c in codes) or not self.absolute or
+                    not any(k in ('X','Y') for k,v in words) or
+                    any(k not in ('G','X','Y','F') for k,v in words) or
+                    any(sum(k == axis for k,v in words) > 1 for axis in ('X','Y','F'))):
+                    raise ValueError('unsupported G53 combination')
             for k,v in words:
                 n=float(v)
                 if k=='G' and n==20:self.units=25.4
@@ -71,12 +90,16 @@ class Plant(Peer):
                 for k,v in words:
                     if k not in ('X','Y'):continue
                     i=0 if k=='X' else 1
-                    target[i]=float(v)*self.units+self.offset[i]-self.bias[i] if self.absolute else target[i]+float(v)*self.units
+                    target[i]=(float(v)*self.units-self.bias[i] if machine_block else
+                               float(v)*self.units+self.offset[i]-self.bias[i] if self.absolute else
+                               target[i]+float(v)*self.units)
                 if not all(lo<=value<=hi for value,(lo,hi) in zip(target,self.physical_limits)):
                     self.event('collision',target);self.reply('ALARM:1\r\n');return
                 moved=target!=self.actual
                 self.actual=target
                 if moved:self.event('physicalMove',target)
+                if machine_block:
+                    self.event('machineCoordinateMove',{'actual':target,'reported':[a+b for a,b in zip(target,self.bias)],'spindle':self.spindle,'power':self.power})
             if self.state!='Alarm':self.state='Idle'
         if self.ack_enabled:
             if line=='$G' and self.zero_seen and self.hold_zero_modal_ack:

@@ -98,7 +98,7 @@ public:
     QStringList oldWitnessErrors()const{return {"OLD_SEPARATE_WITNESS_MISSING"};}
     QVariantMap uiCommissioning()const{return {{"stage","complete"},{"workMinX",0.},{"workMinY",0.},{"workMaxX",200.},{"workMaxY",150.},{"activeInputs",0},{"controllerState","Idle"}};}
     QVariantMap uiLocalFrame()const{return {{"phase","inactive"}};}
-    QVariantMap uiExtraction()const{return {{"mode","operatorSupervisedDeviceCycle"},{"pendingAction",""},{"singleClickStart",true},{"attendedStartReady",attendedError.isEmpty()},{"attendedStartError",attendedError}};}
+    QVariantMap uiExtraction()const{return {{"mode","operatorSupervisedDeviceCycle"},{"pendingAction",""},{"singleClickStart",true},{"attendedStartReady",attendedError.isEmpty()},{"attendedStartError",attendedError},{"referenceReady",attendedError.isEmpty()},{"referenceError",attendedError}};}
     void setAttendedError(QString error){attendedError=std::move(error);emit uiChanged();}
 signals:
     void uiChanged();
@@ -637,6 +637,13 @@ class FeatureWorkflowTest : public QObject {
         machine.setAttendedError("ATTENDED_INTERLOCK_DENIED");QTRY_COMPARE(window->property("startBlockReason").toString(),QString("ATTENDED_INTERLOCK_DENIED"));
         QVERIFY(!item("startJobButton")->isEnabled());QVERIFY(!machine.busy());
         machine.setAttendedError({});QTRY_VERIFY(window->property("startBlockReason").toString().isEmpty());
+        window->setProperty("page",2);
+        auto *reference=item("referenceHomeButton");QVERIFY(reference);
+        QTRY_VERIFY(reference->isVisible()&&reference->isEnabled());
+        QCOMPARE(reference->property("nativeActionRole").toString(),QString("referenceHome"));
+        const auto referenceCenter=reference->mapToScene(reference->boundingRect().center());
+        QVERIFY(QRectF(0,0,window->width(),window->height()).contains(referenceCenter));
+        QVERIFY(window->property("basic").toBool());
         project.setProperty("x",250.);QTRY_VERIFY(!project.job().valid());
         QTRY_VERIFY(!window->property("startBlockReason").toString().isEmpty());QVERIFY(!item("startJobButton")->isEnabled());
         QVERIFY(!machine.busy());QVERIFY(!machine.firing());

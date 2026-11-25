@@ -18,6 +18,7 @@ enum class ControllerRuntimeRequestKind {
     FocusOff,
     Start,
     StartAttended,
+    ReferenceHome,
     LocalData, LocalCapture, LocalStart, LocalFrame, LocalResume,
     SetupData,
     OperatorData,
@@ -52,6 +53,8 @@ struct ControllerRuntimeMailbox {
     QObject *context = nullptr;
     std::deque<ControllerRuntimeRequest> normal;
     std::atomic<quint64> generation{1};
+    std::atomic<quint64> startSequenceGeneration{1};
+    std::atomic<quint64> sequenceContextEpoch{1};
     std::atomic_bool stop{false}, close{false}, shutdown{false};
     std::atomic<quint64> focusGeneration{1}, focusWindowEpoch{1};
     std::atomic_bool focusOff{false};

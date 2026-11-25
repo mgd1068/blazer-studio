@@ -147,3 +147,13 @@ Es gibt keine allgemeine gespeicherte Anwesenheitsfreigabe und keine automatisch
 Fehlerquittierung. Geplantes verifiziertes S0-Homing erzeugt keinen Zubehörfault;
 echter Verbindungs-/Ausgabeverlust bleibt gesperrt. Explizit konfigurierte
 Sensor-/externe Modi und Fokus/Fortsetzen behalten ihre eigenen Verträge.
+
+## Gebundene Startreferenz und Rückfahrt (beta.10.8)
+
+Der native StartAttended wird innerhalb der ursprünglichen 250-ms-Frist einmalig in einen privaten, höchstens 120 Sekunden gültigen Vorgang überführt. Dieser hält Prepared-Quelle, Profil, Kalibrierung, tatsächlichen WCO, Gerätebindung, Connection-/STOP-/Quellen-/Fensterepochen fest. Erst eine frische bestätigte Referenz am gespeicherten Home und gegebenenfalls der beobachtete Innenraum-Anlauf erlauben genau diesen Auftrag. Keine öffentliche Callback-Funktion kann eine Vorbereitung in neue Startabsicht umdeuten; ein Quellwechsel verwirft den noch nicht gestarteten Auftrag. Bereits laufende eingefrorene Aufträge werden durch das Bearbeiten des nächsten Designs weiterhin nicht ersetzt.
+
+Die Fensterkontext-Epoche ist von der Fokus-Haltefreigabe getrennt. Normales Loslassen einer Maustaste oder das Deaktivieren eines Fokusknopfs während eigener Referenzierung verwirft keine schon gebundene Sequenz. Echter Fenster-/Gerätekontextverlust sowie STOPP/Trennung bleiben widerrufend.
+
+ReferenceHome verwendet denselben kalibrierten Referenzvertrag ohne Prepared-Auftrag oder Zubehörlease. Der eigene native Knopf beendet die Fahrt am tatsächlichen Home, ohne verdeckte Gravur oder zusätzliche Innenraumfahrt. Aktuell ausdrücklich bestätigte G54-Offsets bleiben bei erneuter Referenz gültig; ein abweichender gespeicherter Ursprung kann dadurch nicht nachträglich bestätigt werden.
+
+Der Core hält erfolgreich gestartete Aufträge einschließlich Rückfahrt aktiv. Nach dem letzten Job-ACK werden vor einer neu armierten Statusabfrage bereits gepufferte Rückmeldungen abgearbeitet; erst ein frischer Idle/S0 erlaubt die Rückfahrt. M5 S0 und ein nicht gepuffertes G53 G1 Xhome Yhome F600 verwenden absolute Maschinenkoordinaten. Erst eine weitere frische Idle/S0-/MPos-Bestätigung beendet den Auftrag. Ein eng begrenzter S0-Rückfahrtraum kann den belegten Home außerhalb des normalen Innenraums umfassen; er erweitert niemals die normalen Gravurzielgrenzen. STOPP/Fault/Close verwerfen Rückfahrt und ausstehende Abfragen.

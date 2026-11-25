@@ -89,6 +89,7 @@ class Machine : public Simulator {
     QString prepareReason() const;
     QString nativeInputSafetyError() const;
     Q_INVOKABLE void startAttended();
+    Q_INVOKABLE void referenceHome();
     bool holdConfirmed() const {
         return !live ? Simulator::paused() : session && session->status().holdConfirmed;
     }

@@ -324,6 +324,38 @@ class AccessoryContract {
         const auto witness = submitOperatorPresence(context, true, observedAtMs, nowMs);
         return witness && beginOperator(context, *witness, nowMs, airAssistRequired);
     }
+    // Worker-only completion of an already admitted, immutable native Start
+    // operation. The worker authenticates that commit and continuously checks
+    // its cancellation/epochs through homing; timestamps alone confer no input
+    // authority. No lease or presence is acquired before homing by this helper.
+    // Original click age is preserved, not restamped as a fresh 30s witness.
+    bool beginOperatorWithCommittedStartIntent(const OperatorContext &context,
+            qint64 observedAtMs, qint64 admittedAtMs, qint64 nowMs,
+            bool airAssistRequired = false) {
+        if (m_supervisionMode != SupervisionMode::OperatorSupervisedDeviceCycle ||
+            context.action != OperatorAction::StartJob || m_lease || m_fault ||
+            m_releaseRequired || !validContext(context) ||
+            context.sessionBinding != m_operatorSession ||
+            (m_lastNativeStartContext && sameContext(context, *m_lastNativeStartContext)))
+            return false;
+        // Denial consumes the concrete operation just like immediate Start.
+        m_lastNativeStartContext = context;
+        if (observedAtMs < 0 || admittedAtMs < observedAtMs ||
+            admittedAtMs - observedAtMs > 250 || nowMs < admittedAtMs ||
+            nowMs - observedAtMs > 120000 || observedAtMs < m_lastOperatorWitnessAt ||
+            (airAssistRequired && !roleError(Role::AirAssist, nowMs).isEmpty()))
+            return false;
+        m_operatorPending.reset();
+        m_lastOperatorWitnessAt = observedAtMs;
+        m_operatorLease = context;
+        m_operatorLeaseIssuer = this;
+        m_operatorAttending = true;
+        m_operatorPaused = false;
+        m_lease = true;
+        // DeviceCycle makes no statement about extraction or physical airflow.
+        m_releaseRequired = false;
+        return true;
+    }
     std::optional<OperatorWitness> submitPresence(const OperatorContext &context,
             bool operatorPresent, qint64 witnessedAtMs, qint64 nowMs) {
         if (m_fault || !validContext(context) || context.sessionBinding != m_operatorSession ||

@@ -53,6 +53,25 @@ class NativeInputIntentTestAccess {
 class NativeInputIntentTest : public QObject {
     Q_OBJECT
   private slots:
+    void focusReleaseDoesNotRevokeCommittedWindowContext() {
+        NativeInputIntentAdapter adapter(nullptr,false);
+        QSignalSpy holds(&adapter,&NativeInputIntentAdapter::invalidated);
+        QSignalSpy contexts(&adapter,&NativeInputIntentAdapter::contextInvalidated);
+        QQuickItem focus;
+        adapter.registerControl(&focus,"focus");
+        contexts.clear();holds.clear();
+        focus.setEnabled(false);
+        QVERIFY(holds.count()>0);QCOMPARE(contexts.count(),0);
+        adapter.revokeFocus();QCOMPARE(contexts.count(),0);
+        adapter.revokeActionIntents();QCOMPARE(contexts.count(),0);
+        adapter.revoke();QCOMPARE(contexts.count(),1);
+    }
+    void globalContextRevocationAllowsSynchronousDeletion() {
+        auto *adapter=new NativeInputIntentAdapter(nullptr,false);
+        QPointer<NativeInputIntentAdapter> alive(adapter);
+        connect(adapter,&NativeInputIntentAdapter::contextInvalidated,adapter,[adapter]{delete adapter;});
+        adapter->revoke();QVERIFY(!alive);
+    }
     void disabledDoesNotRegisterPlatformWork() {
         NativeInputIntentAdapter a(nullptr,false);
         QVERIFY(NativeInputIntentTestAccess::inactive(a));

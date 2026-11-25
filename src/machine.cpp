@@ -14,6 +14,7 @@
 namespace {
 std::optional<ControllerNativeAction> nativeAction(const QString &name) {
     if(name=="startAttended")return ControllerNativeAction::StartAttended;
+    if(name=="referenceHome")return ControllerNativeAction::ReferenceHome;
     if(name=="connectHome")return ControllerNativeAction::ConnectHome;
     if(name=="localCapture")return ControllerNativeAction::LocalCapture;
     if(name=="localStart")return ControllerNativeAction::LocalStart;
@@ -48,6 +49,10 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
         if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()))
             runtime->revokeFocusContext();
     });
+    connect(nativeInput,&NativeInputIntentAdapter::contextInvalidated,this,[this] {
+        if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get()))
+            runtime->invalidatePendingSequenceContext();
+    });
     simulatorFrameNonce = QUuid::createUuid().toRfc4122();
     document->addDeviceProfileChangeGuard([self = QPointer<Machine>(this)] {
         return !self || (!self->occupied() && !self->requestPending() && !self->busy() && !self->firing() &&
@@ -76,6 +81,23 @@ Machine::Machine(Document *d, QObject *p, HardwareAccess access)
             if (auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get())) runtime->prepare(document->job());
     });
     connect(d,&Document::selectionChanged,this,[this]{++nativeDocumentGeneration;});
+    // Stable document output changes cancel a committed pre-job Home sequence.
+    // Head-dependent preview replans caused by Home do not change this stamp.
+    const auto outputStamp=[d] {
+        QByteArray bytes;QDataStream out(&bytes,QIODevice::WriteOnly);
+        out<<d->historyRevision()<<d->deviceProfile().outputFingerprint()<<d->manualRegistrationOutputKey();
+        if(d->cutSelectedGraphics())out<<d->selectedRows();
+        return bytes;
+    };
+    const auto lastOutput=std::make_shared<QByteArray>(outputStamp());
+    const auto cancelChangedOutput=[this,outputStamp,lastOutput] {
+        const auto current=outputStamp();if(current==*lastOutput)return;
+        *lastOutput=current;
+        if(auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());live&&runtime)
+            runtime->cancelPendingStartSequence();
+    };
+    connect(d,&Document::changed,this,cancelChangedOutput);
+    connect(d,&Document::selectionChanged,this,cancelChangedOutput);
     refreshPreviewPosition();
 }
 void Machine::setPreviewDeviceBinding(const QByteArray &binding) {
@@ -142,12 +164,19 @@ void Machine::syncDeviceProfile() {
         connect(session.get(), &ControllerSession::changed, this, [this] {
             const QPointer<Machine> alive(this);
             const auto status=session->status();
+            const bool expectedReference=status.connectionEpoch==nativeConnectionEpoch &&
+                status.connected && status.referencing && !status.resetting && !status.firing &&
+                !status.accessoryLeaseActive && !status.accessoryJobActive && !status.accessoryFocusActive &&
+                status.extractionSupervision.value("startSequencePending").toBool() &&
+                status.extractionSupervision.value("startSequencePhase").toString()=="homing" &&
+                status.commissioning.value("stage").toString()=="restoringHome";
             const bool revokeInput=status.connectionEpoch!=nativeConnectionEpoch ||
                                    (nativeSessionVerified && !status.verified);
             nativeConnectionEpoch=status.connectionEpoch;
             nativeSessionVerified=status.verified;
             if (revokeInput) {
-                nativeInput->revoke();
+                if(expectedReference)nativeInput->revokeActionIntents();
+                else nativeInput->revoke();
                 if (!alive) return;
             }
             if (pendingSimulator && !session->status().connected && !session->status().occupied) {
@@ -288,7 +317,7 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
         stream<<action<<QJsonDocument::fromVariant(arguments).toJson(QJsonDocument::Compact)<<setup.value("fingerprint").toString()<<stage<<status.connectionEpoch<<status.coordinateEpoch;
         return QCryptographicHash::hash(data,QCryptographicHash::Sha256);
     }
-    if(status.commissioning.value("active").toBool() && status.commissioning.value("stage").toString()!="complete")return {};
+    if(action!="startAttended" && action!="referenceHome" && status.commissioning.value("active").toBool() && status.commissioning.value("stage").toString()!="complete")return {};
     if(action=="jog") {
         if(arguments.size()!=2||!finiteInputNumber(arguments.value("dx"))||!finiteInputNumber(arguments.value("dy")))return {};
     } else if(action=="frame") {
@@ -300,8 +329,13 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
     } else if(!arguments.isEmpty())return {};
     if(action=="home") {if(status.busy||!status.homingSafetyError.isEmpty())return {};}
     else if(action=="resume") {if(!status.paused||!status.holdConfirmed||status.firing||status.accessoryFocusActive||!processingSafetyErrors().isEmpty())return {};}
+    else if(action=="referenceHome") {
+        if(!status.extractionSupervision.value("referenceReady").toBool() || !status.extractionSupervision.value("referenceError").toString().isEmpty())return {};
+    }
     else if(action!="override") {
-        if(!status.ready||status.busy||status.firing||!status.verified||!status.positionReferenced||!status.motionSafetyError.isEmpty())return {};
+        if(status.busy||status.firing)return {};
+        if(action!="startAttended" && (!status.ready||!status.verified))return {};
+        if(action!="startAttended" && action!="referenceHome" && (!status.positionReferenced||!status.motionSafetyError.isEmpty()))return {};
         if((action=="start"||action=="focus")&&!processingSafetyErrors().isEmpty())return {};
         if(action=="startAttended" && (!status.extractionSupervision.value("attendedStartReady").toBool() || !status.extractionSupervision.value("attendedStartError").toString().isEmpty()))return {};
     }
@@ -524,6 +558,10 @@ void Machine::frame(const QVariantMap &b) {
         dispatchNative("frame",{{"scope",current.value("scope")}},0,0,current);
     else
         Simulator::frame(current);
+}
+void Machine::referenceHome() {
+    if(!live){Simulator::home();return;}
+    dispatchNative("referenceHome",{});
 }
 void Machine::start() { startWithIntent(false); }
 void Machine::startAttended() { startWithIntent(true); }

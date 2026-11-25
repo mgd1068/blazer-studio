@@ -90,6 +90,8 @@ class ControllerRuntimeSession final : public ControllerSession {
         quint64 interaction=0,qint64 observedAt=0,qint64 expiresAt=0,const QByteArray &expectedContextDigest={});
     quint64 m_lastConnectionIntent=0;
     void cancelPendingOpen();
+    void cancelPendingStartSequence(); // Source edits only; running frozen jobs are unaffected.
+    void invalidatePendingSequenceContext(); // Global window/input context loss only, never a focus release.
     const DeviceProfile m_profile;
     std::shared_ptr<ControllerRuntimeHost> m_host;
     ControllerRuntimeWorker *m_worker = nullptr;

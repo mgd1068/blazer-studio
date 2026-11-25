@@ -9,6 +9,12 @@ concept PublicNativeStartAdmission =
         value.beginOperatorWithStartIntent(context, 100, 100);
     };
 static_assert(!PublicNativeStartAdmission<AccessoryContract>);
+template <class T>
+concept PublicCommittedStartAdmission =
+    requires(T &value, const typename T::OperatorContext &context) {
+        value.beginOperatorWithCommittedStartIntent(context, 100, 200, 90100);
+    };
+static_assert(!PublicCommittedStartAdmission<AccessoryContract>);
 
 class OperatorStartIntentContractTest : public QObject {
     Q_OBJECT
@@ -155,6 +161,100 @@ class OperatorStartIntentContractTest : public QObject {
         QVERIFY(!a.beginOperatorWithStartIntent(context('c'), 101, 101));
         QVERIFY(a.activeLease());
         QVERIFY(a.beginOperator(resume, *witness, 101));
+    }
+    void committedStartPreservesOriginalAgeAcrossHomingWithoutFakeWitness() {
+        A a;
+        QVERIFY(selected(a));
+        QVERIFY(!a.activeLease()); // Selection/setup alone creates no presence.
+        QVERIFY(a.beginOperatorWithCommittedStartIntent(context(), 100, 350, 90100));
+        QVERIFY(a.activeLease());
+        QVERIFY(!a.m_operatorPending);
+        QCOMPARE(a.m_lastOperatorWitnessAt, qint64(100));
+        QVERIFY(a.preflightError(90101).isEmpty());
+        QVERIFY(!a.releaseRequired());
+        QCOMPARE(a.state(A::Role::EnclosureExtraction).physical, A::PhysicalState::Unknown);
+        QCOMPARE(a.state(A::Role::EnclosureExtraction).command, A::CommandState::Unknown);
+        QVERIFY(!a.verified(A::Role::EnclosureExtraction));
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context('c'), 100, 350, 90100));
+        a.transition(A::Event::Complete);
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context(), 100, 350, 90101));
+        QVERIFY(!a.beginOperatorWithStartIntent(context(), 90101, 90101));
+        QVERIFY(a.beginOperatorWithCommittedStartIntent(context('c'), 90101, 90102, 90103));
+        A ordinary;
+        QVERIFY(selected(ordinary));
+        QVERIFY(!ordinary.beginOperatorWithStartIntent(context(), 100, 90100));
+    }
+    void committedStartTimeBounds_data() {
+        QTest::addColumn<qint64>("observed");
+        QTest::addColumn<qint64>("admitted");
+        QTest::addColumn<qint64>("now");
+        QTest::addColumn<bool>("valid");
+        QTest::newRow("immediate") << qint64(0) << qint64(0) << qint64(0) << true;
+        QTest::newRow("last-boundary") << qint64(100) << qint64(350) << qint64(120100) << true;
+        QTest::newRow("negative-observation") << qint64(-1) << qint64(0) << qint64(1) << false;
+        QTest::newRow("admit-before-click") << qint64(100) << qint64(99) << qint64(200) << false;
+        QTest::newRow("late-native-commit") << qint64(100) << qint64(351) << qint64(2000) << false;
+        QTest::newRow("future-commit") << qint64(100) << qint64(200) << qint64(199) << false;
+        QTest::newRow("operation-expired") << qint64(100) << qint64(350) << qint64(120101) << false;
+        const auto max = std::numeric_limits<qint64>::max();
+        QTest::newRow("large-valid-clock")
+            << qint64(max - 120000) << qint64(max - 119750) << max << true;
+        QTest::newRow("large-expired-clock") << qint64(0) << qint64(250) << max << false;
+    }
+    void committedStartTimeBounds() {
+        QFETCH(qint64, observed);
+        QFETCH(qint64, admitted);
+        QFETCH(qint64, now);
+        QFETCH(bool, valid);
+        A a;
+        QVERIFY(selected(a));
+        QCOMPARE(a.beginOperatorWithCommittedStartIntent(context(), observed, admitted, now),
+                 valid);
+        QCOMPARE(a.activeLease(), valid);
+        if (valid) {
+            QCOMPARE(a.m_lastOperatorWitnessAt, observed);
+            a.transition(A::Event::Complete);
+        }
+        // Neither time restamping nor switching helper can replay the operation.
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context(), 100, 100, 100));
+        QVERIFY(!a.beginOperatorWithStartIntent(context(), 100, 100));
+    }
+    void committedStartRetainsFaultModeSessionAndIndependentAccessoryGuards() {
+        for (const auto event : {A::Event::Fault, A::Event::Disconnect}) {
+            A a;
+            QVERIFY(selected(a));
+            a.transition(event);
+            QVERIFY(!a.beginOperatorWithCommittedStartIntent(context(), 100, 200, 90100));
+            QVERIFY(a.faulted());
+            QVERIFY(!a.activeLease());
+        }
+        A sensor;
+        QVERIFY(!sensor.beginOperatorWithCommittedStartIntent(context(), 100, 200, 90100));
+        A external;
+        QVERIFY(external.selectOperatorAttendedExternal(QByteArray(64, 'a')));
+        QVERIFY(!external.beginOperatorWithCommittedStartIntent(context(), 100, 200, 90100));
+        A a;
+        QVERIFY(selected(a));
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(
+            context('b', A::OperatorAction::StartJob, 'c'), 100, 200, 90100));
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context('b', A::OperatorAction::Focus),
+                                                         100, 200, 90100));
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context('b', A::OperatorAction::Resume),
+                                                         100, 200, 90100));
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context(), 100, 200, 90100, true));
+        QVERIFY(!a.activeLease());
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context(), 100, 200, 90100, false));
+        QVERIFY(a.beginOperatorWithCommittedStartIntent(context('c'), 100, 200, 90100));
+        a.transition(A::Event::Pause);
+        QVERIFY(!a.beginOperatorWithCommittedStartIntent(context('d'), 100, 200, 90101));
+        QVERIFY(a.activeLease()); // Not an implicit Resume or lease replacement.
+        A release;
+        QVERIFY(release.configure(A::Role::EnclosureExtraction,
+                                  {"synthetic-output", "synthetic evidence", true}));
+        QVERIFY(release.request(A::Role::EnclosureExtraction, true));
+        QVERIFY(release.releaseRequired());
+        QVERIFY(!release.beginOperatorWithCommittedStartIntent(context(), 100, 200, 90100));
+        QVERIFY(release.releaseRequired());
     }
     void airAssistRemainsIndependentAndFailedIntentDoesNotBecomeReusable() {
         A a;

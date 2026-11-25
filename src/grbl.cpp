@@ -357,7 +357,7 @@ bool GrblSession::insideMachineBed(const QPointF &workPoint) const {
            machinePoint.y() <= commissionedEnvelope->bottom() + epsilon;
 }
 bool GrblSession::insideReportedMachineBed() const {
-    return knownReportedMachinePosition && insideRawMachineBed(reportedMachinePosition);
+    return knownReportedMachinePosition && (insideRawMachineBed(reportedMachinePosition) || jobReturnPositionAllowed());
 }
 bool GrblSession::insideRawMachineBed(const QPointF &p) const {
     if (!commissionedEnvelope || !commissionedEnvelope->isValid())
@@ -570,6 +570,7 @@ void GrblSession::handshake() {
     pump();
 }
 void GrblSession::close() {
+    clearJobReturn();
     operatorLocalPermit.reset();localCaptureResult.reset();localExecutionActive=false;localExecutionKind=LocalExecutionKind::None;
     setupReadback = {};
     clearAckDeadline();
@@ -610,6 +611,7 @@ void GrblSession::close() {
            "bestätigt.");
 }
 void GrblSession::fail(const QString &message, ControllerDiagnostics::FaultCause cause) {
+    clearJobReturn();
     operatorLocalPermit.reset();localCaptureResult.reset();localExecutionActive=false;localExecutionKind=LocalExecutionKind::None;
     clearAckDeadline();
     clearWorkZero();
@@ -994,6 +996,8 @@ void GrblSession::line(const QByteArray &s) {
         if(operatorLocalPermit && !localMotionSafetyError().isEmpty() && !workZero && !handshaking && !awaitingReset) {
             fail("Lokaler Startpunkt/Fahrraum verloren: "+localMotionSafetyError(),ControllerDiagnostics::FaultCause::CoordinateMismatch);return;
         }
+        if(jobReturn && jobReturn->initialApproach && knownReportedMachinePosition && insideRawMachineBed(reportedMachinePosition))
+            jobReturn->initialApproach=false;
         if (rejectUnsafeReportedMachinePosition())
             return;
         if(controllerState=="Door" && setupReadback.pending && setupReadback.operatorLocal) {
@@ -1034,8 +1038,24 @@ void GrblSession::line(const QByteArray &s) {
             return;
         }
         if (waitingIdle && !workZero && controllerState == "Idle" && knownPosition && knownOffset &&
-            knownOutput && reportedOutput == 0 && !activeInputs) {
+            knownOutput && reportedOutput == 0 && !activeInputs &&
+            (!jobReturn || jobReturn->phase==JobReturn::Phase::Parked || jobReturn->queryArmed)) {
             waitingIdle = false;
+            if(jobReturn && jobReturn->phase==JobReturn::Phase::Engraving) {
+                if(!beginJobReturn())fail("Laserfreie Rückfahrt zum Referenzpunkt nicht angenommen.");
+                return;
+            }
+            if(jobReturn && jobReturn->phase==JobReturn::Phase::Returning) {
+                const auto h=jobReturn->home;
+                if(!knownReportedMachinePosition || offset!=jobReturn->wco ||
+                   std::abs(reportedMachinePosition.x()-h.x())>0.001 ||
+                   std::abs(reportedMachinePosition.y()-h.y())>0.001) {
+                    fail("Rückfahrt: Referenzpunkt vom Controller nicht bestätigt.");return;
+                }
+                jobReturn->phase=JobReturn::Phase::Parked;
+                jobReturn->queryArmed=false;
+                append("Referenzpunkt erreicht; Werkstück kann entnommen werden.");
+            }
             diagnostic.beginStream(false, diagnosticState());
             timeout.stop();
             progress = 1;
@@ -1157,7 +1177,10 @@ void GrblSession::line(const QByteArray &s) {
                     if (homingPending)
                         knownPosition = knownOffset = false;
                     waitingIdle = true;
-                    diagnostic.statusQuery(serial.write("?") == 1);
+                    if(jobReturn && jobReturn->phase!=JobReturn::Phase::Parked) {
+                        jobReturn->queryArmed=false;
+                        QMetaObject::invokeMethod(this,[this,epoch=jobReturnEpoch]{armJobReturnReadback(epoch);},Qt::QueuedConnection);
+                    } else diagnostic.statusQuery(serial.write("?") == 1);
                     if (!paused)
                         timeout.start(30000);
                     else
@@ -1291,7 +1314,42 @@ bool GrblSession::frameLocalPrepared(const QStringList &lines) {
     if(!ready()||!verified()||!localMotionSafetyError().isEmpty()||lines.isEmpty())return false;
     localExecutionKind=LocalExecutionKind::FrozenS0Frame;localExecutionActive=true;return commands(lines,true);
 }
-bool GrblSession::startPrepared(const PreparedControllerJob &job) {
+void GrblSession::clearJobReturn() { jobReturn.reset();++jobReturnEpoch; }
+bool GrblSession::jobReturnPositionAllowed() const {
+    if(!jobReturn || !knownOutput || reportedOutput!=0 || !knownOffset || offset!=jobReturn->wco ||
+       !knownReportedMachinePosition)return false;
+    const auto p=reportedMachinePosition;
+    if(jobReturn->phase==JobReturn::Phase::Parked)
+        return std::abs(p.x()-jobReturn->home.x())<=0.001 && std::abs(p.y()-jobReturn->home.y())<=0.001;
+    if(jobReturn->phase!=JobReturn::Phase::Returning &&
+       !(jobReturn->phase==JobReturn::Phase::Engraving && jobReturn->initialApproach))return false;
+    const auto &r=jobReturn->allowed;
+    return std::isfinite(p.x()) && std::isfinite(p.y()) && p.x()>=r.left() && p.x()<=r.right() && p.y()>=r.top() && p.y()<=r.bottom();
+}
+void GrblSession::armJobReturnReadback(quint64 epoch) {
+    if(epoch!=jobReturnEpoch || !jobReturn || jobReturn->phase==JobReturn::Phase::Parked || !waitingIdle)return;
+    // Drain responses already queued before arming this query, never alarms.
+    if(serial.bytesAvailable())receive();
+    if(epoch!=jobReturnEpoch || !jobReturn || !waitingIdle)return;
+    if(!input.isEmpty()){fail("Rückfahrt: unvollständige alte Controllerantwort.");return;}
+    jobReturn->queryArmed=true;
+    const bool accepted=serial.write("?")==1;
+    diagnostic.statusQuery(accepted);
+    if(!accepted)fail("Rückfahrt: aktuelle Positionsabfrage nicht gesendet.");
+}
+bool GrblSession::beginJobReturn() {
+    if(!jobReturn || !ready() || !verified() || !positionReferenced || !knownReportedMachinePosition ||
+       offset!=jobReturn->wco || !knownOutput || reportedOutput!=0 || activeInputs)return false;
+    const auto home=jobReturn->home;
+    jobReturn->phase=JobReturn::Phase::Returning;
+    jobReturn->queryArmed=false;jobReturn->from=reportedMachinePosition;
+    // Absolute MACHINE coordinates; G54/workpiece offsets must not move parking.
+    const bool accepted=commands({"M5 S0","G21","G90",QString("G53 G1 X%1 Y%2 F600")
+        .arg(GrblWireNumbers::format(home.x()),GrblWireNumbers::format(home.y())),"G0"},false);
+    if(accepted){state="Rückfahrt zum Referenzpunkt";append("Gravur beendet; laserfreie Rückfahrt zum Referenzpunkt.");}
+    return accepted;
+}
+bool GrblSession::startPrepared(const PreparedControllerJob &job, std::optional<QPointF> machineHome) {
     diagnostic.request(ControllerDiagnostics::Action::Start);
     if (!job.valid() || !ready() || !verified() || !positionReferenced ||
         !motionSafetyError().isEmpty() || !insideReportedMachineBed() ||
@@ -1309,7 +1367,24 @@ bool GrblSession::startPrepared(const PreparedControllerJob &job) {
             return false;
         }
     }
-    return commands(job.lines(), true);
+    const bool fromParkedHome=jobReturn && jobReturn->phase==JobReturn::Phase::Parked &&
+        jobReturnPositionAllowed() && !insideRawMachineBed(reportedMachinePosition) &&
+        machineHome && jobReturn->home==*machineHome;
+    clearJobReturn();
+    if (machineHome) {
+        const auto h=*machineHome;
+        if (!setupReadback.valid || !commissionedEnvelope || !std::isfinite(h.x()) || !std::isfinite(h.y()) ||
+            GrblWireNumbers::coordinate(h.x())!=h.x() || GrblWireNumbers::coordinate(h.y())!=h.y())return false;
+        const auto &bed=*commissionedEnvelope;
+        const QRectF allowed(QPointF(std::min(bed.left(),h.x()),std::min(bed.top(),h.y())),
+                             QPointF(std::max(bed.right(),h.x()),std::max(bed.bottom(),h.y())));
+        if (!allowed.isValid() || allowed.width()>setupReadback.settings.value(130) ||
+            allowed.height()>setupReadback.settings.value(131))return false;
+        jobReturn=JobReturn{JobReturn::Phase::Engraving,h,offset,{},allowed,false,fromParkedHome};
+    }
+    const bool accepted=commands(job.lines(), true);
+    if(!accepted)clearJobReturn();
+    return accepted;
 }
 void GrblSession::start(const JobPlan &job) {
     diagnostic.request(ControllerDiagnostics::Action::Start);
@@ -1408,6 +1483,7 @@ void GrblSession::pause() {
     emit changed();
 }
 void GrblSession::stop() {
+    clearJobReturn();
     operatorLocalPermit.reset();localCaptureResult.reset();localExecutionActive=false;localExecutionKind=LocalExecutionKind::None;
     setupReadback = {};
     clearAckDeadline();
@@ -1467,6 +1543,7 @@ void GrblSession::jog(double dx, double dy) {
     commands({"M5", "$J=G91 G21 X" + n(dx) + " Y" + n(dy) + " F600"});
 }
 void GrblSession::home() {
+    clearJobReturn();
     diagnostic.request(ControllerDiagnostics::Action::Home);
     if (const auto error = homingSafetyError(); !error.isEmpty()) {
         diagnostic.deny(ControllerDiagnostics::Action::Home,

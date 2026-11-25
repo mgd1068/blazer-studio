@@ -4,6 +4,8 @@
 #include <QDataStream>
 #include <chrono>
 #include <cmath>
+#include <QScopedValueRollback>
+#include "grblwirenumbers.h"
 namespace {
 QByteArray contextHash(const QByteArray &source,quint64 epoch,quint64 attempt,const QByteArray &session) {
     QByteArray bytes;QDataStream stream(&bytes,QIODevice::WriteOnly);stream<<source<<epoch<<attempt<<session;
@@ -28,8 +30,13 @@ QVariantMap ControllerRuntimeWorker::extractionSupervisionSnapshot() const {
     const QVariantList fans={
         QVariantMap{{"role","enclosureExhaust"},{"state","unknown"},{"feedback","notReadBack"},{"independentControl",false}},
         QVariantMap{{"role","laserModuleCooling"},{"state","unknown"},{"feedback","notReadBack"},{"independentControl",false}}};
-    const auto startError=attendedStartError();
-    return {{"singleClickStart",singleClickStartEligible()},{"attendedStartError",startError},{"attendedStartReady",startError.isEmpty()},
+    const auto startError=attendedStartError(),referenceError=referenceHomeError();
+    return {{"referenceReady",referenceError.isEmpty()},{"referenceError",referenceError},
+        {"referencePending",m_attendedStart && m_attendedStart->referenceOnly},
+        {"startSequencePending",m_attendedStart.has_value()},
+        {"startSequencePhase",m_attendedStart?m_attendedStart->phase:QString("idle")},
+        {"startSequenceReason",m_attendedStartReason},
+        {"singleClickStart",singleClickStartEligible()},{"attendedStartError",startError},{"attendedStartReady",startError.isEmpty()},
         {"mode",name},{"notice",m_accessory.supervisionNotice()},{"reason",m_operatorReason},
         {"pendingAction",m_operatorWitness?m_operatorAction:QString()},
         {"remainingMs",m_operatorWitness?std::max<qint64>(0,m_operatorWitness->expiresAtMs()-now):0},
@@ -139,47 +146,179 @@ bool ControllerRuntimeWorker::noOutputIdle() const {
         !m_accessory.faulted() && !m_accessory.releaseRequired();
 }
 QString ControllerRuntimeWorker::attendedStartError() const {
+    if(m_attendedStart)return "Referenzfahrt und gebundener Auftrag sind bereits eingeplant.";
     if(!singleClickStartEligible())return "Explizit gewählter Zubehörmodus benötigt seinen eigenen Startablauf.";
-    if(m_accessory.faulted() || m_accessory.releaseRequired())return "Tatsächlichen Gerätezustand klären und sichere Freigabe ausdrücklich bestätigen.";
-    if(!m_core || m_commissioning.stage!="complete" || !m_core->positionReferenced)
-        return "Gerät zuerst vollständig einrichten und frisch referenzieren.";
-    if(!m_core->verified() || !noOutputIdle())return "Frischer bestätigter Idle/S0 ohne aktive Ausgabe erforderlich.";
-    if(const auto error=m_core->motionSafetyError();!error.isEmpty())return error;
-    if(!m_core->insideReportedMachineBed())return "Gemeldeter physischer Kopf liegt außerhalb des bestätigten Fahrraums.";
+    const auto error=calibratedHomeError(true);
+    if(!error.isEmpty())return error;
+    if(m_commissioning.stage!="complete" && !(m_attestedWorkOffsetKnown && m_attestedWorkOffset==m_core->offset) &&
+       (m_calibrationCandidate.isEmpty() || QPointF(m_calibrationCandidate.value("workOriginX").toDouble(),
+        m_calibrationCandidate.value("workOriginY").toDouble())!=m_core->offset))
+        return "Geänderten G54-Arbeitsursprung nach Referenzfahrt ausdrücklich prüfen.";
     return {};
+}
+QString ControllerRuntimeWorker::referenceHomeError() const {
+    return calibratedHomeError(false);
+}
+QString ControllerRuntimeWorker::calibratedHomeError(bool allowApproach) const {
+    if(m_attendedStart)return "Gebundene Referenzfahrt läuft bereits.";
+    if(m_accessory.faulted() || m_accessory.releaseRequired())return "Tatsächlichen Gerätezustand klären und sichere Freigabe ausdrücklich bestätigen.";
+    const auto &c=m_commissioning;
+    if(!m_core || (c.stage!="complete" && c.stage!="savedHomeReady" && !(allowApproach && c.stage=="savedApproachReady")) ||
+       !m_core->setupReadback.valid || c.fingerprint!=m_core->setupReadback.fingerprint ||
+       !c.limits.isValid() || !std::isfinite(c.home.x()) || !std::isfinite(c.home.y()))
+        return "Abgeglichene vollständige Kalibrierung für die Startreferenz erforderlich.";
+    if(!m_core->setupReadyForAttestation() || m_core->firing || m_jobActive || m_focusActive || m_accessory.activeLease())
+        return "Frischer ruhender S0-Zustand ohne aktive Ausgabe erforderlich.";
+    if(m_attestedWorkOffsetKnown ? m_core->offset!=m_attestedWorkOffset :
+       (c.stage=="complete" || m_core->offset!=m_core->setupReadback.g54))
+        return "Aktueller G54 gehört nicht zur ausdrücklich bestätigten Kalibrierung.";
+    return {};
+}
+QString ControllerRuntimeWorker::attendedStartInvalidationReason(bool atHomeWrite) const {
+    const auto deny=[](const char *detail){return QString("Startfolge widerrufen: ")+QString::fromUtf8(detail);};
+    if(!m_attendedStart)return deny("gebundene Operation fehlt.");
+    const auto &p=*m_attendedStart;const auto &c=m_commissioning;
+    const auto now=std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if(now<p.admittedAt)return deny("monotone Zeit vor Zulassung.");
+    if(now>p.deadline)return deny("120-Sekunden-Gesamtfrist abgelaufen.");
+    if(p.connection!=m_connectionEpoch)return deny("Verbindungsepoche verändert.");
+    if(p.generation!=m_mailbox->generation.load())return deny("globale STOPP-/Widerrufsgeneration verändert.");
+    if(!p.referenceOnly && p.sourceGeneration!=m_mailbox->startSequenceGeneration.load())return deny("Auftragsquelle verändert.");
+    if(p.window!=m_mailbox->sequenceContextEpoch.load())return deny("globaler Fenster-/Eingabekontext verloren.");
+    if(p.binding!=m_calibrationBinding)return deny("Kalibrier-Gerätebindung verändert.");
+    if(p.profile!=m_profile.outputFingerprint())return deny("Geräteprofil verändert.");
+    if(p.settings!=c.fingerprint)return deny("Kalibrier-Konfigurationsbindung verändert.");
+    if(!m_core->setupReadback.valid)return deny("Controllerreadback nicht mehr gültig.");
+    if(p.settings!=m_core->setupReadback.fingerprint)return deny("Controllerkonfiguration verändert.");
+    if(p.limits!=c.limits)return deny("bestätigter Innenraum verändert.");
+    if(p.home!=c.home)return deny("kalibrierter Homepunkt verändert.");
+    if(p.offset!=m_core->offset)return deny("G54/WCO verändert.");
+    if(!m_core->connected())return deny("Controllerverbindung geschlossen.");
+    if(m_core->awaitingReset)return deny("Reset aktiv.");
+    if(m_core->handshaking)return deny("Handshake aktiv.");
+    if(m_core->paused)return deny("unerwarteter Hold während Startreferenz.");
+    if(m_core->firing)return deny("unerwartete Fokusausgabe aktiv.");
+    if(m_accessory.faulted())return deny("Zubehörstörung aktiv.");
+    if(m_accessory.releaseRequired())return deny("sichere Zubehörfreigabe erforderlich.");
+    if(p.phase!="starting" && m_accessory.activeLease())return deny("unerwartete aktive Zubehörlease.");
+    if(p.phase!="starting" && m_jobActive)return deny("unerwarteter aktiver Auftrag.");
+    if(p.phase!="starting" && m_focusActive)return deny("unerwartete aktive Fokuslease.");
+    if(m_mailbox->stop.load())return deny("STOPP angefordert.");
+    if(m_mailbox->close.load())return deny("Schließen angefordert.");
+    if(m_mailbox->shutdown.load())return deny("Programmende angefordert.");
+    if(atHomeWrite) {
+        if(p.phase!="homing")return deny("Home-Schreibphase stimmt nicht.");
+        if(p.homeWritten)return deny("Home bereits einmal gesendet.");
+        if(!m_core->statusFresh())return deny("Controllerstatus vor Home veraltet.");
+        if(!m_core->knownOutput)return deny("Ausgangsleistung vor Home unbekannt.");
+        if(m_core->reportedOutput!=0)return deny("Ausgangsleistung vor Home nicht null.");
+        if(m_core->activeInputs)return deny("Sperreingang vor Home aktiv.");
+        if(m_core->controllerState!="Idle" && m_core->controllerState!="Alarm")return deny("Controllerzustand vor Home nicht zulässig.");
+    }
+    return {};
+}
+bool ControllerRuntimeWorker::validateAttendedStart(bool atHomeWrite) {
+    const auto error=attendedStartInvalidationReason(atHomeWrite);
+    if(!error.isEmpty())m_attendedStartFailure=error;
+    return error.isEmpty();
 }
 bool ControllerRuntimeWorker::beginAttendedStart(const ControllerRuntimeRequest &request) {
     const auto error=attendedStartError();
     if(!error.isEmpty()){m_operatorReason=error;return false;}
-    const auto &job=request.prepared;
+    const auto &job=request.prepared;const auto &c=m_commissioning;
     if(!job || !job->valid() || job->profileFingerprint()!=m_profile.outputFingerprint() ||
        job->driverId()!=m_profile.driverId() || job->transport()!=m_profile.transport() ||
        job->mediaType()!="text/x-gcode")return false;
+    // Validate the frozen emitted targets against the interior before any Home.
     const auto bounds=job->workBounds();
     for(const auto point:{bounds.topLeft(),bounds.topRight(),bounds.bottomLeft(),bounds.bottomRight(),job->firstApproach()}) {
-        if(!std::isfinite(point.x()) || !std::isfinite(point.y()) || !m_core->insideMachineBed(point)) {
+        const QPointF machine(GrblWireNumbers::coordinate(point.x())+m_core->offset.x(),
+                              GrblWireNumbers::coordinate(point.y())+m_core->offset.y());
+        if(!std::isfinite(point.x()) || !std::isfinite(point.y()) || !std::isfinite(machine.x()) || !std::isfinite(machine.y()) ||
+           machine.x()<c.limits.left() || machine.x()>c.limits.right() || machine.y()<c.limits.top() || machine.y()>c.limits.bottom()) {
             m_operatorReason="Auftrag liegt mit aktuellem WCO außerhalb des bestätigten Fahrraums.";return false;
         }
     }
+    return commitCalibratedReference(request,false);
+}
+bool ControllerRuntimeWorker::beginReferenceHome(const ControllerRuntimeRequest &request) {
+    const auto error=referenceHomeError();
+    if(!error.isEmpty()){m_attendedStartReason=error;return false;}
+    return commitCalibratedReference(request,true);
+}
+bool ControllerRuntimeWorker::commitCalibratedReference(const ControllerRuntimeRequest &request,bool referenceOnly) {
+    const auto &c=m_commissioning;
     const auto proof=request.input.proof;
-    const auto absoluteNow=std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    if(!proof || proof->action!=ControllerNativeAction::StartAttended ||
-       proof->observedAt<=0 || proof->observedAt>absoluteNow || proof->expiresAt<absoluteNow ||
-       absoluteNow-proof->observedAt>250 || !proof->contextToken || !proof->contextToken->valid ||
-       m_mailbox->stop.load() || m_mailbox->close.load() || !checkClockContinuity())return false;
-    refreshCoordinateEpoch();
+    const auto now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const auto expected=referenceOnly?ControllerNativeAction::ReferenceHome:ControllerNativeAction::StartAttended;
+    if(!proof || proof->action!=expected || proof->observedAt<=0 ||
+       proof->observedAt>now || proof->expiresAt<now || now-proof->observedAt>250 ||
+       !proof->contextToken || !proof->contextToken->valid || !checkClockContinuity())return false;
+    AttendedStartOperation operation;
+    operation.referenceOnly=referenceOnly;operation.prepared=referenceOnly?PreparedControllerJob::Ptr{}:request.prepared;operation.connection=m_connectionEpoch;operation.generation=m_mailbox->generation.load();
+    operation.sourceGeneration=m_mailbox->startSequenceGeneration.load();operation.window=m_mailbox->sequenceContextEpoch.load();
+    operation.observedAt=proof->observedAt;operation.admittedAt=now;operation.deadline=proof->observedAt+120000;
+    operation.relativeAdmittedAt=m_accessoryClock.elapsed();operation.relativeObservedAt=operation.relativeAdmittedAt-(now-proof->observedAt);
+    operation.binding=m_calibrationBinding;operation.profile=m_profile.outputFingerprint();operation.settings=c.fingerprint;
+    operation.offset=m_core->offset;operation.home=c.home;operation.limits=c.limits;
+    m_attendedStartFailure.clear();
+    m_attendedStart=std::move(operation);m_attendedStartReason=referenceOnly?"Laserfreie Referenzfahrt bestätigt; danach kein Auftrag und keine weitere Anfahrt.":"Start bestätigt: zuerst kalibrierte Referenzfahrt, dann genau dieser Auftrag.";
+    m_dispatchProof.reset(); // This is a committed bounded operation, never a renewed native event.
+    discardConnectionHomePermit();m_connectionHomeStarted=false;
+    m_commissioning.restoring=true;
+    // Homing may end at the attested home outside the normal interior. Its
+    // own typed phase re-establishes only the attested approach envelope.
+    m_core->commissionedModalContract=false;
+    startCalibratedHome();
+    return m_attendedStart.has_value();
+}
+void ControllerRuntimeWorker::scheduleAttendedStart() {
+    if(!m_attendedStart || m_attendedStartUpdateQueued)return;
+    m_attendedStartUpdateQueued=true;
+    // Core completion logs emit changed() inside its status parser. Do not
+    // enqueue a new motion stream reentrantly before that parser has returned.
+    QMetaObject::invokeMethod(this,[this]{m_attendedStartUpdateQueued=false;updateAttendedStart();publish();},Qt::QueuedConnection);
+}
+void ControllerRuntimeWorker::updateAttendedStart() {
+    if(!m_attendedStart || m_updatingAttendedStart)return;
+    QScopedValueRollback<bool> guard(m_updatingAttendedStart,true);
+    if(!validateAttendedStart()) {cancelCommissioning(m_attendedStartFailure);return;}
+    auto &p=*m_attendedStart;auto &c=m_commissioning;
+    if(m_core->busy())return;
+    if(p.referenceOnly && (c.stage=="complete" || c.stage=="savedApproachReady" || c.stage=="restoredOriginReview")) {
+        if(m_core->ready() && m_core->verified() && m_core->positionReferenced)
+            discardAttendedStart(c.stage=="complete"?"Referenzpunkt frisch bestätigt; kein Auftrag gestartet.":c.stage=="restoredOriginReview"?"Referenzpunkt bestätigt; geänderten G54-Arbeitsursprung ausdrücklich prüfen.":"Referenzpunkt außerhalb des Innenraums bestätigt; keine weitere Bewegung. Start benötigt gebundenen sicheren Anlauf.");
+        return;
+    }
+    if(c.stage=="savedApproachReady") {
+        if(!m_core->ready() || !m_core->verified())return;
+        const QPointF target=c.limits.topLeft(),work=target-m_core->offset;
+        if(!m_core->insideMachineBed(work)){cancelCommissioning("Startanlauf liegt gerundet außerhalb des bestätigten Anfahrtsraums.");return;}
+        p.phase="approaching";c.stage="restoringApproach";c.target=target;
+        c.deadline=p.deadline;c.reason="Gebundener Start: langsamer laserfreier Anlauf zum geprüften Innenraum.";
+        if(!m_core->commands({"M5 S0","G21 G90 G54",QString("G1 X%1 Y%2 F300 S0").arg(GrblWireNumbers::format(work.x()),GrblWireNumbers::format(work.y()))}))
+            cancelCommissioning("Gebundener Startanlauf nicht angenommen.");
+        return;
+    }
+    if(c.stage!="complete")return;
+    if(!m_core->ready() || !m_core->verified() || !m_core->positionReferenced ||
+       !m_core->motionSafetyError().isEmpty() || !m_core->insideReportedMachineBed())return;
+    p.phase="starting";
     const auto binding=supervisionBinding();
-    if(!m_accessory.selectOperatorSupervisedDeviceCycle(binding))return false;
+    if(!m_accessory.selectOperatorSupervisedDeviceCycle(binding)){cancelCommissioning("Beaufsichtigter Start benötigt störungsfreien Zubehörzustand.");return;}
     m_operatorSession=binding;discardOperatorWitness();
-    const auto source=job->sourceFingerprint()+job->profileFingerprint();
-    const auto operation=contextHash(source,m_coordinateEpoch,++m_operatorAttempt,binding);
-    const AccessoryContract::OperatorContext context{binding,operation,AccessoryContract::OperatorAction::StartJob};
-    // Preserve the original OS event's age across distinct monotonic origins.
-    const auto relativeNow=m_accessoryClock.elapsed();
-    const auto observed=relativeNow-(absoluteNow-proof->observedAt);
-    if(!m_accessory.beginOperatorWithStartIntent(context,observed,relativeNow))return false;
-    m_activeOperatorOperation=operation;m_operatorPaused=false;
-    m_operatorReason="Beaufsichtigter Gerätezyklus durch frischen Start bestätigt. Lüfterzustände unbekannt und nicht rücklesbar.";
-    return true;
+    const auto source=p.prepared->sourceFingerprint()+p.prepared->profileFingerprint();
+    const auto op=contextHash(source,m_coordinateEpoch,++m_operatorAttempt,binding);
+    const AccessoryContract::OperatorContext context{binding,op,AccessoryContract::OperatorAction::StartJob};
+    if(!m_accessory.beginOperatorWithCommittedStartIntent(context,p.relativeObservedAt,p.relativeAdmittedAt,m_accessoryClock.elapsed())) {
+        cancelCommissioning("Ursprünglich gebundener Start ist für die beaufsichtigte Ausgabe nicht mehr gültig.");return;
+    }
+    m_activeOperatorOperation=op;m_operatorPaused=false;
+    m_activePrepared=p.prepared;m_jobActive=true;
+    if(!m_core->startPrepared(*m_activePrepared,p.home)) {
+        m_jobActive=false;m_accessory.transition(AccessoryContract::Event::Fault);
+        retirePrepared();cancelCommissioning("Gebundener Auftrag nach Referenzfahrt nicht angenommen.");return;
+    }
+    discardAttendedStart("Referenz bestätigt; gebundener Auftrag läuft und kehrt nach Erfolg zum Maschinen-Home zurück.");
 }

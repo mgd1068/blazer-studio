@@ -1,4 +1,4 @@
-# Blazer Studio – Einstieg in beta.10.7-dev
+# Blazer Studio – Einstieg in beta.10.8-dev
 
 Die [Anforderungen an den einfachen Standardworkflow](USABILITY_REQUIREMENTS.md) gelten für die weitere Entwicklung.
 
@@ -86,7 +86,7 @@ Eine vollständig bestätigte Einrichtung wird lokal gespeichert, wenn eine eind
 
 ### Beaufsichtigter Gerätebetrieb und erster Auftrag
 
-Ab beta.10.7 genügt nach erfolgreicher Verbindung und Initialisierung im normalen Gerätebetrieb **Am Laser starten** direkt aus der Bearbeitung. Dieser frische Klick bestätigt zugleich die eigene Anwesenheit für genau den vorbereiteten Auftrag. Eine zusätzliche Moduswahl, Vorschau oder Anwesenheitsbestätigung ist für diesen Start nicht nötig. Materialwerte bleiben sichtbar und müssen zum tatsächlichen Material passen. Eine echte vorherige Störung verlangt weiterhin die ausdrückliche Klärung des Gerätezustands; der Startklick löscht keine Fehlersperre. Fokus und Fortsetzen behalten ihre eigenen aktionsbezogenen Bestätigungen. Unter Advanced bleiben ausdrücklich gewählte Sensor-/externe Zubehörmodi mit ihrem eigenen Ablauf verfügbar.
+Ab beta.10.8 genügt bei verbundenem, passend kalibriertem Gerät im normalen Gerätebetrieb **Am Laser starten** direkt aus der Bearbeitung. Dieser Start führt zuerst eine echte Referenzfahrt ohne Laser, gegebenenfalls den geprüften Anlauf in den Innenraum und anschließend genau den gebundenen Auftrag aus. Dieser frische Klick bestätigt zugleich die eigene Anwesenheit für genau den vorbereiteten Auftrag. Eine zusätzliche Moduswahl, Vorschau oder Anwesenheitsbestätigung ist für diesen Start nicht nötig. Materialwerte bleiben sichtbar und müssen zum tatsächlichen Material passen. Eine echte vorherige Störung verlangt weiterhin die ausdrückliche Klärung des Gerätezustands; der Startklick löscht keine Fehlersperre. Fokus und Fortsetzen behalten ihre eigenen aktionsbezogenen Bestätigungen. Unter Advanced bleiben ausdrücklich gewählte Sensor-/externe Zubehörmodi mit ihrem eigenen Ablauf verfügbar.
 
 Die externe Absaugung liegt in diesem Modus außerhalb der Programmsteuerung und wird nicht als Pflichtgerät oder Sensor abgefragt. Beide tatsächlichen Gerätelüfter müssen beim ersten realen Auftrag beobachtet werden. Die Software meldet keinen gemessenen Lüfterlauf und bietet keine unbelegten getrennten Lüfterausgänge an. Der dynamische Gerätezyklus bleibt bei internen G0-Leerfahrten aktiv; G0 unter geprüftem GRBL-Lasermodus ist laserfrei. Am Ende wird M5/S0 angefordert. Firmwareabhängige Lüfterwirkung und Nachlauf sind nicht durch ein ACK bewiesen.
 
@@ -120,3 +120,11 @@ Die anschließende Tiefenschätzung läuft lokal. Sie erzeugt eine relative Tief
 ## Aktualisieren und entfernen
 
 Ein neueres Paket mit `sudo apt install ./DATEINAME.deb` installieren. Entfernen: `sudo apt remove blazer-studio`. Eigene Projekte und Benutzerdaten bleiben getrennt von den installierten Programmdateien. Die Software ist Source Available mit kostenloser Weitergabe; gewerbliche Laserarbeiten sind erlaubt, Verkauf der Software ist ausgeschlossen. Siehe die mitgelieferte Lizenz.
+
+## Maschinen-Referenzpunkt und Auftragsende (beta.10.8)
+
+Oben im Bereich **03 Gerät** steht dauerhaft **Zum Referenzpunkt – ohne Laser**. Der Knopf fordert eine echte Referenzfahrt mit der passenden Kalibrierung an, auch ohne geladene Grafik. Er startet keinen versteckten Auftrag. Liegt Home außerhalb des nutzbaren Innenraums, bleibt der Kopf dort stehen; eine anschließende Startaktion kann den geprüften Innenraum-Anlauf einschließen.
+
+Ein normaler Start bindet den ursprünglichen Klick und den exakt vorbereiteten Auftrag für höchstens 120 Sekunden an Controller, Kalibrierung, Arbeitsursprung und Fensterkontext. Quellenänderung, verlorener Fensterkontext, STOPP, Trennung oder Fehler verwerfen den vorbereiteten Ablauf. Der Klick wird nicht nachträglich als frisch erzeugt. Explizite Sensor-/externe Zubehörmodi behalten ihren eigenen Startvertrag.
+
+Nach erfolgreicher Gravur wartet Blazer auf einen frischen Idle-Status mit Leistung null. Erst danach fährt der Kopf mit **M5 S0** und einer langsamen absoluten **G53-Maschinenfahrt** zum bestätigten Home zurück. Ein verschobener G54-Werkstückursprung wird dabei nicht als Maschinen-Nullpunkt verwendet. Fertig ist der Auftrag erst, wenn der Controller den Rückkehrpunkt mit Leistung null bestätigt. Nach STOPP, Alarm, Türereignis oder Verbindungsfehler erfolgt keine automatische Rückfahrt oder Wiederaufnahme. Ein abgebrochener Auftrag wird nicht als erfolgreich abgeschlossen behandelt.

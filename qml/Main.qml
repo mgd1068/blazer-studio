@@ -112,7 +112,7 @@ ApplicationWindow {
         if (manualStartSelected) return "Handstart öffnen: gemessene Restwege, Startpunkt und vollständige Wegeprüfung im Handstart-Dialog bestätigen. " + (manualStartState.reason || "");
         if (!simulationMode && (controllerRequestPending || controllerConnectionPhase === "opening" || controllerConnectionPhase === "closing")) return "Verbindungs- oder Geräteanfrage läuft. Bestätigten Abschluss abwarten; STOPP bleibt verfügbar.";
         if (!simulationMode && !controllerStatusFresh) return "Controllerdaten fehlen oder sind veraltet. Keine aktuelle Bereitschaft bestätigt; Datenalter: " + controllerStatusAge + ".";
-        if (!simulationMode && setupState.stage !== "complete") return setupState.reason || "Gerät zuerst initialisieren und referenzieren.";
+        if (!simulationMode && setupState.stage !== "complete" && !useAttendedStart) return setupState.reason || "Gerät zuerst initialisieren und referenzieren.";
         if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
         if (!project.jobSummary.valid) return "Auftrag noch nicht bereit: " + project.jobSummary.errors.join(" ");
         if (!simulationMode && (controllerJobPreparing || !controllerJobPrepared)) return controllerPrepareReason || "Controllerauftrag wird vorbereitet. Nach Abschluss erneut ausdrücklich starten.";
@@ -121,15 +121,15 @@ ApplicationWindow {
         if (!simulationMode && useAttendedStart && extractionState.attendedStartError) return extractionState.attendedStartError;
         if (!useAttendedStart && !supervisionAllows("start")) return extractionState.mode === "operatorSupervisedDeviceCycle" ? "Anwesenheit für diesen Auftrag im Bereich Gerät bestätigen." : "Absaugung und Aufsicht für diesen Auftrag im Bereich Gerät bestätigen.";
         if (!simulationMode && !useAttendedStart && typeof machine.processingSafetyErrors !== "undefined" && machine.processingSafetyErrors.length > 0) return machine.processingSafetyErrors.join("\n");
-        if (!simulationMode && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length > 0) return machine.motionSafetyError;
-        if (!simulationMode && !machine.positionReferenced) return "Maschinenreferenz fehlt. Die aktuelle Position ist noch kein verlässlicher Nullpunkt. Referenzfahrt und Arbeitsnullpunkt im Bereich »Gerät« prüfen; nach einer Kollision keinen neuen Versuch starten.";
+        if (!simulationMode && !useAttendedStart && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length > 0) return machine.motionSafetyError;
+        if (!simulationMode && !useAttendedStart && !machine.positionReferenced) return "Maschinenreferenz fehlt. Die aktuelle Position ist noch kein verlässlicher Nullpunkt. Referenzfahrt und Arbeitsnullpunkt im Bereich »Gerät« prüfen; nach einer Kollision keinen neuen Versuch starten.";
         if (basic && !simulationMode) {
             if (!projectHeadMatches) return "Laseraufsatz und Material passen nicht zusammen. Links das passende Material auswählen.";
             if (!useAttendedStart && project.beginnerSummary.requiresAdvanced) return project.beginnerSummary.reason;
             if (!useAttendedStart && project.beginnerSummary.modified) return "Materialwerte wurden verändert. Werte prüfen oder die Profilwerte erneut übernehmen. Randgravur lässt sich rechts mit »Rand gravieren« wählen.";
             if (!useAttendedStart && !proofConfirmed && !isBasicProbe) return "Materialprüfung fehlt: Nach einer echten Probe die Bestätigung unter der Vorschau setzen.";
         }
-        if (!machine.ready) return simulationMode ? "Der Simulator ist noch nicht bereit. Gerätestatus prüfen." : "Der Laser ist noch nicht bereit. Verbindung und Gerätestatus im Bereich »Gerät« prüfen.";
+        if (!machine.ready && !(useAttendedStart && extractionState.attendedStartReady === true)) return simulationMode ? "Der Simulator ist noch nicht bereit. Gerätestatus prüfen." : "Der Laser ist noch nicht bereit. Verbindung und Gerätestatus im Bereich »Gerät« prüfen.";
         return "";
     }
     property bool discardCloseApproved: false
@@ -1150,6 +1150,18 @@ ApplicationWindow {
                                     Text { text: "Gerät & Positionierung"; color: win.ink; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
                                     ActionButton { objectName: "disconnectControllerButton"; text: win.controllerConnectionPhase === "closing" ? "Trennung läuft …" : win.controllerConnectionPhase === "opening" ? "Verbindungsanfrage abbrechen" : win.simulationMode ? (machine.connected ? "Simulator trennen" : "Simulator verbinden") : "GRBL trennen"; dark: win.night; onClicked: machine.toggleConnection() }
                                 }
+                                ActionButton {
+                                    Layout.fillWidth:true
+                                        id: referenceHomeControl; objectName:"referenceHomeButton"
+                                        property bool nativeActionEnabled:true
+                                        property string nativeActionRole:"referenceHome"
+                                        text:"Zum Referenzpunkt – ohne Laser"; dark:win.night
+                                        visible:!win.simulationMode && typeof machine.referenceHome === "function"
+                                        enabled:!!win.extractionState.referenceReady && !win.runtimeOccupied
+                                        hint:win.extractionState.referenceError || "Referenziert am gespeicherten Maschinen-Nullpunkt; startet keine Gravur."
+                                        Component.onCompleted:if(typeof machine.referenceHome === "function")machine.registerNativeActionControl(referenceHomeControl,"referenceHome")
+                                        onClicked:machine.referenceHome()
+                                    }
                                 Text { text: win.simulationMode ? "Simulierter Blaze X M3 · Keine Hardwarebefehle." : machine.connected ? "Serieller GRBL-Anschluss geöffnet. Controllerprüfung, Maschinenreferenz und Zubehör sind getrennte Nachweise." : "Realer Controllerbetrieb angefordert; noch kein geöffneter Anschluss bestätigt."; color: win.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 RowLayout {
                                     visible: typeof machine.simulation !== "undefined"

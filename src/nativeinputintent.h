@@ -31,14 +31,17 @@ class NativeInputIntentAdapter final : public QObject, public QAbstractNativeEve
     void discardMatching(const QString &prefix);
     void revokeFocus();
     void revoke();
+    void revokeActionIntents(); // Retire inputs; committed typed reference keeps its window context.
     QString reason() const;
     bool nativeEventFilter(const QByteArray &, void *, qintptr *) override;
   signals:
     void invalidated(); // Release/context loss: end an active hold, never start one.
+    void contextInvalidated(); // Global window/device context, not ordinary focus release.
   protected:
     bool eventFilter(QObject *, QEvent *) override;
   private:
     friend class NativeInputIntentTestAccess;
+    void revokeImpl(bool globalContext);
     enum class Domain { Unknown, X11Server32, KWinMonotonic32 };
     struct Sample { quint32 server = 0; qint64 before = -1, after = -1; };
     struct Pending {

@@ -385,6 +385,11 @@ install(FILES tools/photo_depth.py tools/setup_depth.py DESTINATION share/blazer
 include(packaging/Packaging.cmake)
 
 if(BUILD_TESTING)
+    qt_add_executable(blazer-startattendedsequence-tests tests/startattendedsequence_test.cpp)
+    target_link_libraries(blazer-startattendedsequence-tests PRIVATE blazer-core Qt6::Test)
+    target_compile_definitions(blazer-startattendedsequence-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME startattendedsequence COMMAND blazer-startattendedsequence-tests -platform offscreen)
+    set_tests_properties(startattendedsequence PROPERTIES TIMEOUT 120 ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen")
     qt_add_executable(blazer-selecteddevicerestore-tests tests/selecteddevicerestore_test.cpp)
     target_link_libraries(blazer-selecteddevicerestore-tests PRIVATE blazer-core Qt6::Test)
     add_test(NAME selecteddevicerestore COMMAND blazer-selecteddevicerestore-tests -platform offscreen)
