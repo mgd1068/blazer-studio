@@ -22,6 +22,7 @@ class CommissioningModel : public QObject {
     Q_PROPERTY(bool connected MEMBER connected NOTIFY changed)
   public:
     bool pending = false, busy = false, firing = false, connected = true;
+    bool delayCoordinateConfirmation = false;
     int begins = 0, cancels = 0, stops = 0, attests = 0, homes = 0, probes = 0, corners = 0,
         zeros = 0, confirms = 0;
     QVariantList limitCalls;
@@ -59,10 +60,10 @@ class CommissioningModel : public QObject {
         setStage("homeReady");
     }
     Q_INVOKABLE void commissioningHome() {
-        if (stage() != "homeReady")
+        if (stage() != "homeReady" && stage() != "savedHomeReady")
             return;
         ++homes;
-        setStage("homing", true);
+        setStage(stage() == "savedHomeReady" ? "restoringHome" : "homing", true);
     }
     Q_INVOKABLE void confirmCommissioningHome() {
         if (stage() != "geometry")
@@ -113,7 +114,10 @@ class CommissioningModel : public QObject {
     }
     Q_INVOKABLE void confirmCommissioningCoordinates() {
         ++confirms;
-        setStage("complete");
+        if (delayCoordinateConfirmation) {
+            pending = true;
+            emit changed();
+        } else setStage("complete");
     }
     Q_INVOKABLE void cancelCommissioning() {
         ++cancels;
@@ -209,6 +213,7 @@ import "%1" as App
 ApplicationWindow {
  width:%2; height:%3; visible:true
  property alias setup: setup
+ App.DeviceInitializationPanel { anchors.fill:parent; modelMachine:commissioningModel; dark:%4 }
  App.M3CommissioningDialog { id:setup; modelMachine:commissioningModel; dark:%4 }
 })")
                              .arg(QUrl::fromLocalFile(dir).toString())
@@ -270,7 +275,7 @@ class CommissioningUiTest : public QObject {
         QVERIFY(h.press("attestSetupMechanics"));
         QCOMPARE(h.model.attests, 1);
         QCOMPARE(h.model.motions(), 0);
-        QCOMPARE(h.model.nativeControls.size(), 7);
+        QCOMPARE(h.model.nativeControls.size(), 10); // Full wizard, saved approach and compact initialization.
         auto *home = h.item("setupHomeButton");
         QVERIFY(home);
         QVERIFY(home->property("nativeActionEnabled").toBool());
@@ -338,7 +343,6 @@ class CommissioningUiTest : public QObject {
         QVERIFY(h.press("confirmSetupCoordinates"));
         QCOMPARE(h.model.confirms, 1);
         QCOMPARE(h.model.stage(), QString("complete"));
-        QVERIFY(h.press("closeSetup"));
         QTRY_VERIFY(!h.dialog->property("visible").toBool());
         QCOMPARE(h.model.cancels, 0);
         QCOMPARE(h.model.motions(), 8); // one home, two probes, four corners, one explicit zero
@@ -383,7 +387,7 @@ class CommissioningUiTest : public QObject {
         QVERIFY2(h.create(true), qPrintable(h.error));
         QTRY_COMPARE(h.model.begins, 1);
         h.model.setStage(stage, stage.endsWith("Pending") || stage == "homing");
-        QVERIFY(h.press("closeSetup"));
+        QVERIFY(h.press("cancelSetup"));
         QTRY_COMPARE(h.model.cancels, 1);
         QCOMPARE(h.model.motions(), 0);
     }
@@ -411,7 +415,7 @@ class CommissioningUiTest : public QObject {
         QCOMPARE(h.item("commissioningReason")->property("textFormat").toInt(), int(Qt::PlainText));
         QCOMPARE(h.item("commissioningReason")->property("text").toString(),
                  QString("<b>Nur Controllertext</b>"));
-        QVERIFY(h.press("closeSetup"));
+        QVERIFY(h.press("cancelSetup"));
         QTRY_COMPARE(h.model.cancels, 1);
         QCOMPARE(h.model.motions(), 0);
     }
@@ -426,6 +430,81 @@ class CommissioningUiTest : public QObject {
         QVERIFY(!h.item("confirmSetupCoordinates")->isEnabled());
         QVERIFY(h.press("confirmSetupCoordinates", false));
         QCOMPARE(h.model.confirms, 0);
+    }
+    void finalConfirmationWaitsForWorkerBeforeClosing() {
+        Harness h;
+        QVERIFY2(h.create(false), qPrintable(h.error));
+        h.model.setStage("workCoordinates");
+        h.model.delayCoordinateConfirmation = true;
+        QVERIFY(h.press("setupCoordinatesWitness"));
+        QVERIFY(h.press("confirmSetupCoordinates"));
+        QCOMPARE(h.model.confirms, 1);
+        QVERIFY(h.dialog->property("visible").toBool());
+        QVERIFY(!h.item("closeSetup")->isVisible());
+        QVERIFY(!h.item("cancelSetup")->isEnabled());
+        QCOMPARE(h.model.cancels, 0);
+        h.model.settled("complete");
+        QTRY_VERIFY(!h.dialog->property("visible").toBool());
+        QCOMPARE(h.model.cancels, 0);
+        QCOMPARE(h.model.motions(), 0);
+    }
+    void reopeningFaultPreservesReasonUntilExplicitRestart() {
+        Harness h;
+        QVERIFY2(h.create(false), qPrintable(h.error));
+        h.model.data["reason"] = "Einrichtung durch STOPP widerrufen.";
+        h.model.setStage("fault");
+        QVERIFY(QMetaObject::invokeMethod(h.dialog, "close"));
+        QTRY_VERIFY(!h.dialog->property("visible").toBool());
+        // The fake's cancel intentionally replaces state; inject the worker's fault again.
+        h.model.data["reason"] = "Einrichtung durch STOPP widerrufen.";
+        h.model.setStage("fault");
+        QVERIFY(QMetaObject::invokeMethod(h.dialog, "open"));
+        QTRY_VERIFY(h.dialog->property("visible").toBool());
+        QCOMPARE(h.model.begins, 1);
+        QCOMPARE(h.item("commissioningReason")->property("text").toString(),
+                 QString("Einrichtung durch STOPP widerrufen."));
+        QVERIFY(h.press("restartSetup"));
+        QCOMPARE(h.model.begins, 2);
+    }
+    void deniedFinalConfirmationStaysOpenAndCanBeRetried() {
+        Harness h;
+        QVERIFY2(h.create(false), qPrintable(h.error));
+        h.model.setStage("workCoordinates");
+        h.model.delayCoordinateConfirmation = true;
+        QVERIFY(h.press("setupCoordinatesWitness"));
+        QVERIFY(h.press("confirmSetupCoordinates"));
+        QTRY_VERIFY(h.dialog->property("finishSawPending").toBool());
+        h.model.data["reason"] = "Aktueller G54-/Positionsreadback fehlt.";
+        h.model.settled("workCoordinates");
+        QTRY_VERIFY(!h.dialog->property("finishRequested").toBool());
+        QVERIFY(h.dialog->property("visible").toBool());
+        QVERIFY(h.item("commissioningActionError")->property("text").toString().contains("G54"));
+        QVERIFY(h.item("cancelSetup")->isEnabled());
+        h.model.delayCoordinateConfirmation = false;
+        QVERIFY(h.press("confirmSetupCoordinates"));
+        QTRY_VERIFY(!h.dialog->property("visible").toBool());
+        QCOMPARE(h.model.cancels, 0);
+        QCOMPARE(h.model.motions(), 0);
+    }
+    void savedInitializationRequiresOnlyExplicitHomeAndDoesNotMoveOnDisplay() {
+        Harness h;
+        QVERIFY2(h.create(false), qPrintable(h.error));
+        QVERIFY(QMetaObject::invokeMethod(h.dialog,"close"));
+        QTRY_VERIFY(!h.dialog->property("visible").toBool());
+        h.model.data["reason"]="Gespeicherte Einrichtung stimmt mit dem Controller überein. Referenzieren erforderlich.";
+        h.model.setStage("savedHomeReady");
+        QCOMPARE(h.model.motions(),0);
+        auto home=h.item("initializeSavedHome");QVERIFY(home);
+        QVERIFY(home->isVisible());QVERIFY(home->isEnabled());
+        QCOMPARE(home->property("testRegisteredAction").toString(),QString("setupHome"));
+        QVERIFY(!h.item("initializeSavedApproach")->isVisible());
+        QVERIFY(h.press("initializeSavedHome"));
+        QCOMPARE(h.model.homes,1);QCOMPARE(h.model.stage(),QString("restoringHome"));
+        QVERIFY(!home->isEnabled());
+        h.model.settled("complete");
+        QVERIFY(!home->isVisible());
+        QCOMPARE(h.model.confirms,0);QCOMPARE(h.model.probes,0);QCOMPARE(h.model.corners,0);
+        QCOMPARE(h.model.homes,1);
     }
     void deniedNativeActionIsVisibleInsideModalDialog() {
         Harness h;

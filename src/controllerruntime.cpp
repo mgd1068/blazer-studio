@@ -1,6 +1,7 @@
 #include "controllerruntime.h"
 #include "controllerruntimemailbox.h"
 #include "controllerruntimeworker.h"
+#include "controllercalibrationstore.h"
 #include "job.h"
 #include <QCoreApplication>
 #include <QMutexLocker>
@@ -85,6 +86,18 @@ ControllerRuntimeSession::ControllerRuntimeSession(DeviceProfile profile, QObjec
             [worker = m_worker] { worker->initialize(); });
     connect(m_worker, &ControllerRuntimeWorker::latestAvailable, this,
             &ControllerRuntimeSession::consumeLatest, Qt::QueuedConnection);
+    connect(m_worker, &ControllerRuntimeWorker::calibrationCompleted, this,
+            [this](const QByteArray &binding, const QVariantMap &record) {
+                if(binding.isEmpty())return;
+                QString error;
+                ControllerCalibrationStore store;
+                const bool saved=store.save(binding,record,&error);
+                if(binding==m_calibrationBinding) {
+                    m_calibrationStored=saved;
+                    m_calibrationStorageError=saved?QString():"Geräteeinrichtung konnte nicht gespeichert werden: "+error;
+                    emit changed();
+                }
+            }, Qt::QueuedConnection);
     connect(
         m_worker, &ControllerRuntimeWorker::openFinished, this,
         [this](quint64 id, bool opened, const QString &reason) {
@@ -130,6 +143,12 @@ ControllerRuntimeSession::~ControllerRuntimeSession() {
 ControllerStatus ControllerRuntimeSession::status() const {
     QMutexLocker lock(&m_mailbox->mutex);
     auto result = m_mailbox->latest;
+    // Nested Core.changed callbacks can briefly publish Idle before the ordered
+    // initialization readback has finished. Do not expose that as readiness for
+    // a second, conflicting data transaction (notably manual positioning).
+    const bool initializing=result.commissioning.value("stage")=="readback";
+    result.commissioning["calibrationStored"]=m_calibrationStored;
+    if(!m_calibrationStorageError.isEmpty())result.commissioning["storageError"]=m_calibrationStorageError;
     const auto now = nowMs();
     result.statusAgeMs = m_mailbox->deviceCapture < 0 ? -1 : now - m_mailbox->deviceCapture;
     result.runtimeHeartbeatAgeMs =
@@ -154,7 +173,7 @@ ControllerStatus ControllerRuntimeSession::status() const {
     result.closing |= m_closing || m_mailbox->close.load();
     result.opening |= m_pendingOpen != 0;
     result.requestPending |= m_pendingOpen != 0 || !m_mailbox->normal.empty() ||
-                             m_mailbox->dispatchInFlight || m_mailbox->continuityFence;
+                             m_mailbox->dispatchInFlight || m_mailbox->continuityFence || initializing;
     result.occupied |= result.opening || result.requestPending || m_mailbox->close.load() ||
                        m_mailbox->stop.load();
     result.occupied |= result.closing;
@@ -196,6 +215,15 @@ ControllerSubmission ControllerRuntimeSession::requestOpen(const QString &endpoi
     request.id = id;
     request.endpoint = endpoint;
     request.binding = binding;
+    m_calibrationBinding=binding;
+    m_calibrationStorageError.clear();
+    m_calibrationStored=false;
+    if(!binding.isEmpty()) {
+        QString error;
+        request.calibrationRecord=ControllerCalibrationStore().load(binding,&error);
+        m_calibrationStored=!request.calibrationRecord.isEmpty();
+        if(!error.isEmpty())m_calibrationStorageError="Gespeicherte Einrichtung nicht verwendbar: "+error;
+    }
     request.issuedAt = nowMs();
     request.expiresAt = request.issuedAt + 3000;
     if (!m_mailbox->enqueue(std::move(request)))
@@ -351,7 +379,7 @@ bool ControllerRuntimeSession::localData(const QVariantMap &data) {
     const auto id=++m_nextRequest;
     if(data.value("op")=="begin") {
         bool denied=false;
-        {QMutexLocker lock(&m_mailbox->mutex);denied=m_mailbox->dispatchInFlight||!m_mailbox->normal.empty()||m_mailbox->latest.busy||m_mailbox->latest.firing||m_mailbox->latest.accessoryLeaseActive||m_mailbox->stop.load()||m_mailbox->close.load();}
+        {QMutexLocker lock(&m_mailbox->mutex);denied=m_mailbox->dispatchInFlight||!m_mailbox->normal.empty()||m_mailbox->latest.commissioning.value("stage")=="readback"||m_mailbox->latest.busy||m_mailbox->latest.firing||m_mailbox->latest.accessoryLeaseActive||m_mailbox->stop.load()||m_mailbox->close.load();}
         if(denied){m_localAdmissionError="Manueller Beginn abgelehnt: Geräteaktion aktiv oder ausstehend.";m_localAdmissionRevision=id;emit changed();return false;}
     }
     m_localAdmissionError.clear();
@@ -534,6 +562,7 @@ void ControllerRuntimeWorker::drain() {
         retirePrepared();
     }
     if (m_mailbox->takeControl(m_mailbox->close)) {
+        clearCalibrationSession();
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_core->close();
@@ -568,6 +597,7 @@ void ControllerRuntimeWorker::drain() {
         if(m_local.engaged() && request.kind!=Kind::LocalData && request.kind!=Kind::LocalCapture && request.kind!=Kind::LocalStart && request.kind!=Kind::LocalFrame && request.kind!=Kind::LocalResume && request.kind!=Kind::OperatorData && request.kind!=Kind::Hold && request.kind!=Kind::FocusOff && request.kind!=Kind::Open) {
             m_core->append("Manueller lokaler Rahmen: globale Geräteaktion gesperrt.");
         } else if(m_commissioning.active() && m_commissioning.stage!="complete" &&
+           !(request.kind==Kind::LocalData && request.bounds.value("op")=="begin" && m_commissioning.stage!="readback" && !m_commissioning.moving()) &&
            request.kind!=Kind::SetupData && request.kind!=Kind::OperatorData && request.kind!=Kind::SetupHome && request.kind!=Kind::SetupProbe && request.kind!=Kind::SetupCorner && request.kind!=Kind::SetupZero && request.kind!=Kind::Open && request.kind!=Kind::Hold) {
             m_core->append("Einrichtung aktiv: normale Geräteaktion gesperrt.");
         } else switch (request.kind) {
@@ -578,6 +608,8 @@ void ControllerRuntimeWorker::drain() {
             discardOperatorWitness();m_operatorSession.clear();m_activeOperatorOperation.clear();m_operatorPaused=false;
             m_accessory = AccessoryContract(true);
             const bool opened = m_core->open(request.endpoint) && checkClockContinuity();
+            if(opened)beginCalibrationRestore(request.calibrationRecord,request.binding);
+            else clearCalibrationSession();
             emit openFinished(
                 request.id, opened,
                 opened ? QString() : QString("Controlleranschluss konnte nicht geöffnet werden."));
@@ -763,6 +795,7 @@ void ControllerRuntimeWorker::coreChanged() {
     m_wasVerified = status.verified;
     m_wasReferenced = status.positionReferenced;
     if (!status.connected) {
+        clearCalibrationSession();
         discardOperatorWitness();m_activeOperatorOperation.clear();m_operatorPaused=false;
         m_accessory.transition(AccessoryContract::Event::Disconnect);
         m_jobActive = m_focusActive = false;

@@ -26,7 +26,7 @@ ApplicationWindow {
     readonly property string controllerStatusAge: typeof machine.statusAgeMs !== "undefined" && machine.statusAgeMs >= 0 ? Math.floor(machine.statusAgeMs) + " ms" : "unbekannt"
     readonly property string controllerViewState: controllerClosePending || controllerConnectionPhase === "closing" ? "Porttrennung läuft" : controllerConnectionPhase === "opening" ? "Verbindungsanfrage läuft" : simulationMode ? machine.state : controllerRequestPending ? "Geräteanfrage läuft" : !controllerStatusFresh ? "Controllerdaten unbekannt/veraltet" : controllerConnectionPhase === "handshake" ? "Controllerprüfung läuft" : machine.state
     readonly property bool grblVerified: !simulationMode && controllerConnectionPhase !== "opening" && controllerConnectionPhase !== "closing" && controllerStatusFresh && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
-    readonly property bool positioningReady: !controllerRequestPending && machine.ready && machine.positionReferenced && (win.simulationMode || (controllerStatusFresh && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
+    readonly property bool positioningReady: !controllerRequestPending && machine.ready && machine.positionReferenced && (win.simulationMode || (setupState.stage === "complete" && controllerStatusFresh && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
     readonly property string synchronousWorkBlockReason: typeof project.synchronousWorkBlockReason !== "undefined" ? project.synchronousWorkBlockReason : ""
     readonly property bool synchronousWorkReady: synchronousWorkBlockReason.length === 0
     function allowSynchronousUiWork() {
@@ -108,6 +108,7 @@ ApplicationWindow {
         if (manualStartSelected) return "Handstart öffnen: gemessene Restwege, Startpunkt und vollständige Wegeprüfung im Handstart-Dialog bestätigen. " + (manualStartState.reason || "");
         if (!simulationMode && (controllerRequestPending || controllerConnectionPhase === "opening" || controllerConnectionPhase === "closing")) return "Verbindungs- oder Geräteanfrage läuft. Bestätigten Abschluss abwarten; STOPP bleibt verfügbar.";
         if (!simulationMode && !controllerStatusFresh) return "Controllerdaten fehlen oder sind veraltet. Keine aktuelle Bereitschaft bestätigt; Datenalter: " + controllerStatusAge + ".";
+        if (!simulationMode && setupState.stage !== "complete") return setupState.reason || "Gerät zuerst initialisieren und referenzieren.";
         if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
         if (!project.jobSummary.valid) return "Auftrag noch nicht bereit: " + project.jobSummary.errors.join(" ");
         if (!simulationMode && (controllerJobPreparing || !controllerJobPrepared)) return controllerPrepareReason || "Controllerauftrag wird vorbereitet. Nach Abschluss erneut ausdrücklich starten.";
@@ -1156,6 +1157,11 @@ ApplicationWindow {
                                     text: win.controllerConnectionPhase === "closing" ? "Verbindung wird beendet. Simulator und Gerätewechsel warten auf die bestätigte Trennung." : win.controllerConnectionPhase === "opening" ? "Anschlussöffnung angefordert · noch keine Verbindung oder Controllerprüfung bestätigt" : win.simulationMode ? "Simulator · keine USB-Verbindung zum Laser" : win.controllerConnectionPhase === "handshake" ? "Anschluss geöffnet · Controllerprüfung läuft · " + machine.state : win.controllerViewState + (!win.controllerStatusFresh ? " (" + win.controllerStatusAge + ")" : machine.connected && !machine.positionReferenced ? " · Referenzfahrt nicht bestätigt" : "") + ((!machine.connected && machine.log.length>0) ? " · "+machine.log[0] : "")
                                     color: win.grblVerified ? "#209b76" : win.muted
                                     Accessible.role: Accessible.StaticText; Accessible.name: text
+                                }
+                                DeviceInitializationPanel {
+                                    Layout.fillWidth: true; visible: !win.simulationMode && machine.connected
+                                    modelMachine: machine; dark: win.night; actionsAllowed: !win.projectDialogActive
+                                    onReviewRequested: commissioningDialog.open()
                                 }
                                 Text {
                                     objectName: "processingSafetyStatus"

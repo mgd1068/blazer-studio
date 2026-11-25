@@ -480,6 +480,19 @@ void GrblSession::captureSetupReadback(const QByteArray &s) {
         if(r.version || !s.endsWith(']'))malformed();
         r.version=true;r.firmware=QCryptographicHash::hash(s,QCryptographicHash::Sha256);
     }
+    if(command=="$I" && s.startsWith("[MSG:") && s.contains("MAC=")) {
+        // Identity is accepted only inside this connection's ordered $I reply.
+        // Retain a domain-separated digest; never expose the raw device address.
+        static const QRegularExpression mac(QStringLiteral(R"((?:^|:)MAC=([0-9A-Fa-f]{2}([:-])[0-9A-Fa-f]{2}(?:\2[0-9A-Fa-f]{2}){4})(?=:|\]|$))"));
+        auto matches=mac.globalMatch(QString::fromLatin1(s));
+        const auto match=matches.hasNext()?matches.next():QRegularExpressionMatch();
+        if(!s.endsWith(']') || !match.hasMatch() || matches.hasNext() || s.count("MAC=")!=1 || !r.deviceIdentityHash.isEmpty())malformed();
+        else {
+            const auto identity=match.captured(1).toLower().replace('-',':').toLatin1();
+            if(identity=="00:00:00:00:00:00" || identity=="ff:ff:ff:ff:ff:ff")malformed();
+            else r.deviceIdentityHash=QCryptographicHash::hash(QByteArray("m3-controller-identity-v1:")+identity,QCryptographicHash::Sha256);
+        }
+    }
     if(command=="$G" && s.startsWith("[GC:")) {
         const auto tokens=s.mid(4,s.size()-5).split(' ');
         r.modal=s.endsWith(']') && tokens.contains("G21") && tokens.contains("G90") && tokens.contains("G54") && tokens.contains("M5") && tokens.contains("S0");

@@ -6,12 +6,97 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <QRegularExpression>
 namespace {
 qint64 setupNow(){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 bool closePoint(QPointF a,QPointF b){return std::abs(a.x()-b.x())<=0.002 && std::abs(a.y()-b.y())<=0.002;}
 bool finiteSetup(double x){return std::isfinite(x);}
 }
+void ControllerRuntimeWorker::clearCalibrationSession() {
+    m_calibrationReadbackPending=false;
+    m_calibrationCandidate.clear();m_calibrationBinding.clear();
+}
+void ControllerRuntimeWorker::beginCalibrationRestore(const QVariantMap &record,const QByteArray &binding) {
+    clearCalibrationSession();
+    m_commissioning={};m_commissioning.connectionEpoch=m_connectionEpoch;
+    m_calibrationBinding=binding;m_calibrationCandidate=record;
+    m_restoreReason.clear();m_calibrationReadbackPending=true;
+    m_commissioning.stage="readback";
+    m_commissioning.reason="Verbindung initialisieren; vollständige Controllerdaten werden automatisch gelesen.";
+}
+bool ControllerRuntimeWorker::matchCalibrationCandidate() {
+    const auto &r=m_calibrationCandidate;auto &c=m_commissioning;
+    const auto reject=[&](QString reason){m_restoreReason=std::move(reason);return false;};
+    if(r.isEmpty())return reject("Keine passende gespeicherte Kalibrierung; einmalige vollständige Einrichtung erforderlich.");
+    const QStringList hashes={"binding","deviceIdentityHash","profileFingerprint","settingsFingerprint"};
+    const QStringList numbers={"homeX","homeY","minX","minY","maxX","maxY","observedMinX","observedMinY","observedMaxX","observedMaxY","workOriginX","workOriginY"};
+    QSet<QString> allowed{"schema"};for(const auto &key:hashes)allowed.insert(key);for(const auto &key:numbers)allowed.insert(key);
+    if(r.size()!=allowed.size())return reject("Gespeicherte Kalibrierdaten haben ein unbekanntes Format.");
+    for(auto i=r.cbegin();i!=r.cend();++i)if(!allowed.contains(i.key()))return reject("Unbekanntes Kalibrierfeld.");
+    const auto numeric=[&](const QString &key,double &value){
+        const auto v=r.value(key);const auto type=v.metaType().id();
+        if(type!=QMetaType::Double&&type!=QMetaType::Int&&type!=QMetaType::LongLong&&type!=QMetaType::UInt&&type!=QMetaType::ULongLong)return false;
+        value=v.toDouble();return std::isfinite(value)&&std::abs(value)<=10000;
+    };
+    double schema=0;if(!numeric("schema",schema)||schema!=1)return reject("Kalibrierformat ist veraltet oder ungültig.");
+    static const QRegularExpression hex(QStringLiteral("^[0-9a-f]{64}$"));
+    for(const auto &key:hashes)if(r.value(key).metaType().id()!=QMetaType::QString||!hex.match(r.value(key).toString()).hasMatch())return reject("Kalibrierbindung ist ungültig.");
+    for(const auto &key:numbers){double value;if(!numeric(key,value))return reject("Kalibriergeometrie enthält ungültige Zahlen.");}
+    const auto value=[&](const QString &key){return r.value(key).toDouble();};
+    if(r.value("binding").toString().toLatin1()!=m_calibrationBinding ||
+       r.value("profileFingerprint").toString().toLatin1()!=m_profile.outputFingerprint())return reject("Geräteinstanz oder Profil unterscheidet sich von der gespeicherten Kalibrierung.");
+    const auto &live=m_core->setupReadback;
+    if(live.deviceIdentityHash.size()!=32 || r.value("deviceIdentityHash").toString().toLatin1()!=live.deviceIdentityHash.toHex())return reject("Frische eindeutige Controlleridentität fehlt oder ist verändert.");
+    if(r.value("settingsFingerprint").toString().toLatin1()!=live.fingerprint.toHex())return reject("Firmware oder kalibrierrelevante Controllerdaten haben sich verändert.");
+    const QPointF home(value("homeX"),value("homeY"));
+    const QPointF low(value("observedMinX"),value("observedMinY")),high(value("observedMaxX"),value("observedMaxY"));
+    const double minX=value("minX"),minY=value("minY"),maxX=value("maxX"),maxY=value("maxY");
+    if(minX>=maxX||minY>=maxY||low.x()>home.x()||low.y()>home.y()||high.x()<home.x()||high.y()<home.y())return reject("Gespeicherter Referenz-/Innenraum ist widersprüchlich.");
+    const QRectF approach(QPointF(std::min(minX,low.x()),std::min(minY,low.y())),QPointF(std::max(maxX,high.x()),std::max(maxY,high.y())));
+    if(approach.width()>m_profile.workArea().width()+.001||approach.height()>m_profile.workArea().height()+.001)return reject("Gespeicherter Anfahrtsraum überschreitet den Profilfahrweg.");
+    c.home=home;c.observedMin=low;c.observedMax=high;c.limits=QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
+    // Current G54 must be usable on the actual decimal wire grid. Never reuse
+    // old work coordinates or silently restore G10 offsets.
+    for(const auto point:{c.limits.topLeft(),c.limits.topRight(),c.limits.bottomLeft(),c.limits.bottomRight()}){
+        const auto work=point-m_core->offset;
+        const QPointF actual(GrblWireNumbers::coordinate(work.x())+m_core->offset.x(),GrblWireNumbers::coordinate(work.y())+m_core->offset.y());
+        if(actual.x()<minX||actual.x()>maxX||actual.y()<minY||actual.y()>maxY)return reject("Aktueller G54-Versatz passt nicht zum gespeicherten Wire-Innenraum; neue Zuordnung erforderlich.");
+    }
+    c.restoring=true;m_restoreReason="Gespeicherte Kalibrierung stimmt mit den frisch gelesenen Controllerdaten überein.";
+    return true;
+}
+void ControllerRuntimeWorker::finishCalibrationReference() {
+    auto &c=m_commissioning;
+    if(!m_core->insideReportedMachineBed()){cancelCommissioning("Frischer Maschinenpunkt liegt nicht im gespeicherten Innenraum.");return;}
+    const QPointF origin(m_calibrationCandidate.value("workOriginX").toDouble(),m_calibrationCandidate.value("workOriginY").toDouble());
+    c.restored=true;
+    if(origin==m_core->offset) {
+        c.stage="complete";c.reason="Gespeicherte Kalibrierung und aktueller G54 bestätigt; Maschinenreferenz frisch erneuert.";
+    } else {
+        c.stage="restoredOriginReview";c.reason="Maschinenraum und Referenz bestätigt. Aktueller G54-Arbeitsursprung hat sich verändert; die angezeigte Zuordnung ausdrücklich bestätigen.";
+    }
+}
+void ControllerRuntimeWorker::publishCalibrationRecord() {
+    const auto &c=m_commissioning;const auto &live=m_core->setupReadback;
+    if(c.stage!="complete")return;
+    if(live.deviceIdentityHash.size()!=32||m_calibrationBinding.size()!=64) {
+        m_commissioning.reason="Einrichtung gilt nur für diese Verbindung; eindeutige Controllerkennung oder Gerätebindung fehlt, Speichern nicht möglich.";
+        return;
+    }
+    QVariantMap r{{"schema",1},{"binding",QString::fromLatin1(m_calibrationBinding)},
+        {"deviceIdentityHash",QString::fromLatin1(live.deviceIdentityHash.toHex())},
+        {"profileFingerprint",QString::fromLatin1(m_profile.outputFingerprint())},
+        {"settingsFingerprint",QString::fromLatin1(live.fingerprint.toHex())},
+        {"homeX",c.home.x()},{"homeY",c.home.y()},
+        {"minX",c.limits.left()},{"minY",c.limits.top()},{"maxX",c.limits.right()},{"maxY",c.limits.bottom()},
+        {"observedMinX",c.observedMin.x()},{"observedMinY",c.observedMin.y()},{"observedMaxX",c.observedMax.x()},{"observedMaxY",c.observedMax.y()},
+        {"workOriginX",m_core->offset.x()},{"workOriginY",m_core->offset.y()}};
+    emit calibrationCompleted(m_calibrationBinding,r);
+}
+
 void ControllerRuntimeWorker::cancelCommissioning(const QString &reason) {
+    m_calibrationReadbackPending=false; // STOP/cancel cannot restart the connect readback later.
+    m_calibrationCandidate.clear();
     if(m_commissioning.stage=="inactive" || m_commissioning.stage=="fault")return;
     m_commissioning.stage="fault";m_commissioning.reason=reason;
     m_core->commissionedEnvelope.reset();
@@ -24,6 +109,8 @@ QVariantMap ControllerRuntimeWorker::commissioningSnapshot() const {
     for(auto i=m_core->setupReadback.settings.cbegin();i!=m_core->setupReadback.settings.cend();++i)settings[QString::number(i.key())]=i.value();
     QVariantMap result{{"stage",c.stage},{"reason",c.reason},{"active",c.active()},
         {"controllerState",m_core->controllerState},{"activeInputs",m_core->activeInputs},
+        {"restoreReason",m_restoreReason},{"hasSavedCalibration",c.restoring||c.restored},
+        {"calibrationSaveAvailable",m_core->setupReadback.deviceIdentityHash.size()==32&&m_calibrationBinding.size()==64},
         {"ready",c.stage=="complete"},{"settings",settings},{"fingerprint",QString::fromLatin1(c.fingerprint.toHex())},
         {"machineX",m_core->reportedMachinePosition.x()},{"machineY",m_core->reportedMachinePosition.y()},
         {"positionKnown",m_core->knownReportedMachinePosition && m_core->statusFresh()},
@@ -42,7 +129,15 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
     const auto denied=[&](const QString &reason){c.reason=reason;};
     if(m_accessory.activeLease() || m_jobActive || m_focusActive || m_core->firing || m_core->paused){denied("Einrichtung gesperrt: aktive Ausgabe oder Zubehörfreigabe.");return;}
     if(op=="begin") {
+        // Connect already performs this readback. A delayed Begin from its
+        // previous GUI snapshot must not restart a completed data transaction
+        // and race the operator's queued mechanics attestation.
+        if(c.stage=="readback" ||
+           (c.stage=="mechanics" && c.connectionEpoch==m_connectionEpoch &&
+            m_core->setupReadback.valid && c.fingerprint==m_core->setupReadback.fingerprint))return;
+        // Begin from savedHomeReady remains an explicit full recalibration.
         if(!m_core->setupReadyForAttestation()){denied("Frischer geprüfter Idle- oder Homing-Alarmstatus mit S0 für Einrichtung erforderlich.");return;}
+        m_calibrationCandidate.clear();m_restoreReason.clear();
         c={};c.connectionEpoch=m_connectionEpoch;c.stage="readback";c.reason="Lese Einstellungen, Modalzustand, Offsets und Startupblöcke.";c.deadline=setupNow()+15000;
         if(!m_core->beginSetupReadback())cancelCommissioning("Controllerdaten konnten nicht angefordert werden.");
         return;
@@ -109,18 +204,19 @@ void ControllerRuntimeWorker::setupData(const QVariantMap &data) {
             c.stage="workCoordinates";m_core->commissionedEnvelope=c.limits;
             c.reason="Vier physische Ecken bestätigt. G54/WPos/WCO und Modellzuordnung prüfen; derzeitigen Arbeitsnullpunkt ausdrücklich übernehmen.";
         } else {c.target=c.cornerIndex==1?c.limits.bottomRight():c.cornerIndex==2?c.limits.topRight():c.limits.topLeft();c.stage="cornerReady";c.reason="Physische Ecke bestätigt; nächste Ecke laserfrei anfahren.";}
-    } else if(op=="coordinatesObserved" && c.stage=="workCoordinates") {
+    } else if(op=="coordinatesObserved" && (c.stage=="workCoordinates"||c.stage=="restoredOriginReview")) {
         if(!m_core->positionReferenced || !m_core->insideReportedMachineBed() || !m_core->knownOffset){denied("Aktueller G54-/Positionsreadback fehlt.");return;}
-        c.stage="complete";c.reason="Sessionbezogener gemessener Fahrraum und G54-Zuordnung bestätigt. Absaugung und Materialfreigabe separat erforderlich.";
+        c.stage="complete";c.reason="Gemessener Fahrraum und G54-Zuordnung bestätigt. Gerätebetrieb und Material vor dem Start prüfen.";
+        publishCalibrationRecord();
     } else denied("Dieser Einrichtungsschritt ist in der aktuellen Phase nicht zulässig.");
 }
 void ControllerRuntimeWorker::setupMotion(const ControllerRuntimeRequest &request) {
     auto &c=m_commissioning;
     if(m_accessory.activeLease()||m_jobActive||m_focusActive||m_core->firing||m_core->paused||m_core->busy()||!m_core->statusFresh()||
        !m_core->setupReadback.valid || c.fingerprint!=m_core->setupReadback.fingerprint)return;
-    if(request.kind==ControllerRuntimeRequestKind::SetupHome && c.stage=="homeReady") {
+    if(request.kind==ControllerRuntimeRequestKind::SetupHome && (c.stage=="homeReady"||c.stage=="savedHomeReady")) {
         m_core->commissionedHomingContract=true;
-        c.stage="homing";c.deadline=setupNow()+90000;c.reason="Referenzfahrt läuft; tatsächlichen Homeort anschließend bestätigen.";
+        c.stage=c.restoring?"restoringHome":"homing";c.deadline=setupNow()+90000;c.reason="Referenzfahrt läuft; tatsächlichen Homeort anschließend bestätigen.";
         m_core->home();m_core->commissionedHomingContract=false; // Exactly one intended Home.
         if(!m_core->homingPending)cancelCommissioning("Referenzfahrt wurde nicht angenommen.");
         return;
@@ -139,6 +235,9 @@ void ControllerRuntimeWorker::setupMotion(const ControllerRuntimeRequest &reques
         if(dx!=0)c.xConfirmed=true;
         if(dy!=0)c.yConfirmed=true;
         c.stage="probePending";
+    } else if(request.kind==ControllerRuntimeRequestKind::SetupCorner && c.stage=="savedApproachReady") {
+        if(request.x!=0)return;
+        target=c.limits.topLeft();c.stage="restoringApproach";
     } else if(request.kind==ControllerRuntimeRequestKind::SetupCorner && c.stage=="cornerReady") {
         if(request.x!=c.cornerIndex||c.cornerIndex<0||c.cornerIndex>3)return;
         const auto r=c.limits;target=c.cornerIndex==0?r.bottomLeft():c.cornerIndex==1?r.bottomRight():c.cornerIndex==2?r.topRight():r.topLeft();
@@ -151,7 +250,19 @@ void ControllerRuntimeWorker::setupMotion(const ControllerRuntimeRequest &reques
     if(!m_core->commands({"M5 S0","G21 G90 G54",QString("G1 X%1 Y%2 F300 S0").arg(x,y)}))cancelCommissioning("Einzelbewegung wurde nicht angenommen.");
 }
 void ControllerRuntimeWorker::updateCommissioning() {
-    if(m_setupUpdating||!m_commissioning.active())return;
+    if(m_setupUpdating)return;
+    if(m_calibrationReadbackPending) {
+        if(!m_core->connected()||m_core->awaitingReset||m_core->handshaking||m_core->busy()||m_local.engaged())return;
+        if(!m_core->setupReadyForAttestation()) {
+            m_commissioning.reason="Automatische Datenprüfung wartet auf frischen ruhenden S0-Zustand oder zulässigen Homing-Alarm ohne Sperreingang; keine automatische Bewegung.";
+            return;
+        }
+        m_calibrationReadbackPending=false;
+        m_commissioning.deadline=setupNow()+15000;
+        if(!m_core->beginSetupReadback())cancelCommissioning("Automatische Controllerdaten konnten nicht angefordert werden.");
+        return;
+    }
+    if(!m_commissioning.active())return;
     QScopedValueRollback<bool> guard(m_setupUpdating,true);auto &c=m_commissioning;
     if(c.connectionEpoch!=m_connectionEpoch || !m_core->connected() || m_core->awaitingReset || (m_core->handshaking && !m_core->setupReadback.pending)) {cancelCommissioning("Verbindung/Reset/Neustart hat die Einrichtung entwertet.");return;}
     if(c.stage!="complete" && c.stage!="readback" && m_core->knownOutput && m_core->reportedOutput!=0) {cancelCommissioning("Unerwartete gemeldete Leistung während laserfreier Einrichtung.");return;}
@@ -161,7 +272,9 @@ void ControllerRuntimeWorker::updateCommissioning() {
             if(!m_core->setupReadback.valid){cancelCommissioning(m_core->setupReadback.error);return;}
             if(m_core->setupReadyForAttestation()) {
                 if(!closePoint(m_core->offset,m_core->setupReadback.g54)){cancelCommissioning("G54-Readback und aktueller WCO widersprechen sich.");return;}
-                c.fingerprint=m_core->setupReadback.fingerprint;c.stage="mechanics";c.reason="Controllerdaten frisch gelesen. Endschalter, Richtung, freie Mechanik und deaktivierte Laseremission prüfen.";}
+                c.fingerprint=m_core->setupReadback.fingerprint;
+                if(matchCalibrationCandidate()) {c.stage="savedHomeReady";c.reason="Kalibrierung passt. Bewusste Referenzfahrt starten; beim Verbinden erfolgt keine Bewegung.";}
+                else {c.stage="mechanics";c.reason="Controllerdaten frisch gelesen. "+m_restoreReason+" Endschalter, Richtung, freie Mechanik und deaktivierte Laseremission prüfen.";}}
         }
         return;
     }
@@ -180,7 +293,21 @@ void ControllerRuntimeWorker::updateCommissioning() {
         // This intermediate callback cannot finish or fail the transaction.
         if(m_core->ready() && m_core->positionReferenced && !m_core->verified())return;
         if(!m_core->ready() || !m_core->verified() || !m_core->positionReferenced){cancelCommissioning("Frischer Idle/S0-Referenzreadback fehlt.");return;}
-        if(c.stage=="homing") {
+        if(c.stage=="restoringHome") {
+            if(!closePoint(m_core->reportedMachinePosition,c.home)||!closePoint(m_core->offset,m_core->setupReadback.g54)){cancelCommissioning("Frische Referenz stimmt nicht mit gespeichertem Home/G54 überein; erneut kalibrieren.");return;}
+            c.homeObserved=true;m_core->commissionedModalContract=true;
+            const auto current=m_core->reportedMachinePosition;
+            const bool inside=current.x()>=c.limits.left()&&current.x()<=c.limits.right()&&current.y()>=c.limits.top()&&current.y()<=c.limits.bottom();
+            if(inside) {m_core->commissionedEnvelope=c.limits;finishCalibrationReference();}
+            else {
+                const QRectF approach(QPointF(std::min(c.limits.left(),c.observedMin.x()),std::min(c.limits.top(),c.observedMin.y())),QPointF(std::max(c.limits.right(),c.observedMax.x()),std::max(c.limits.bottom(),c.observedMax.y())));
+                m_core->commissionedEnvelope=approach;c.cornerIndex=0;c.target=c.limits.topLeft();c.stage="savedApproachReady";
+                c.reason="Home liegt außerhalb des gespeicherten Innenraums. Bestätigten langsamen S0-Anlauf zum Innenraumursprung ausdrücklich starten.";
+            }
+        } else if(c.stage=="restoringApproach") {
+            if(!closePoint(m_core->reportedMachinePosition,c.target)){cancelCommissioning("Gespeicherter Anlauf hat den bestätigten Innenraumursprung nicht erreicht.");return;}
+            m_core->commissionedEnvelope=c.limits;finishCalibrationReference();
+        } else if(c.stage=="homing") {
             if(!closePoint(m_core->offset,m_core->setupReadback.g54)){cancelCommissioning("Unerwartete WCO-Änderung während Referenzfahrt.");return;}
             c.home=m_core->reportedMachinePosition;c.stage="geometry";c.reason="Referenz protokolliert. Tatsächlichen Homeort und Pull-off beobachten und bestätigen.";}
         else {

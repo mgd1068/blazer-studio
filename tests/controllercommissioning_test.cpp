@@ -58,6 +58,19 @@ class ControllerCommissioningTest:public QObject {
         QVERIFY(r.commissioningData({{"op","limits"},{"minX",-190.0},{"minY",-140.0},{"maxX",-10.0},{"maxY",-10.0}}));QTRY_COMPARE(stage(r),QString("cornerReady"));
     }
 private slots:
+    void delayedBeginCannotOvertakeMechanicsAttestation() {
+        RuntimePeer peer;QVERIFY(peer.start(script).ok);
+        ControllerRuntimeSession r(DeviceProfile::m3Reference());
+        QVERIFY(r.requestOpen(peer.port(),QByteArray(64,'d')).enqueued);
+        QTRY_VERIFY(stage(r)=="mechanics" && r.status().ready && !r.status().requestPending);
+        const auto settingsReads=[&]{int n=0;for(const auto &entry:peer.snapshot().object.value("events").toArray()){auto e=entry.toObject();if(e.value("kind")=="command"&&e.value("value")=="$$")++n;}return n;};
+        const auto before=settingsReads();QVERIFY(before>0); // Basic handshake plus full initialization may both read $$.
+        QVERIFY(data(r,"begin"));
+        QVERIFY(r.commissioningData({{"op","mechanics"},{"switches",true},{"direction",true},{"freeTravel",true},{"laserDisabled",true}}));
+        QTRY_COMPARE(stage(r),QString("homeReady"));
+        QCOMPARE(settingsReads(),before);QCOMPARE(count(peer,"physicalMove"),0);QCOMPARE(count(peer,"homed"),0);
+        r.close();QTRY_VERIFY(!r.status().connected);
+    }
     void positiveHomeDoesNotInventUnvisitedNegativeTravel_data() {
         QTest::addColumn<double>("maxX");QTest::addColumn<double>("maxY");QTest::addColumn<bool>("accepted");
         QTest::newRow("user-measured-interior")<<199.0<<149.0<<true;
@@ -201,6 +214,9 @@ private slots:
     void changedConfigurationRevokes(){RuntimePeer peer;ControllerRuntimeSession r(DeviceProfile::m3Reference());home(peer,r);if(QTest::currentTestFailed())return;
         QVERIFY(peer.control({{"action","reply"},{"data","$23=0\r\n"}}).ok);QTRY_COMPARE(stage(r),QString("fault"));QVERIFY(!r.status().positionReferenced);QVERIFY(!r.status().motionSafetyError.isEmpty());r.close();QTRY_VERIFY(!r.status().connected);}
     void absentAckTimeoutAndStop(){RuntimePeer peer;ControllerRuntimeSession r(DeviceProfile::m3Reference());QVERIFY(peer.start(script).ok);QVERIFY(r.requestOpen(peer.port(),QByteArray(64,'c')).enqueued);QTRY_VERIFY(r.status().ready);
+        // A repeated Begin in mechanics now intentionally joins the automatic
+        // readback. Request a fresh readback from the next stable wizard phase.
+        QVERIFY(r.commissioningData({{"op","mechanics"},{"switches",true},{"direction",true},{"freeTravel",true},{"laserDisabled",true}}));QTRY_COMPARE(stage(r),QString("homeReady"));
         QVERIFY(peer.control({{"action","set"},{"values",QJsonObject{{"ackEnabled",false}}}}).ok);QVERIFY(data(r,"begin"));QTRY_COMPARE(stage(r),QString("readback"));QVERIFY(ControllerRuntimeTestAccess::expire(r));QTRY_COMPARE(stage(r),QString("fault"));QCOMPARE(count(peer,"physicalMove"),0);r.close();QTRY_VERIFY(!r.status().connected);}
     void normalActionsCannotBorrowSetupEnvelope(){RuntimePeer peer;ControllerRuntimeSession r(DeviceProfile::m3Reference());home(peer,r);if(QTest::currentTestFailed())return;
         const auto moves=count(peer,"physicalMove");QVERIFY(ControllerRuntimeTestAccess::action(r,ControllerNativeAction::Jog,1,0));QTest::qWait(100);QCOMPARE(count(peer,"physicalMove"),moves);

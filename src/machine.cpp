@@ -250,9 +250,9 @@ QByteArray Machine::nativeBinding(const QString &action,const QVariantMap &argum
         const auto setup=status.commissioning;const auto stage=setup.value("stage").toString();
         if(status.busy||status.firing||status.accessoryLeaseActive||status.accessoryJobActive||status.accessoryFocusActive)return {};
         if(action=="setupZero") {if(stage!="workCoordinates"||!arguments.isEmpty())return {};}
-        else if(action=="setupHome") {if(stage!="homeReady"||!arguments.isEmpty())return {};}
+        else if(action=="setupHome") {if((stage!="homeReady"&&stage!="savedHomeReady")||!arguments.isEmpty())return {};}
         else if(action=="setupProbe") {if(stage!="geometry"||!setup.value("homeObserved").toBool()||arguments.size()!=2||!finiteInputNumber(arguments.value("dx"))||!finiteInputNumber(arguments.value("dy")))return {};}
-        else if(action=="setupCorner") {if(stage!="cornerReady"||arguments.size()!=1||arguments.value("index").toInt()!=setup.value("cornerIndex").toInt())return {};}
+        else if(action=="setupCorner") {if((stage!="cornerReady"&&stage!="savedApproachReady")||arguments.size()!=1||arguments.value("index").toInt()!=setup.value("cornerIndex").toInt())return {};}
         else return {};
         QByteArray data;QDataStream stream(&data,QIODevice::WriteOnly);
         stream<<action<<QJsonDocument::fromVariant(arguments).toJson(QJsonDocument::Compact)<<setup.value("fingerprint").toString()<<stage<<status.connectionEpoch<<status.coordinateEpoch;

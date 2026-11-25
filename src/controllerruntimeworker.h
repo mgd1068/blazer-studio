@@ -41,7 +41,15 @@ class ControllerRuntimeWorker final : public QObject {
     QVariantMap localFrameSnapshot() const;
     QByteArray supervisionBinding() const;
     ControllerCommissioning m_commissioning;
-    bool m_setupUpdating=false;
+    bool m_setupUpdating=false, m_calibrationReadbackPending=false;
+    QByteArray m_calibrationBinding;
+    QVariantMap m_calibrationCandidate;
+    QString m_restoreReason;
+    void beginCalibrationRestore(const QVariantMap &record,const QByteArray &binding);
+    void clearCalibrationSession();
+    bool matchCalibrationCandidate();
+    void finishCalibrationReference();
+    void publishCalibrationRecord();
     QByteArray m_operatorSession, m_operatorSource, m_activeOperatorOperation;
     quint64 m_operatorAttempt=0, m_operatorWitnessCoordinate=0;
     bool m_operatorPaused=false;
@@ -89,6 +97,7 @@ class ControllerRuntimeWorker final : public QObject {
     void shutdown();
   signals:
     void latestAvailable();
+    void calibrationCompleted(QByteArray binding,QVariantMap record);
     void openFinished(quint64 requestId, bool opened, const QString &reason);
     void shutdownFinished();
 };

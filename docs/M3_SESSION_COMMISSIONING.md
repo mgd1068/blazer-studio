@@ -2,7 +2,7 @@
 
 Der Worker hält den Zustand; GUI-Attestierungen sind ausdrücklich vom Operator
 beobachtete Mechanikdaten, keine automatisch gemessenen Tatsachen. Die Evidenz
-wird nicht als ausführbare Freigabedatei gespeichert/importiert. Profil, aktive
+wird nicht als ausführbare Freigabedatei gespeichert/importiert. Ab beta.10.5 können abgeschlossene Geometrie- und Kalibrierdaten wiederverwendet werden, wie unten beschrieben. Profil, aktive
 Verbindungsepoche, Firmware und Einstellungen binden sie an diese Sitzung.
 
 Vor der ersten Verbindung muss die Oberfläche auf sichere Erstprüfung mit
@@ -55,6 +55,40 @@ werden bis Referenz, Proben, vier Ecken, G10 und Grant durchlaufen. Negative
 Readbacks/fehlende ACKs/Attestierungen/Konfigurationsänderungen und Versuch einer
 normalen Bewegung während Setup werden unabhängig beobachtet. Keine echten
 Ports, OS-Eingaben, Laser- oder Hardwarevalidierung.
+
+
+## Gespeicherte Kalibrierung und automatische Initialisierung
+
+Nach erfolgreichem Verbindungsaufbau wird ein vollständiger Readback automatisch
+angefordert. Connect löst keine Referenzfahrt, G10-Offsetänderung oder Gravur aus.
+Der lokale Datenspeicher bindet einen abgeschlossenen Kalibrierdatensatz an den
+DeviceLibrary-Bindingdigest und authentifiziert den Inhalt mit HMAC-SHA256. Der
+Schlüssel und die atomar geschriebenen Dateien sind nur für den lokalen Benutzer
+lesbar. Dies schützt vor beschädigten oder versehentlich veränderten Datensätzen;
+es ist keine Vertrauensgrenze gegenüber demselben Betriebssystembenutzer.
+
+Der Worker prüft Schema, endliche Geometrie, Profil, Hardwarekennung aus der
+geordneten frischen $I-Antwort und Firmware-/Settingsfingerprint erneut. Ein
+Datensatz enthält niemals positionReferenced oder eine Ausgabe-/Zubehörfreigabe.
+Ohne eindeutige Controllerkennung bleibt die alte vollständige Sitzungseinrichtung
+verwendbar, wird aber nicht zur automatischen Wiederverwendung gespeichert.
+
+`savedHomeReady` erlaubt genau einen frischen nativen `setupHome`-Intent. Erst
+bestätigtes Homing mit frischem Idle/S0 und passender Maschinenposition stellt
+die Referenz wieder her. Home außerhalb des Innenraums führt zu
+`savedApproachReady`: ein eigener nativer `setupCorner(0)` fordert die gespeicherte
+langsame S0-Anfahrt an. Normale Geräteaktionen bleiben dabei gesperrt. Nach der
+Anfahrt gilt ausschließlich das gespeicherte Innenrechteck. Bei geändertem G54
+verlangt `restoredOriginReview` die erneute Zuordnungsbestätigung; unverändertes
+G54 erlaubt den Abschluss nach der Referenz. Kein automatisches Starten oder
+Umgehen von STOPP, Alarm, Door, Reset, Handshake oder Parameterwidersprüchen.
+
+Die letzte Bestätigung der vollständigen Einrichtung schließt den Dialog erst
+nach Worker-complete. Während dieser asynchronen Bestätigung gibt es keinen
+zweiten schließenden Abbruchknopf; STOPP bleibt möglich. Ein ausdrückliches
+Verwerfen während einer unvollständigen Einrichtung widerruft weiterhin die
+Positionsreferenz. Der Widerrufsgrund bleibt im Hauptfenster und beim Wiederöffnen
+sichtbar, bis ausdrücklich neue Controllerdaten angefordert werden.
 
 ## Beaufsichtigte externe Absaugung
 

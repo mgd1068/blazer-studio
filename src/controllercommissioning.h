@@ -15,8 +15,9 @@ struct ControllerCommissioning {
     quint64 connectionEpoch = 0;
     qint64 deadline = -1;
     bool xConfirmed = false, yConfirmed = false, homeObserved = false;
+    bool restoring = false, restored = false;
     bool active() const { return stage != "inactive" && stage != "fault"; }
-    bool moving() const { return stage == "homing" || stage == "probePending" || stage == "cornerPending"; }
+    bool moving() const { return stage == "restoringHome" || stage == "restoringApproach" || stage == "homing" || stage == "probePending" || stage == "cornerPending"; }
 };
 // Public GUI contract is exposed by Machine:
 // commissioning: readonly map {stage,reason,settings,fingerprint,machineX/Y,

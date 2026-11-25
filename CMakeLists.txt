@@ -46,6 +46,7 @@ qt_add_library(blazer-core STATIC
     src/controllersession.cpp src/controllersession.h
     src/grbl.cpp src/grbl.h src/machine.cpp src/machine.h
     src/controllercommissioning.cpp src/controllercommissioning.h src/controlleroperatorsupervision.cpp
+    src/controllercalibrationstore.cpp src/controllercalibrationstore.h
     src/controllerruntime.cpp src/controllerruntime.h src/controllerruntimeworker.h src/controllerruntimemailbox.h
     src/simulator.cpp src/simulator.h src/workspace.cpp src/workspace.h)
 qt_add_resources(blazer-core manufacturer_catalog PREFIX /catalog FILES profiles/manufacturer-materials.json)
@@ -69,7 +70,7 @@ endif()
 
 set(blazer_qml
     qml/NativeImportDialog.qml qml/VectorInspectionDialog.qml qml/TechnicalDiagnosticsDialog.qml qml/ArtLibraryDialog.qml qml/JobPlacementDialog.qml qml/DialogField.qml qml/DeviceManagerDialog.qml qml/BarcodeDialog.qml qml/MaterialTestRecordDialog.qml qml/SettingsBundleDialog.qml
-    qml/ExtractionSupervisionPanel.qml qml/M3CommissioningDialog.qml qml/ManualStartDialog.qml qml/ManualRegistrationDialog.qml qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
+    qml/ExtractionSupervisionPanel.qml qml/DeviceInitializationPanel.qml qml/M3CommissioningDialog.qml qml/ManualStartDialog.qml qml/ManualRegistrationDialog.qml qml/Main.qml qml/OnboardingDialog.qml qml/BetaHelpDialog.qml qml/StartupError.qml qml/Help.js qml/HelpBubble.qml qml/ToolCombo.qml qml/ToolsPanel.qml qml/ReliefPanel.qml qml/ActionButton.qml qml/SectionLabel.qml qml/NumberField.qml
     qml/ManufacturerDialog.qml qml/MaterialEditor.qml qml/ProjectDialog.qml qml/RecentProjectsDialog.qml qml/HistoryDialog.qml)
 qt_add_executable(blazer-studio src/main.cpp)
 qt_add_qml_module(blazer-studio URI BlazerStudio VERSION 1.0 QML_FILES ${blazer_qml})
@@ -382,3 +383,25 @@ install(TARGETS blazer-studio RUNTIME DESTINATION bin)
 install(FILES tools/photo_depth.py tools/setup_depth.py DESTINATION share/blazer-studio/tools)
 
 include(packaging/Packaging.cmake)
+
+if(BUILD_TESTING)
+    qt_add_executable(blazer-calibrationreconnect-tests tests/calibrationreconnect_test.cpp)
+    target_link_libraries(blazer-calibrationreconnect-tests PRIVATE blazer-core Qt6::Test)
+    target_compile_definitions(blazer-calibrationreconnect-tests PRIVATE BLAZER_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME calibrationreconnect COMMAND blazer-calibrationreconnect-tests -platform offscreen)
+    set_tests_properties(calibrationreconnect PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QPA_PLATFORM=offscreen")
+endif()
+
+# Standalone authenticated calibration-data store tests: no runtime or devices.
+if(BUILD_TESTING)
+    qt_add_executable(blazer-controllercalibrationstore-tests
+        tests/controllercalibrationstore_test.cpp src/controllercalibrationstore.cpp)
+    target_include_directories(blazer-controllercalibrationstore-tests PRIVATE src)
+    target_link_libraries(blazer-controllercalibrationstore-tests PRIVATE Qt6::Core Qt6::Test)
+    if(BLAZER_SANITIZERS)
+        target_compile_options(blazer-controllercalibrationstore-tests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(blazer-controllercalibrationstore-tests PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME controllercalibrationstore COMMAND blazer-controllercalibrationstore-tests)
+    set_tests_properties(controllercalibrationstore PROPERTIES TIMEOUT 30)
+endif()

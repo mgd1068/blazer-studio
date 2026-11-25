@@ -99,6 +99,9 @@ class ControllerRuntimeSession final : public ControllerSession {
     ControllerJobPreparation *m_preparation = nullptr;
     QByteArray m_candidateLocalFrame;
     QString m_localAdmissionError;
+    QString m_calibrationStorageError;
+    QByteArray m_calibrationBinding;
+    bool m_calibrationStored=false;
     quint64 m_localAdmissionRevision=0;
     QTimer *m_uiAgeTicker = nullptr; // Read-only projection, never a safety deadline.
     ControllerRuntimeInputStamp sealNativePress(quint64 interaction, quint64 window,

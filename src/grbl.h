@@ -137,7 +137,7 @@ class GrblSession : public ControllerSession {
         bool g54Known=false, g92Known=false, tloKnown=false;
         QPointF g54, g92;
         double tlo=0;
-        QByteArray fingerprint, firmware;
+        QByteArray fingerprint, firmware, deviceIdentityHash;
         QString error;
     } setupReadback;
     bool setupReadyForAttestation() const;

@@ -1,6 +1,6 @@
-# Blazer Studio – Einstieg in beta.10.4-dev
+# Blazer Studio – Einstieg in beta.10.5-dev
 
-**Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.8-dev ergänzt eine geführte, nur für die aktuelle Verbindung geltende M3-Einrichtung und einen ausdrücklich bestätigten Absaugmodus ohne Sensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
+**Beta-Ziel:** ein nutzbarer M3-Grundworkflow vom Entwurf bis zum beaufsichtigten Auftrag. Die vollständige LightBurn-Parität bleibt ein weiteres Entwicklungsziel. beta.10.5 ergänzt gespeicherte Gerätekalibrierung mit automatischem Controllerabgleich. Die Maschinenposition wird bei jeder Verbindung neu referenziert. Der beaufsichtigte Gerätezyklus benötigt keinen externen Absaugsensor. Diese Softwarefunktionen sind keine bereits erfolgte physische Abnahme deines Geräts. Die veröffentlichte beta.7 und ältere Versuche erhalten dadurch keine nachträgliche Freigabe. Siehe [aktuelle Grenzen](KNOWN_LIMITATIONS.md).
 
 Getestete Paketplattform: **Ubuntu 26.04, x86_64**. Andere Linux-Versionen sind noch nicht als Paketplattform bestätigt. Es handelt sich um einen Software-Testkandidaten; Geräte-/Materialabnahme und externe Bedienungstests sind offen.
 
@@ -51,16 +51,24 @@ Beta.10.4 prüft den gemessenen Innenfahrraum zusammen mit dem bestätigten Refe
 
 Der Simulator bleibt Standard. Ein echter Anschluss erfolgt ausdrücklich im Gerätebereich. USB-Gerätezugriff muss für den Benutzer erlaubt sein; bei Berechtigungsproblemen die Zugriffsrechte beziehungsweise Mitgliedschaft in der Ubuntu-Gruppe `dialout` mit dem Systemadministrator prüfen und anschließend neu anmelden. Die Anwendung verlangt keine Ausführung als root.
 
-### M3 für diese Verbindung einrichten
+### Ein bekanntes M3 initialisieren
+
+1. Das tatsächliche Gerät auswählen und **GRBL verbinden**. Blazer liest Firmware, Controllerkennung, Einstellungen, Offsets und Startupblöcke automatisch. Dabei fährt der Kopf nicht los.
+2. Passt eine gespeicherte Einrichtung zum Controller, **Referenzieren – ohne Laser** drücken und die freie Referenzfahrt am Gerät beobachten. Bei unverändertem Arbeitsursprung ist die Initialisierung damit abgeschlossen.
+3. Liegt der Referenzort außerhalb des gespeicherten Innenraums, bietet Blazer eine zusätzliche langsame Fahrt **Sicheren Startpunkt anfahren – ohne Laser** an. Hat sich der Arbeitsursprung geändert, die neue Zuordnung im kleinen Ursprungsdialog prüfen und bestätigen. Es werden keine alten Offsets automatisch zurückgeschrieben.
+
+Die gespeicherten Daten enthalten Fahrraum und Prüfparameter, keine gültige Position und keine Startfreigabe. Sie sind an Geräteinstanz, Controllerkennung, Profil und Einstellungen gebunden. Fehlt ein passender Datensatz, nennt Blazer den Grund und fordert die einmalige vollständige Einrichtung an. Beschädigte Dateien werden nicht übernommen. Ältere Versionen haben keinen wiederverwendbaren Datensatz gespeichert; alte Bildschirmbestätigungen werden nicht nachträglich als Datei importiert.
+
+### Ein M3 erstmalig oder nach relevanten Änderungen einrichten
 
 1. Vor dem Verbinden die Laseremission **am Gerät sicher deaktivieren**, den Fahrweg räumen und am Gerät bleiben. Schon das Öffnen des USB-Anschlusses kann die Firmware starten; der Verbindungsaufbau setzt den Controller zurück. Unter **Gerät & Positionierung → Zuordnung …** das tatsächliche Gerät mit seinem Anschluss auswählen, dann ausdrücklich **GRBL verbinden**. Eine Verbindung allein startet keinen Auftrag.
-2. **M3 einrichten …** öffnen. Der Dialog liest Controller- und Einstellungsdaten. Bei einer Ablehnung den angezeigten Grund klären; die Anwendung löscht keine Startupbefehle und umgeht keine Schutzverriegelung.
+2. **M3 einrichten …** öffnen. Die Controllerdaten werden nach dem Verbinden automatisch gelesen. Bei einer Ablehnung den angezeigten Grund klären; die Anwendung löscht keine Startupbefehle und umgeht keine Schutzverriegelung.
 3. Endschalter, Homingrichtung/Pull-off, freien Fahrweg und deaktivierte Laseremission tatsächlich prüfen und bestätigen. Erst **Referenzfahrt jetzt starten** fordert die Fahrt an. Anschließend den wirklichen Referenzort am Gerät bestätigen.
 4. Je Achse einen freien **1-mm-Prüfschritt** wählen, Richtung und Strecke messen und einzeln bestätigen. Der Positionszähler ersetzt diese Beobachtung nicht. Zeichnungsbezug: Ursprung links unten, +X nach rechts, +Y nach oben.
 5. Den gemessenen **Innenfahrraum in Maschinenkoordinaten** mit Abstand zu den mechanischen Grenzen eingeben. Negative Werte sind möglich; die nominellen 200 × 150 mm sind kein Messnachweis. Alle vier Ecken einzeln laserfrei anfahren und am Gerät bestätigen.
-6. Die geprüfte Ursprungsecke ausdrücklich als Arbeitsnull setzen und anschließend die angezeigte Maschinen-/Arbeitskoordinaten-Zuordnung prüfen und bestätigen. Der Dialog startet danach keinen Laserauftrag. Das Design muss vollständig innerhalb des geprüften Innenraums liegen.
+6. Die angezeigte Maschinen-/Arbeitskoordinaten-Zuordnung prüfen. Falls nötig die geprüfte Ursprungsecke ausdrücklich als Arbeitsnull setzen. Mit **Koordinaten bestätigen und Einrichtung abschließen** abschließen. Der Dialog wartet auf die Bestätigung und schließt anschließend selbst; er startet keinen Laserauftrag. Das Design muss vollständig innerhalb des geprüften Innenraums liegen.
 
-Die Einrichtung gilt nur für diese Gerätesitzung. STOPP, Reset, Trennung, Fehler oder Änderungen an Firmware/Einstellungen entwerten sie; anschließend erneut einrichten. Ein Projekt speichert keine Gerätefreigabe. Bei falscher Richtung oder unerwartetem Verhalten sofort STOPP beziehungsweise den Not-Aus am Gerät verwenden. Siehe [Einrichtungsvertrag](../M3_SESSION_COMMISSIONING.md).
+Eine vollständig bestätigte Einrichtung wird lokal gespeichert, wenn eine eindeutige Controllerkennung vorhanden ist. Ohne diese Kennung gilt sie nur für die aktuelle Verbindung. STOPP, Reset, Trennung oder Fehler entwerten die aktuelle Positionsreferenz; ein passender gespeicherter Datensatz kann nach neuer Prüfung und bewusster Referenzfahrt erneut verwendet werden. Änderungen an Firmware, relevanten Einstellungen, Profil oder Controller erfordern eine neue vollständige Einrichtung. Ein Projekt speichert keine Gerätefreigabe. Bei falscher Richtung oder unerwartetem Verhalten sofort STOPP beziehungsweise den Not-Aus am Gerät verwenden. Siehe [Einrichtungsvertrag](../M3_SESSION_COMMISSIONING.md).
 
 ### Stattdessen ab Handposition starten
 

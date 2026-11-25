@@ -83,6 +83,9 @@ void ControllerRuntimeWorker::localData(const ControllerRuntimeRequest &request)
     if(op=="cancel") {invalidateLocalFrame("Lokalen Rahmen abgebrochen; globale Referenz bleibt unbekannt.");f.phase="inactive";return;}
     if(op=="begin") {
         if(m_core->busy()||m_core->firing||m_accessory.activeLease()||m_jobActive||m_focusActive||!m_core->connected()||!m_core->statusFresh()||!m_core->knownOutput||m_core->reportedOutput!=0) {reject("Vor Handpositionierung erst aktiven Auftrag STOPPEN und frischen ruhenden S0-Zustand abwarten.");return;}
+        // Explicit local positioning replaces global initialization, while the
+        // connection's device binding remains available for later recalibration.
+        m_calibrationReadbackPending=false;m_calibrationCandidate.clear();
         invalidateLocalFrame("Neuer manueller Bezug.");f={};f.resultRevision=request.id;f.frameId=nonce();f.connectionEpoch=m_connectionEpoch;f.startupSequence=m_core->startupSequence;
         f.phase="reading";f.deadline=localNow()+15000;f.reason="Nur Controllerdaten lesen; globale Referenz für Handpositionierung verwerfen.";
         m_commissioning.stage="inactive";m_core->commissionedEnvelope.reset();m_core->commissionedModalContract=m_core->commissionedHomingContract=m_core->commissionedOverrideContract=false;m_core->positionReferenced=false;
