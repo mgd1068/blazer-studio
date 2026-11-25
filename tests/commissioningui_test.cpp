@@ -445,6 +445,20 @@ class CommissioningUiTest : public QObject {
         h.model.setStage("homing");
         QTRY_VERIFY(!label->isVisible());
     }
+    void activeLimitAlarmRemainsVisibleInsideModalDialog() {
+        Harness h;
+        QVERIFY2(h.create(false), qPrintable(h.error));
+        QTRY_COMPARE(h.model.begins, 1);
+        h.model.data["controllerState"]="Alarm";
+        h.model.data["activeInputs"]=true;
+        h.model.setStage("homeReady");
+        auto label=h.item("commissioningControllerState");
+        QVERIFY(label);
+        QTRY_VERIFY(label->isVisible());
+        QVERIFY(label->property("text").toString().contains("Alarm"));
+        QVERIFY(label->property("text").toString().contains("Endschalter oder Sperreingang aktiv"));
+        QCOMPARE(h.model.motions(),0);
+    }
 };
 QTEST_MAIN(CommissioningUiTest)
 #include "commissioningui_test.moc"

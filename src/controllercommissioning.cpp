@@ -22,6 +22,7 @@ QVariantMap ControllerRuntimeWorker::commissioningSnapshot() const {
     const auto &c=m_commissioning;QVariantMap settings;
     for(auto i=m_core->setupReadback.settings.cbegin();i!=m_core->setupReadback.settings.cend();++i)settings[QString::number(i.key())]=i.value();
     QVariantMap result{{"stage",c.stage},{"reason",c.reason},{"active",c.active()},
+        {"controllerState",m_core->controllerState},{"activeInputs",m_core->activeInputs},
         {"ready",c.stage=="complete"},{"settings",settings},{"fingerprint",QString::fromLatin1(c.fingerprint.toHex())},
         {"machineX",m_core->reportedMachinePosition.x()},{"machineY",m_core->reportedMachinePosition.y()},
         {"positionKnown",m_core->knownReportedMachinePosition && m_core->statusFresh()},
