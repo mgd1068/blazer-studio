@@ -1,4 +1,9 @@
 #include "machine.h"
+#include "applicationservices.h"
+#include "materiallibrary.h"
+#include "registration.h"
+#include "workspace.h"
+#include "reliefpreview.h"
 #include "document.h"
 #include "controllerruntime.h"
 #include "controllerruntimeworker.h"
@@ -28,7 +33,7 @@ public:
     }
     static bool seed(NativeInputIntentAdapter &a,QQuickItem &control,const QString &action,const QByteArray &binding) {
         const auto key=action+"#"+QString::number(quintptr(&control),16);
-        if(binding.isEmpty()||a.m_controls.value(key)!=&control||!a.m_clickBindings.value(key))return false;
+        if(binding.isEmpty()||a.m_controls.value(key)!=&control||!a.m_clickBindings.value(key)){qWarning()<<"Missing native binding/control"<<key<<binding.size()<<a.m_controls.size()<<a.m_controls.keys()<<control.property("nativeActionRole");return false;}
         const auto now=NativeInputIntentAdapter::nowMs();a.m_domain=NativeInputIntentAdapter::Domain::X11Server32;
         a.m_sample={1000,now-5,now-4};
         auto token=std::make_shared<NativeInputContextToken>();a.m_tokens[key]=token;
@@ -65,7 +70,13 @@ QQuickItem *find(QQuickItem *item,const QString &name){if(item->objectName()==na
 class CommissioningMachineBridgeTest:public QObject {
     Q_OBJECT
     static int count(RuntimePeer &p,const QString &kind){return p.snapshot().object.value("counts").toObject().value(kind).toInt();}
+public slots:
+    void slowPageTransition(){QThread::msleep(300);}
 private slots:
+    void initTestCase() {
+        qmlRegisterType<Workspace>("BlazerStudio",1,0,"Workspace");
+        qmlRegisterType<ReliefPreview>("BlazerStudio",1,0,"ReliefPreview");
+    }
     void actualControlsMachineAndWorkerEndToEnd(){
         QTemporaryDir isolatedData;QVERIFY(isolatedData.isValid());
         const auto previousData=qgetenv("XDG_DATA_HOME");qputenv("XDG_DATA_HOME",isolatedData.path().toUtf8());
@@ -168,6 +179,53 @@ ApplicationWindow {
         QTRY_VERIFY(!machine.occupied());QCOMPARE(count(peer,"powered"),powerBeforeReference);
 
         QTRY_VERIFY2(machine.extractionSupervision().value("attendedStartReady").toBool(),qPrintable(machine.extractionSupervision().value("attendedStartError").toString()+" / "+machine.commissioning().value("stage").toString()+" / "+machine.commissioning().value("reason").toString()+" / "+machine.extractionSupervision().value("startSequenceReason").toString()+" / "+machine.log().join(" | ")));
+        root.reset(); // Replace the bridge window; do not accumulate two applications' controls.
+        // Exercise the real Main toolbar and its page transition, not only the
+        // small bridge controls. The only connected endpoint is this test's PTY.
+        {
+            MaterialLibrary materials(isolatedData.filePath("main-materials.json"));
+            Registration registration;
+            ApplicationServices services(&document,&machine,isolatedData.filePath("main-settings.ini"));
+            QVERIFY(services.finishOnboarding());
+            QQmlEngine mainEngine;
+            mainEngine.rootContext()->setContextProperty("project",&document);
+            mainEngine.rootContext()->setContextProperty("machine",&machine);
+            mainEngine.rootContext()->setContextProperty("materialLibrary",&materials);
+            mainEngine.rootContext()->setContextProperty("cameraRegistration",&registration);
+            mainEngine.rootContext()->setContextProperty("appServices",&services);
+            QQmlComponent mainComponent(&mainEngine,QUrl::fromLocalFile(QStringLiteral(BLAZER_TEST_SOURCE_DIR "/qml/Main.qml")));
+            std::unique_ptr<QObject> mainRoot(mainComponent.create());QVERIFY2(mainRoot,qPrintable(mainComponent.errorString()));
+            auto mainWindow=qobject_cast<QQuickWindow*>(mainRoot.get());QVERIFY(mainWindow);
+            mainWindow->requestActivate();QVERIFY(QTest::qWaitForWindowActive(mainWindow));
+            auto mainItem=[&](const QString &name){return find(mainWindow->contentItem(),name);};
+            QTRY_VERIFY(mainRoot->findChild<QObject*>("startupSafetyDialog")->property("visible").toBool());
+            QVERIFY(QMetaObject::invokeMethod(mainItem("acknowledgeStartupSafety"),"clicked"));
+            QTRY_VERIFY(!mainRoot->findChild<QObject*>("startupSafetyDialog")->property("visible").toBool());
+            auto mainStart=mainItem("startJobButton");QVERIFY(mainStart);
+            QTRY_VERIFY2(mainStart->isEnabled(),qPrintable(mainRoot->property("startBlockReason").toString()));
+            QVERIFY2(NativeInputIntentTestAccess::hit(mainWindow,mainStart),"Main Start must be reachable by native hit testing");
+            // A slower first layout must not age the native input before dispatch.
+            QVERIFY(connect(mainRoot.get(),SIGNAL(pageChanged()),this,SLOT(slowPageTransition()),Qt::DirectConnection));
+            const auto before=count(peer,"powered");
+            QVERIFY(ControllerRuntimeTestAccess::seed(machine,*mainStart,"startAttended"));
+            QVERIFY(QMetaObject::invokeMethod(mainStart,"clicked"));
+            QTRY_VERIFY2_WITH_TIMEOUT(count(peer,"powered")>before,qPrintable(document.message()+" / "+machine.log().join(" | ")),3000);
+            QTRY_VERIFY(!machine.occupied());
+            QCOMPARE(mainRoot->property("page").toInt(),2);
+            QVERIFY(mainItem("liveJobPanel")->isVisible());
+            // Programmatic activation has no new input. Explain rejection in
+            // the main view, retain the finished preview and never run twice.
+            const auto after=count(peer,"powered");
+            QTRY_VERIFY(mainStart->isEnabled());
+            QVERIFY(QMetaObject::invokeMethod(mainStart,"clicked"));
+            QTRY_VERIFY(mainItem("startActionStatus")->isVisible());
+            QVERIFY(!mainRoot->property("startActionError").toString().isEmpty());
+            QTest::qWait(80);QCOMPARE(count(peer,"powered"),after);
+            mainWindow->hide();
+        }
+        root.reset(component.create());QVERIFY(root);window=qobject_cast<QQuickWindow*>(root.get());QVERIFY(window);
+        setup=root->property("setup").value<QObject*>();QVERIFY(setup);
+        window->requestActivate();QVERIFY(QTest::qWaitForWindowActive(window));
         const auto poweredBeforeSingle=count(peer,"powered");
         machine.startAttended();QTest::qWait(60);QCOMPARE(count(peer,"powered"),poweredBeforeSingle);
         // One genuine-shaped native intent, no clearance, mode selection or

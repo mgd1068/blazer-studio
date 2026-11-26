@@ -13,6 +13,7 @@ ApplicationWindow {
     color: bg
     readonly property bool simulationMode: typeof machine.simulation === "undefined" || machine.simulation
     readonly property var liveJobState: typeof machine.liveJob !== "undefined" ? machine.liveJob : ({})
+    property string startActionError: ""
     property bool livePreviewSelected: true
     property string lastLiveJobKey: ""
     readonly property string liveJobKey: {
@@ -471,6 +472,9 @@ ApplicationWindow {
     onPageChanged: { machine.focus(false); if(basic && page>2)basic=false }
     Connections {
         target: machine
+        function onNativeActionDenied(action, reason) {
+            if (action === "start" || action === "startAttended") win.startActionError = reason
+        }
         function onChanged() {
             if (!win.simulationMode && !win.grblVerified) win.proofConfirmed = false
             win.maybeFinishControllerClose()
@@ -770,7 +774,13 @@ ApplicationWindow {
                     text: !win.basic && win.page === 0 ? "Vorschau  →" : win.manualStartSelected ? "Handstart öffnen …" : win.simulationMode ? "▶  Simulation starten" : "▶  Am Laser starten"
                     primary: true; compact: true; enabled: !win.controllerClosePending && ((!win.basic && win.page === 0) || (win.manualStartSelected ? win.manualStartCanOpen : win.startBlockReason.length === 0))
                     hint: !win.basic && win.page === 0 ? "Zeigt die berechneten Werkzeugwege. Startet noch keinen Laser." : win.startBlockReason || "Startet den angezeigten Auftrag. Der bewusste Startklick bestätigt die eigene Anwesenheit für diesen Vorgang."
-                    onClicked: { if (!win.basic && win.page === 0) win.page = 1; else if(win.manualStartSelected) manualStartDialog.open(); else { win.livePreviewSelected = true; win.page = 2; if(win.useAttendedStart)machine.startAttended();else machine.start() } }
+                    onClicked: { if (!win.basic && win.page === 0) win.page = 1; else if(win.manualStartSelected) manualStartDialog.open(); else {
+                        win.startActionError = ""
+                        // Consume the original Start input before changing the view:
+                        // first-layout work must not age or invalidate this click.
+                        if(win.useAttendedStart)machine.startAttended();else machine.start()
+                        if (win.startActionError.length === 0) { win.livePreviewSelected = true; win.page = 2 }
+                    } }
                 }
             }
         }
@@ -780,6 +790,16 @@ ApplicationWindow {
             Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 8; bottomPadding: 8
             wrapMode: Text.WordWrap; textFormat: Text.PlainText; color: win.ink
             text: "Verbindung wird beendet. Das Fenster wartet auf die bestätigte Porttrennung. STOPP bleibt verfügbar; ein geschlossener Port bestätigt keine physische Laser-Abschaltung."
+        }
+        Label {
+            objectName: "startActionStatus"
+            readonly property string reason: win.startActionError || (!win.simulationMode && !win.runtimeOccupied ? win.startBlockReason : "")
+            visible: reason.length > 0
+            Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 8; bottomPadding: 8
+            text: "Start nicht möglich: " + reason
+            textFormat: Text.PlainText; wrapMode: Text.WordWrap
+            color: win.night ? "#ffd29b" : "#8b4800"
+            background: Rectangle { color: win.night ? "#382d22" : "#fff2df" }
         }
         Label {
             objectName: "manualRegistrationIndicator"

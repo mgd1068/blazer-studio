@@ -414,6 +414,7 @@ bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,
     const auto binding=nativeBinding(action,arguments,snapshot);
     const QPointer<Machine> alive(this);
     const auto denied=[this,alive,action](const QString &reason) {
+        qWarning().noquote()<<"Blazer native action rejected:"<<action<<reason;
         document->notify(reason);
         if (alive) emit nativeActionDenied(action,reason);
         return false;
@@ -617,39 +618,50 @@ void Machine::referenceHome() {
 void Machine::start() { startWithIntent(false); }
 void Machine::startAttended() { startWithIntent(true); }
 void Machine::startWithIntent(bool attended) {
+    const auto reject=[this,attended](const QString &reason) {
+        const QPointer<Machine> alive(this);
+        qWarning().noquote()<<"Blazer Start rejected:"<<reason;
+        document->notify(reason);
+        if(alive)emit nativeActionDenied(attended?"startAttended":"start",reason);
+    };
     if (document->planningBusy()) {
-        document->notify("Auftragsberechnung oder Export läuft noch.");
+        reject("Auftragsberechnung oder Export läuft noch.");
         return;
     }
-    if (busy() || firing())
+    if (busy() || firing()) {
+        reject("Eine Geräteaktion läuft bereits. Aktuellen Auftrag zuerst beenden.");
         return;
+    }
     if (live && document->startMode() != Document::AbsoluteCoordinates) {
-        document->notify("Relative Startmodi sind derzeit nur im Simulator eingerichtet. Reale Positions- und Koordinatenbindung ist noch nicht abgenommen.");
+        reject("Relative Startmodi sind derzeit nur im Simulator eingerichtet. Reale Positions- und Koordinatenbindung ist noch nicht abgenommen.");
         return;
     }
     if(live && attended) {
         const auto state=session->status().extractionSupervision;
         if(!state.value("attendedStartReady").toBool() || !state.value("attendedStartError").toString().isEmpty()) {
-            document->notify(state.value("attendedStartError").toString().isEmpty()?"Gerät noch nicht bereit.":state.value("attendedStartError").toString());return;
+            reject(state.value("attendedStartError").toString().isEmpty()?"Gerät noch nicht bereit.":state.value("attendedStartError").toString());return;
         }
     }
     if (live && !attended && !processingSafetyErrors().isEmpty()) {
-        document->notify(processingSafetyErrors().join("\n"));
+        reject(processingSafetyErrors().join("\n"));
         return;
     }
     const auto &job = document->job();
     if (job.deviceProfile().outputFingerprint() != document->deviceProfile().outputFingerprint()) {
-        document->notify("Geräteprofil des Auftrags ist veraltet; bitte neu berechnen.");
+        reject("Geräteprofil des Auftrags ist veraltet; bitte neu berechnen.");
         return;
     }
     if (!job.valid()) {
-        document->notify(job.errors.join("; "));
+        reject(job.errors.join("; "));
         return;
     }
     if (live) {
-        auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());if(!runtime)return;
+        auto runtime=dynamic_cast<ControllerRuntimeSession *>(session.get());if(!runtime){reject("Controllerverbindung fehlt. Laser erneut verbinden.");return;}
         if(runtime->m_candidateMoves.constData()!=job.moves.constData()||runtime->m_candidateMoves.size()!=job.moves.size()||!runtime->jobPrepared()) {
-            runtime->prepare(job);return; // No completion callback can start this job.
+            const QPointer<Machine> alive(this);
+            runtime->prepare(job);
+            if(alive)reject("Auftrag wird neu vorbereitet. Sobald die Vorbereitung abgeschlossen ist, erneut auf Start klicken.");
+            return; // No completion callback can start this job.
         }
         dispatchNative(attended?"startAttended":"start",{},0,0,{},runtime->m_preparation->result(runtime->m_prepareSequence));
     } else {

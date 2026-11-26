@@ -1,4 +1,6 @@
-# Blazer Studio – Einstieg in beta.10.9-dev
+# Blazer Studio – Einstieg in beta.10.10-dev
+
+Beta 10.10 übergibt den Startklick vor dem Wechsel in die Liveansicht an die Steuerung. Ein langsamer Ansichtsaufbau verbraucht dadurch nicht die Eingabefrist. Startablehnungen und Gründe für einen gesperrten Startknopf erscheinen direkt unter der Werkzeugleiste.
 
 Die [Anforderungen an den einfachen Standardworkflow](USABILITY_REQUIREMENTS.md) gelten für die weitere Entwicklung.
 
