@@ -363,6 +363,28 @@ bool NativeInputIntentAdapter::eligible(QObject *control,bool click) {
     const auto property=control->property("nativeActionEnabled");
     return !property.isValid() ? !click : property.metaType().id()==QMetaType::Bool&&property.toBool();
 }
+namespace {
+bool emptyNonmodalToolTipOverlay(QQuickItem *item,const QPointF &scene) {
+    // Qt's popup overlay covers the entire window. A nonmodal tooltip outside
+    // this point passes mouse input through in Qt; it is not a blocking sheet.
+    // Only this concrete Qt case is transparent. Dialogs (including dim:false),
+    // other popup kinds, arbitrary children and the tooltip itself still block.
+    if(!item->inherits("QQuickOverlay"))return false;
+    const auto children=item->childItems();if(children.size()>4096)return false;
+    bool hasToolTip=false;
+    for(auto child:children) {
+        if(!child->isVisible())continue;
+        const auto owner=child->parent();
+        if(!child->inherits("QQuickPopupItem") || !owner || !owner->inherits("QQuickToolTip"))return false;
+        const auto modal=owner->property("modal"),dim=owner->property("dim");
+        if(modal.metaType().id()!=QMetaType::Bool || modal.toBool() ||
+           dim.metaType().id()!=QMetaType::Bool || dim.toBool() ||
+           child->contains(child->mapFromScene(scene)))return false;
+        hasToolTip=true;
+    }
+    return hasToolTip;
+}
+}
 bool NativeInputIntentAdapter::hitControl(QObject *windowObject,QObject *control,const QPointF &scene,bool key) {
     auto window=qobject_cast<QQuickWindow *>(windowObject);
     auto item=qobject_cast<QQuickItem *>(control);
@@ -382,7 +404,8 @@ bool NativeInputIntentAdapter::hitControl(QObject *windowObject,QObject *control
         std::stable_sort(children.begin(),children.end(),[](auto a,auto b){return a->z()<b->z();});
         QQuickItem *next=nullptr;
         for(auto i=children.crbegin();i!=children.crend();++i)
-            if((*i)->isVisible()&&(*i)->contains((*i)->mapFromScene(scene))){next=*i;break;}
+            if((*i)->isVisible()&&(*i)->contains((*i)->mapFromScene(scene)) &&
+               !emptyNonmodalToolTipOverlay(*i,scene)){next=*i;break;}
         if(!next)break;
         hit=next;if(depth==63)return false;
     }

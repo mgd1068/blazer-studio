@@ -1,4 +1,6 @@
-# Blazer Studio – Einstieg in beta.10.10-dev
+# Blazer Studio – Einstieg in beta.10.11-dev
+
+Beta 10.11 behebt eine Startblockade bei eingeblendetem Hilfetext über dem Startknopf. Der Klick funktioniert auch nach kurzem Lesen des Hilfetexts; echte modale Dialoge sperren den Start weiterhin. Meldungen über nicht erkannte Klicks verwenden verständlichen Text.
 
 Beta 10.10 übergibt den Startklick vor dem Wechsel in die Liveansicht an die Steuerung. Ein langsamer Ansichtsaufbau verbraucht dadurch nicht die Eingabefrist. Startablehnungen und Gründe für einen gesperrten Startknopf erscheinen direkt unter der Werkzeugleiste.
 

@@ -31,6 +31,26 @@ public:
         const auto okay=NativeInputIntentAdapter::hitControl(window,control,scene,false);
         return okay;
     }
+    // Synthetic OS provenance only on the independently created PTY. Deliver
+    // actual Qt press/release events through the complete Main Button, so its
+    // pressed/focus/eligibility signals are exercised instead of seeding pending.
+    static bool click(NativeInputIntentAdapter &a,QQuickItem &control,const QString &action) {
+        auto window=control.window();if(!window)return false;
+        const auto key=action+"#"+QString::number(quintptr(&control),16);
+        const auto scene=control.mapToScene(control.boundingRect().center());
+        const auto global=window->mapToGlobal(scene.toPoint());
+        QMouseEvent press(QEvent::MouseButtonPress,scene,scene,global,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+        auto calibrate=[&]{const auto n=NativeInputIntentAdapter::nowMs();a.m_domain=NativeInputIntentAdapter::Domain::X11Server32;a.m_sample={quint32(n),n-1,n};return quint32(n);};
+        auto stamp=calibrate();a.capture(window,stamp,scene,false,true,false,false,int(Qt::LeftButton),press.device());
+        if(!a.m_rawPress.contains(key)){qWarning()<<"Native Main press capture failed"<<key;return false;}
+        press.setTimestamp(stamp);QCoreApplication::sendEvent(window,&press);
+        if(!a.m_armed.contains(key)){qWarning()<<"Native Main accepted press failed"<<key;return false;}
+        QMouseEvent release(QEvent::MouseButtonRelease,scene,scene,global,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+        stamp=calibrate();a.release(window,stamp,scene,false,true,false,false,int(Qt::LeftButton),release.device());
+        if(!a.m_pending.contains(key)){qWarning()<<"Native Main release capture failed"<<key;return false;}
+        release.setTimestamp(stamp);QCoreApplication::sendEvent(window,&release);
+        return true;
+    }
     static bool seed(NativeInputIntentAdapter &a,QQuickItem &control,const QString &action,const QByteArray &binding) {
         const auto key=action+"#"+QString::number(quintptr(&control),16);
         if(binding.isEmpty()||a.m_controls.value(key)!=&control||!a.m_clickBindings.value(key)){qWarning()<<"Missing native binding/control"<<key<<binding.size()<<a.m_controls.size()<<a.m_controls.keys()<<control.property("nativeActionRole");return false;}
@@ -57,6 +77,7 @@ public:
             .arg(worker->m_core->firing).arg(worker->m_core->paused);},Qt::BlockingQueuedConnection);
         return result;
     }
+    static bool click(Machine&m,QQuickItem&control,const QString&action){return NativeInputIntentTestAccess::click(*m.nativeInput,control,action);}
     static bool seed(Machine&m,QQuickItem&control,const QString&action,const QVariantMap&args={}){
         const auto binding=m.nativeBinding(action,args,m.session->status());
         const auto actual=m.nativeArguments(&control,{});
@@ -207,8 +228,29 @@ ApplicationWindow {
             // A slower first layout must not age the native input before dispatch.
             QVERIFY(connect(mainRoot.get(),SIGNAL(pageChanged()),this,SLOT(slowPageTransition()),Qt::DirectConnection));
             const auto before=count(peer,"powered");
-            QVERIFY(ControllerRuntimeTestAccess::seed(machine,*mainStart,"startAttended"));
-            QVERIFY(QMetaObject::invokeMethod(mainStart,"clicked"));
+            // Normal users pause over Start long enough to read its tooltip.
+            // A nonmodal tooltip's full-window overlay must pass clicks through.
+            QTest::mouseMove(mainWindow,mainStart->mapToScene(mainStart->boundingRect().center()).toPoint());
+            QTest::qWait(850);
+            bool tooltipVisible=false;
+            for(auto tip:mainRoot->findChildren<QObject*>("helpTooltip"))tooltipVisible|=tip->property("visible").toBool();
+            QVERIFY(tooltipVisible);
+            QVERIFY(NativeInputIntentTestAccess::hit(mainWindow,mainStart));
+            // Even a non-dimming modal dialog away from Start remains a blocker.
+            QQmlComponent modalComponent(&mainEngine);
+            modalComponent.setData("import QtQuick; import QtQuick.Controls; Popup { modal:true; dim:false; x:10; y:250; width:160; height:100 }",QUrl());
+            std::unique_ptr<QObject> modal(modalComponent.create());QVERIFY2(modal,qPrintable(modalComponent.errorString()));
+            modal->setParent(mainRoot.get());QVERIFY(modal->setProperty("parent",QVariant::fromValue(mainWindow->contentItem())));
+            QVERIFY(QMetaObject::invokeMethod(modal.get(),"open"));QTRY_VERIFY(modal->property("visible").toBool());
+            QVERIFY(!NativeInputIntentTestAccess::hit(mainWindow,mainStart));
+            QVERIFY(QMetaObject::invokeMethod(modal.get(),"close"));QTRY_VERIFY(!modal->property("visible").toBool());
+            QTest::qWait(200);
+            QTest::mouseMove(mainWindow,QPoint(20,180));
+            QTest::mouseMove(mainWindow,mainStart->mapToScene(mainStart->boundingRect().center()).toPoint());
+            QTest::qWait(850);
+            tooltipVisible=false;for(auto tip:mainRoot->findChildren<QObject*>("helpTooltip"))tooltipVisible|=tip->property("visible").toBool();
+            QVERIFY(tooltipVisible);
+            QVERIFY(ControllerRuntimeTestAccess::click(machine,*mainStart,"startAttended"));
             QTRY_VERIFY2_WITH_TIMEOUT(count(peer,"powered")>before,qPrintable(document.message()+" / "+machine.log().join(" | ")),3000);
             QTRY_VERIFY(!machine.occupied());
             QCOMPARE(mainRoot->property("page").toInt(),2);

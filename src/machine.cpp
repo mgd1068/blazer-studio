@@ -425,7 +425,7 @@ bool Machine::dispatchNative(const QString &action,const QVariantMap &arguments,
         const auto platformReason=nativeInput->reason();
         return denied(!platformReason.isEmpty() ? platformReason : binding.isEmpty()
             ? QString("Geräteaktion gesperrt: aktueller Controller- oder Einrichtungskontext gibt diese Aktion nicht frei.")
-            : QString("Geräteaktion gesperrt: frischer nativer Druck und zugehöriges Loslassen am passenden Bedienelement fehlen."));
+            : QString("Klick nicht erkannt. Bitte erneut klicken. Falls die Meldung bestehen bleibt, liegt ein Fehler in der Eingabeerkennung des Programms vor."));
     }
     QByteArray source;if(prepared)source=prepared->sourceFingerprint()+prepared->profileFingerprint();
     const auto digest=ControllerNativeDigest::request(*kind,action=="override"?double(feed):x,action=="override"?double(power):y,bounds,source);
