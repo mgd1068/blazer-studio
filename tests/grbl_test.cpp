@@ -533,6 +533,17 @@ class GrblTest : public QObject {
         if (acknowledgeLast) QTRY_VERIFY(session.workZero && session.workZero->queryArmed);
         else QTRY_VERIFY(session.workZero && session.workZero->modalReadback);
     }
+    void finishQueuedPeerResponses(Controller &controller,Machine &machine) {
+        // Drain the already delivered no-ACK window once, then let the peer
+        // respond to future commands itself, including queued readback fences.
+        // Repeatedly guessing one ok from waitingAck can manufacture extra ACKs.
+        QTest::qWait(30);
+        const int pending=ControllerRuntimeTestAccess::call(runtime(machine),[](Context &c){
+            return c.core.buffering?int(c.core.inFlight.size()):c.core.pendingAcks;
+        });
+        controller.autoAck=controller.respondToStatus=true;
+        if(pending>0)controller.reply(QByteArray("ok\r\n").repeated(pending));
+    }
   private slots:
     void preparedCompactGateMatchesActualHalfMillimetreWireTargets_data() {
         QTest::addColumn<bool>("yAxis");
@@ -741,13 +752,7 @@ class GrblTest : public QObject {
         if (activity == "lease-with-lost-flags") {
             QVERIFY(runtimeView(machine).accessory.activeLease());
             runtimeView(machine).jobActive = runtimeView(machine).focusActive = false;
-            for (int i = 0; i < 80 && machine.busy(); ++i) {
-                if (grbl->waitingAck)
-                    controller.reply("ok\r\n");
-                if (grbl->waitingIdle)
-                    controller.report();
-                QTest::qWait(2);
-            }
+            finishQueuedPeerResponses(controller,machine);
             QTRY_VERIFY(machine.ready());
             QVERIFY(runtimeView(machine).accessory.activeLease());
             QVERIFY(!runtimeView(machine).jobActive && !runtimeView(machine).focusActive);
@@ -827,13 +832,7 @@ class GrblTest : public QObject {
         QVERIFY(machine.busy() && runtimeView(machine).accessory.activeLease());
         QVERIFY(!document.synchronousWorkBlockReason().isEmpty());
         auto grbl = coreView(machine);
-        for (int i = 0; i < 80 && machine.busy(); ++i) {
-            if (grbl->waitingAck)
-                controller.reply("ok\r\n");
-            if (grbl->waitingIdle)
-                controller.report();
-            QTest::qWait(2);
-        }
+        finishQueuedPeerResponses(controller,machine);
         QTRY_VERIFY(machine.ready());
         QCOMPARE(controller.commands.mid(cut), expected);
         QVERIFY(!runtimeView(machine).accessory.activeLease());
@@ -2886,7 +2885,9 @@ class GrblTest : public QObject {
         QVERIFY(machine.connectionVerified());
         QCOMPARE(controller.realtime.count(char(0x18)), 1);
         QVERIFY(!controller.realtime.contains('~'));
-        QCOMPARE(controller.commands, QStringList({"M5 S0", "$I", "$$", "$G"}));
+        QCOMPARE(controller.commands.mid(0,4), QStringList({"M5 S0", "$I", "$$", "$G"}));
+        for(const auto &line:controller.commands.mid(4))
+            QVERIFY(QStringList({"M5 S0","G21 G90 G54","$I","$$","$G","$#","$N"}).contains(line)); // Readback and nonmoving modal normalization only.
         requireReference(machine);
         controller.runOnPoweredCommand = true;
         startPreparedMachine(machine);
@@ -2983,6 +2984,7 @@ class GrblTest : public QObject {
             QTRY_VERIFY(!session->status().connected);
         } else if (mode == "closed") {
             session->close();
+            QTRY_VERIFY(!session->status().connected && session->status().connectionPhase=="closed" && !session->status().occupied);
             QTRY_VERIFY(controller.commands.count("M5 S0") >= 2);
         }
         const auto resetCount = controller.realtime.count(char(0x18));

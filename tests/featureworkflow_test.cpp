@@ -80,7 +80,9 @@ class AttendedReadinessMachine : public Machine {
     Q_PROPERTY(bool simulation READ uiSimulation NOTIFY uiChanged)
     Q_PROPERTY(bool connected READ uiConnected NOTIFY uiChanged)
     Q_PROPERTY(bool connectionVerified READ uiConnected NOTIFY uiChanged)
-    Q_PROPERTY(bool statusFresh READ uiConnected NOTIFY uiChanged)
+    Q_PROPERTY(bool statusFresh READ uiFresh NOTIFY uiChanged)
+    Q_PROPERTY(QString state READ uiState NOTIFY uiChanged)
+    Q_PROPERTY(QStringList log READ uiLog NOTIFY uiChanged)
     Q_PROPERTY(QString connectionPhase READ uiPhase NOTIFY uiChanged)
     Q_PROPERTY(bool jobPreparing READ uiFalse NOTIFY uiChanged)
     Q_PROPERTY(bool jobPrepared READ uiConnected NOTIFY uiChanged)
@@ -93,6 +95,11 @@ class AttendedReadinessMachine : public Machine {
     Q_PROPERTY(QVariantMap liveJob READ uiLiveJob NOTIFY uiChanged)
 public:
     explicit AttendedReadinessMachine(Document *document):Machine(document,nullptr,HardwareAccess::Disabled){}
+    QString faultReason;
+    bool uiFresh()const{return faultReason.isEmpty();}
+    QString uiState()const{return faultReason.isEmpty()?Machine::state():QString("Verbindungsfehler");}
+    QStringList uiLog()const{return faultReason.isEmpty()?QStringList{}:QStringList{faultReason};}
+    void setFaultReason(QString reason){faultReason=std::move(reason);emit uiChanged();}
     QString attendedError;
     QVariantMap liveState;
     QVariantMap uiLiveJob()const{return liveState;}
@@ -676,6 +683,14 @@ class FeatureWorkflowTest : public QObject {
         machine.setAttendedError("ATTENDED_INTERLOCK_DENIED");QTRY_COMPARE(window->property("startBlockReason").toString(),QString("ATTENDED_INTERLOCK_DENIED"));
         QVERIFY(!item("startJobButton")->isEnabled());QVERIFY(!machine.busy());
         machine.setAttendedError({});QTRY_VERIFY(window->property("startBlockReason").toString().isEmpty());
+        machine.setFaultReason("Laser hat GCode nicht rechtzeitig quittiert; Auftrag abgebrochen.");
+        QTRY_VERIFY(!window->property("controllerStatusFresh").toBool());
+        QTRY_VERIFY(window->property("startBlockReason").toString().contains("nicht rechtzeitig quittiert"));
+        QVERIFY(!window->property("startBlockReason").toString().contains("Datenalter"));
+        auto failure=item("startActionStatus");QVERIFY(failure&&failure->isVisible());
+        QVERIFY(failure->property("text").toString().contains("nicht rechtzeitig quittiert"));
+        QVERIFY(!item("startJobButton")->isEnabled());
+        machine.setFaultReason({});QTRY_VERIFY(window->property("startBlockReason").toString().isEmpty());
         window->setProperty("page",2);
         auto *reference=item("referenceHomeButton");QVERIFY(reference);
         QTRY_VERIFY(reference->isVisible()&&reference->isEnabled());

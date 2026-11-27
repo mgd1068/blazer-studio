@@ -9,6 +9,7 @@
 #include <QScopedValueRollback>
 #include <QSignalBlocker>
 #include <cmath>
+#include <limits>
 namespace {
 QString n(double v) {
     return QString::number(v, 'f', 3);
@@ -37,6 +38,8 @@ GrblSession::GrblSession(QObject *parent, DeviceProfile profile)
             fail("Arbeitsnullpunkt nicht rechtzeitig eindeutig bestätigt; Referenz verworfen.",
                  ControllerDiagnostics::FaultCause::Timeout);
     });
+    bufferedDrainWatchdog.setInterval(100);
+    connect(&bufferedDrainWatchdog,&QTimer::timeout,this,&GrblSession::checkBufferedJobDrain);
     ackClock.start();
     ackTimeout.setSingleShot(true);
     ackTimeout.setTimerType(Qt::PreciseTimer);
@@ -207,6 +210,7 @@ bool GrblSession::statusFresh() const {
     return lastStatus.isValid() && lastStatus.elapsed() <= 1500;
 }
 void GrblSession::clearAckDeadline() {
+    clearBufferedJobDrain();
     ackTimeout.stop();
     ackDue.clear();
     ackPausedAt = -1;
@@ -221,6 +225,10 @@ void GrblSession::armAckDeadline() {
 void GrblSession::acknowledgeDeadline() {
     if (!ackDue.isEmpty())
         ackDue.removeFirst(); // Bounded by the transport RX window.
+    // A buffered parser can block behind the planner. An ACK consumes exactly
+    // the FIFO head and starts the next head's inactivity window. Neither new
+    // writes, unmatched ok, nor status traffic may renew this deadline.
+    if(buffering && !ackDue.isEmpty())ackDue.first()=(ackPausedAt>=0?ackPausedAt:ackClock.elapsed())+10000;
     armAckDeadline();
 }
 void GrblSession::pauseAckDeadline() {
@@ -1027,7 +1035,14 @@ void GrblSession::line(const QByteArray &s) {
             append("Controller gesperrt: " + controllerState);
             return;
         }
-        if (controllerState == "Idle" && knownOutput && reportedOutput != 0 && !firing) {
+        // Some dynamic-M4 firmware retains the last reported FS.S after PWM
+        // stops. Only this typed shutdown transaction may accept that cached
+        // value, solely to issue M5. Completion still requires post-M5 S0.
+        const bool dynamicJobShutdown=bufferedJobDrain &&
+            (bufferedJobDrain->phase==BufferedJobDrain::Phase::BeforeM5 ||
+             bufferedJobDrain->phase==BufferedJobDrain::Phase::Finalizing ||
+             (bufferedJobDrain->phase==BufferedJobDrain::Phase::AfterM5 && !bufferedJobDrain->queryArmed));
+        if (controllerState == "Idle" && knownOutput && reportedOutput != 0 && !firing && !dynamicJobShutdown) {
             fail("Controller meldet Leistung im Leerlauf; Auftrag verworfen, Ausgang prüfen.",
                  ControllerDiagnostics::FaultCause::IdleOutputReported);
             return;
@@ -1037,9 +1052,12 @@ void GrblSession::line(const QByteArray &s) {
                  ControllerDiagnostics::FaultCause::ExcessOverride);
             return;
         }
+        if(observeBufferedJobStatus())return;
         if (waitingIdle && !workZero && controllerState == "Idle" && knownPosition && knownOffset &&
             knownOutput && reportedOutput == 0 && !activeInputs &&
-            (!jobReturn || jobReturn->phase==JobReturn::Phase::Parked || jobReturn->queryArmed)) {
+            (!jobReturn || jobReturn->phase==JobReturn::Phase::Parked || jobReturn->queryArmed) &&
+            (!bufferedJobDrain || bufferedJobDrain->phase!=BufferedJobDrain::Phase::AfterM5 || bufferedJobDrain->queryArmed)) {
+            if(bufferedJobDrain && bufferedJobDrain->phase==BufferedJobDrain::Phase::AfterM5)clearBufferedJobDrain();
             waitingIdle = false;
             if(jobReturn && jobReturn->phase==JobReturn::Phase::Engraving) {
                 if(!beginJobReturn())fail("Laserfreie Rückfahrt zum Referenzpunkt nicht angenommen.");
@@ -1177,7 +1195,12 @@ void GrblSession::line(const QByteArray &s) {
                     if (homingPending)
                         knownPosition = knownOffset = false;
                     waitingIdle = true;
-                    if(jobReturn && jobReturn->phase!=JobReturn::Phase::Parked) {
+                    if(bufferedJobDrain && bufferedJobDrain->phase==BufferedJobDrain::Phase::Finalizing) {
+                        bufferedJobDrain->phase=BufferedJobDrain::Phase::AfterM5;
+                        bufferedJobDrain->queryArmed=false;
+                        if(jobReturn)jobReturn->queryArmed=false;
+                        QMetaObject::invokeMethod(this,[this,epoch=bufferedDrainEpoch]{armBufferedJobReadback(epoch);},Qt::QueuedConnection);
+                    } else if(jobReturn && jobReturn->phase!=JobReturn::Phase::Parked) {
                         jobReturn->queryArmed=false;
                         QMetaObject::invokeMethod(this,[this,epoch=jobReturnEpoch]{armJobReturnReadback(epoch);},Qt::QueuedConnection);
                     } else diagnostic.statusQuery(serial.write("?") == 1);
@@ -1207,6 +1230,12 @@ void GrblSession::pump() {
         int index = queueHead + (buffering ? sent : 0);
         if (index >= queue.size())
             break;
+        if(bufferedJobDrain && bufferedJobDrain->phase==BufferedJobDrain::Phase::Streaming &&
+           index==bufferedJobDrain->m5Index) {
+            if(sent==0 && !waitingAck)beginBufferedJobDrain();
+            break; // Never place final M5 in the firmware until fresh Idle/S0.
+        }
+        if(bufferedJobDrain && bufferedJobDrain->phase==BufferedJobDrain::Phase::BeforeM5)break;
         auto bytes = queue[index].toLatin1() + "\n";
         if (bytes.size() > 79) {
             fail("GCode-Zeile länger als GRBL-Zeilenpuffer.",
@@ -1235,8 +1264,9 @@ void GrblSession::pump() {
         }
         if(homingBlock && homingDispatchAccepted)homingDispatchAccepted();
         if(dispatchAccepted)dispatchAccepted();
-        // Conservative host policy, NOT a proven GRBL planner-full bound.
-        // Status traffic must never renew an outstanding command's deadline.
+        // Buffered head: bounded absence of genuine FIFO ACK progress.
+        // Unbuffered commands retain their individual write+10s deadline.
+        // Status/new writes never renew an existing FIFO head's deadline.
         for (int line = 0; line < bytes.count('\n'); ++line)
             ackDue.append(ackClock.elapsed() + 10000);
         armAckDeadline();
@@ -1250,6 +1280,73 @@ void GrblSession::pump() {
         waitingAck = true;
         timeout.start();
     } while (buffering);
+}
+void GrblSession::clearBufferedJobDrain() {
+    bufferedDrainWatchdog.stop();bufferedJobDrain.reset();++bufferedDrainEpoch;
+}
+bool GrblSession::startBufferedJob(const QStringList &lines,double estimatedSeconds) {
+    if(lines.size()<2 || lines[lines.size()-2]!="M5 S0" || lines.last()!="G0" ||
+       !laserMode || !std::isfinite(estimatedSeconds) || estimatedSeconds<0)return false;
+    const double budget=std::ceil(estimatedSeconds*10000.)+30000.; // Includes minimum10% feed override.
+    if(!std::isfinite(budget) || budget>double(std::numeric_limits<qint64>::max()/2))return false;
+    clearBufferedJobDrain();BufferedJobDrain drain;
+    drain.m5Index=lines.size()-2;drain.hardBudgetMs=qint64(budget);bufferedJobDrain=drain;
+    const bool accepted=commands(lines,true);
+    if(!accepted)clearBufferedJobDrain();
+    return accepted;
+}
+void GrblSession::beginBufferedJobDrain() {
+    if(!bufferedJobDrain || !inFlight.isEmpty() || waitingAck)return;
+    auto &drain=*bufferedJobDrain;drain.phase=BufferedJobDrain::Phase::BeforeM5;drain.queryArmed=false;
+    drain.activeMs=drain.noProgressMs=drain.lastTick=0;
+    drain.positionKnown=knownReportedMachinePosition;drain.lastMachinePosition=reportedMachinePosition;
+    bufferedDrainClock.start();bufferedDrainWatchdog.start();timeout.stop();
+    state="Controller arbeitet restliche Gravurbahnen ab";
+    QMetaObject::invokeMethod(this,[this,epoch=bufferedDrainEpoch]{armBufferedJobReadback(epoch);},Qt::QueuedConnection);
+}
+void GrblSession::armBufferedJobReadback(quint64 epoch) {
+    if(epoch!=bufferedDrainEpoch || !bufferedJobDrain || !connected())return;
+    const auto phase=bufferedJobDrain->phase;
+    if(phase!=BufferedJobDrain::Phase::BeforeM5 && phase!=BufferedJobDrain::Phase::AfterM5)return;
+    // Old reports/partial payloads cannot certify this newly armed fence.
+    if(serial.bytesAvailable())receive();
+    if(epoch!=bufferedDrainEpoch || !bufferedJobDrain || !connected())return;
+    if(!input.isEmpty()) {
+        // USB/UART can split an otherwise valid old status across reads. Finish
+        // parsing it before arming the new-query fence; the drain watchdogs
+        // still bound a truncated reply and STOP invalidates this epoch.
+        QTimer::singleShot(5,this,[this,epoch]{armBufferedJobReadback(epoch);});
+        return;
+    }
+    bufferedJobDrain->queryArmed=true;
+    if(jobReturn && phase==BufferedJobDrain::Phase::AfterM5)jobReturn->queryArmed=true;
+    const bool accepted=serial.write("?")==1;diagnostic.statusQuery(accepted);
+    if(!accepted)fail("Planner-Abschluss: neue Statusabfrage konnte nicht gesendet werden.");
+}
+void GrblSession::checkBufferedJobDrain() {
+    if(!bufferedJobDrain || bufferedJobDrain->phase==BufferedJobDrain::Phase::Streaming)return;
+    auto &drain=*bufferedJobDrain;const auto now=bufferedDrainClock.elapsed();
+    const auto delta=std::max<qint64>(0,now-drain.lastTick);drain.lastTick=now;
+    if(!paused){drain.activeMs+=delta;drain.noProgressMs+=delta;}
+    if(drain.activeMs>drain.hardBudgetMs) {
+        fail("Planner-Abschluss überschreitet die begrenzte Planzeit einschließlich 10-%-Vorschubreserve.",ControllerDiagnostics::FaultCause::Timeout);return;
+    }
+    // This is ONLY a final-drain progress guard with no motion ACK pending.
+    // Normal closed contours can alias status samples while ACKs progress.
+    if(!paused && (drain.phase==BufferedJobDrain::Phase::BeforeM5 || drain.phase==BufferedJobDrain::Phase::AfterM5) &&
+       drain.noProgressMs>=10000)fail("Planner-Abschluss: zehn Sekunden ohne neue gemeldete Maschinenbewegung oder Abschluss.",ControllerDiagnostics::FaultCause::Timeout);
+}
+bool GrblSession::observeBufferedJobStatus() {
+    if(!bufferedJobDrain || bufferedJobDrain->phase==BufferedJobDrain::Phase::Streaming)return false;
+    auto &drain=*bufferedJobDrain;
+    if(knownReportedMachinePosition) {
+        if(drain.positionKnown && reportedMachinePosition!=drain.lastMachinePosition)drain.noProgressMs=0;
+        drain.positionKnown=true;drain.lastMachinePosition=reportedMachinePosition;
+    }
+    if(drain.phase!=BufferedJobDrain::Phase::BeforeM5 || !drain.queryArmed || controllerState!="Idle" ||
+       !knownPosition || !knownOffset || !knownOutput || activeInputs || paused)return false;
+    drain.phase=BufferedJobDrain::Phase::Finalizing;drain.queryArmed=false;
+    pump();return true; // The real M5 must still be ACKed; never complete here.
 }
 bool GrblSession::commands(const QStringList &lines, bool buffered) {
     if (!ready() || lines.isEmpty()) {
@@ -1308,7 +1405,7 @@ bool GrblSession::startLocalPrepared(const PreparedControllerJob &job) {
     if(!ready()||!verified()||!localMotionSafetyError().isEmpty()||!job.valid() ||
        job.profileFingerprint()!=m_deviceProfile.outputFingerprint()||job.driverId()!=m_deviceProfile.driverId()||job.transport()!=m_deviceProfile.transport()||job.mediaType()!="text/x-gcode")return false;
     for(const auto p:{job.workBounds().topLeft(),job.workBounds().topRight(),job.workBounds().bottomLeft(),job.workBounds().bottomRight(),job.firstApproach()})if(!localTargetAllowed(p))return false;
-    localExecutionKind=LocalExecutionKind::Job;localExecutionActive=true;return commands(job.lines(),true);
+    localExecutionKind=LocalExecutionKind::Job;localExecutionActive=true;return startBufferedJob(job.lines(),job.visualization()?job.visualization()->estimatedSeconds:0);
 }
 bool GrblSession::frameLocalPrepared(const QStringList &lines) {
     if(!ready()||!verified()||!localMotionSafetyError().isEmpty()||lines.isEmpty())return false;
@@ -1382,7 +1479,7 @@ bool GrblSession::startPrepared(const PreparedControllerJob &job, std::optional<
             allowed.height()>setupReadback.settings.value(131))return false;
         jobReturn=JobReturn{JobReturn::Phase::Engraving,h,offset,{},allowed,false,fromParkedHome};
     }
-    const bool accepted=commands(job.lines(), true);
+    const bool accepted=startBufferedJob(job.lines(),job.visualization()?job.visualization()->estimatedSeconds:0);
     if(!accepted)clearJobReturn();
     return accepted;
 }
@@ -1437,7 +1534,7 @@ void GrblSession::start(const JobPlan &job) {
                                           : program.errors().join("; "));
         return;
     }
-    commands(program.gcodeLines(), true);
+    startBufferedJob(program.gcodeLines(),std::isfinite(job.seconds)&&job.seconds>0?job.seconds:0);
 }
 void GrblSession::pause() {
     if (awaitingReset || homingPending || workZero) {

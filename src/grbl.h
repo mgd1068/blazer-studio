@@ -83,6 +83,7 @@ class GrblSession : public ControllerSession {
     void frame(const QVariantMap &bounds) override;
 
   private:
+    friend class GrblBackpressureTest;
     friend class GrblTest; // Offline PTY fixtures may supply a synthetic machine contract.
     friend class ControllerRuntimeWorker;
     friend class ControllerRuntimeTestAccess;
@@ -100,6 +101,24 @@ class GrblSession : public ControllerSession {
     void acknowledgeDeadline();
     void pauseAckDeadline();
     void resumeAckDeadline();
+    struct BufferedJobDrain {
+        enum class Phase {Streaming,BeforeM5,Finalizing,AfterM5};
+        Phase phase=Phase::Streaming;
+        qsizetype m5Index=0;
+        bool queryArmed=false,positionKnown=false;
+        QPointF lastMachinePosition;
+        qint64 hardBudgetMs=30000,activeMs=0,noProgressMs=0,lastTick=0;
+    };
+    std::optional<BufferedJobDrain> bufferedJobDrain;
+    QElapsedTimer bufferedDrainClock;
+    QTimer bufferedDrainWatchdog;
+    quint64 bufferedDrainEpoch=0;
+    bool startBufferedJob(const QStringList &lines,double estimatedSeconds);
+    void clearBufferedJobDrain();
+    void beginBufferedJobDrain();
+    void armBufferedJobReadback(quint64 epoch);
+    void checkBufferedJobDrain();
+    bool observeBufferedJobStatus();
     int queueHead = 0;
     struct OperatorLocalPermit {
         QByteArray frameId, settingsFingerprint;

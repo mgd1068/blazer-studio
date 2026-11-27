@@ -1,4 +1,6 @@
-# Blazer Studio – Einstieg in beta.10.11-dev
+# Blazer Studio – Einstieg in beta.10.12-dev
+
+Beta 10.12 zeigt nach einem Verbindungsfehler die konkrete Abbruchursache im Startbereich, statt sie durch die Folgeanzeige „Controllerdaten fehlen“ zu verdecken. Bei gepufferter Gravur überwacht die Wartezeit echte FIFO-Quittierungsfortschritte; Statusmeldungen allein halten eine fehlende Quittierung nicht am Leben. Vor dem abschließenden M5 wartet die Software gesondert und begrenzt auf das Abarbeiten der letzten Gravurbahnen. Erst bestätigtes Laser-Aus und die abschließende Rückmeldung erlauben den normalen Auftragsabschluss.
 
 Beta 10.11 behebt eine Startblockade bei eingeblendetem Hilfetext über dem Startknopf. Der Klick funktioniert auch nach kurzem Lesen des Hilfetexts; echte modale Dialoge sperren den Start weiterhin. Meldungen über nicht erkannte Klicks verwenden verständlichen Text.
 

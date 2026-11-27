@@ -39,6 +39,11 @@ ApplicationWindow {
     readonly property bool controllerJobPrepared: simulationMode || (typeof machine.jobPrepared !== "undefined" && machine.jobPrepared)
     readonly property string controllerPrepareReason: typeof machine.prepareReason !== "undefined" ? machine.prepareReason : "Controllerauftrag ist noch nicht vorbereitet."
     readonly property string controllerStatusAge: typeof machine.statusAgeMs !== "undefined" && machine.statusAgeMs >= 0 ? Math.floor(machine.statusAgeMs) + " ms" : "unbekannt"
+    readonly property string controllerFaultReason: {
+        if (simulationMode || machine.state !== "Verbindungsfehler") return ""
+        const entries = machine.log
+        return "Laserverbindung nach Fehler geschlossen: " + (entries.length > 0 ? entries[0] : "Geräteprotokoll prüfen.")
+    }
     readonly property string controllerViewState: controllerClosePending || controllerConnectionPhase === "closing" ? "Porttrennung läuft" : controllerConnectionPhase === "opening" ? "Verbindungsanfrage läuft" : simulationMode ? machine.state : controllerRequestPending ? "Geräteanfrage läuft" : !controllerStatusFresh ? "Controllerdaten unbekannt/veraltet" : controllerConnectionPhase === "handshake" ? "Controllerprüfung läuft" : machine.state
     readonly property bool grblVerified: !simulationMode && controllerConnectionPhase !== "opening" && controllerConnectionPhase !== "closing" && controllerStatusFresh && typeof machine.connectionVerified !== "undefined" && machine.connected && machine.connectionVerified
     readonly property bool positioningReady: !controllerRequestPending && machine.ready && machine.positionReferenced && (win.simulationMode || (setupState.stage === "complete" && controllerStatusFresh && typeof machine.motionSafetyError !== "undefined" && machine.motionSafetyError.length === 0))
@@ -126,6 +131,7 @@ ApplicationWindow {
     readonly property string startBlockReason: {
         if (manualStartSelected) return "Handstart öffnen: gemessene Restwege, Startpunkt und vollständige Wegeprüfung im Handstart-Dialog bestätigen. " + (manualStartState.reason || "");
         if (!simulationMode && (controllerRequestPending || controllerConnectionPhase === "opening" || controllerConnectionPhase === "closing")) return "Verbindungs- oder Geräteanfrage läuft. Bestätigten Abschluss abwarten; STOPP bleibt verfügbar.";
+        if (!simulationMode && controllerFaultReason.length > 0) return controllerFaultReason;
         if (!simulationMode && !controllerStatusFresh) return "Controllerdaten fehlen oder sind veraltet. Keine aktuelle Bereitschaft bestätigt; Datenalter: " + controllerStatusAge + ".";
         if (!simulationMode && setupState.stage !== "complete" && !useAttendedStart) return setupState.reason || "Gerät zuerst initialisieren und referenzieren.";
         if (project.planningBusy) return "Die Vorschau wird noch berechnet.";
@@ -793,7 +799,7 @@ ApplicationWindow {
         }
         Label {
             objectName: "startActionStatus"
-            readonly property string reason: win.startActionError || (!win.simulationMode && !win.runtimeOccupied ? win.startBlockReason : "")
+            readonly property string reason: win.controllerFaultReason || win.startActionError || (!win.simulationMode && !win.runtimeOccupied ? win.startBlockReason : "")
             visible: reason.length > 0
             Layout.fillWidth: true; leftPadding: 18; rightPadding: 18; topPadding: 8; bottomPadding: 8
             text: "Start nicht möglich: " + reason
